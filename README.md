@@ -56,6 +56,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-assertion-client` | **`private_key_jwt`** | n/a | n/a | client credentials | no |
 | `pkce-mtls-client` | **`self_signed_tls_client_auth`** | n/a | n/a | client credentials | no |
 | `pkce-exchange-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
+| `pkce-ciba-client` | `client_secret_basic` | n/a | n/a | **CIBA** | no |
 
 ## What the flow looks like
 
@@ -243,6 +244,22 @@ client's word.
 approve it.
 
 ![invalid_authorization_details](docs/images/36-rar-refused.png)
+
+**36. CIBA** — the client names the user it wants and supplies a message they will recognise.
+
+![Backchannel authentication request](docs/images/37-ciba-request.png)
+
+**37. CIBA** — an `auth_req_id` and a polling interval. No redirect happened, and none will.
+
+![Client polling for the outcome](docs/images/38-ciba-polling.png)
+
+**38. CIBA** — the user's device, showing the same message so they can check it before approving.
+
+![The approval screen](docs/images/39-ciba-approve.png)
+
+**39. CIBA** — the next poll returns a token.
+
+![Approved, with an access token](docs/images/40-ciba-granted.png)
 
 ## Refresh tokens and public clients
 
@@ -522,6 +539,42 @@ this practical at all.
 Not implemented: echoing `authorization_details` in the token *response* body, which the RFC also
 calls for. The claim in the token covers the demonstration.
 
+## Backchannel authentication (CIBA)
+
+`/ciba` demonstrates OpenID Connect CIBA. The client names the user it wants to authenticate and
+waits; the user approves on a device of their own. There is no redirect, no browser, and the user
+never visits the client — which is what makes it work for a call centre agent asking you to confirm
+something, or a payment terminal.
+
+1. The client posts `scope`, `login_hint` and a `binding_message` to `/backchannel/authenticate` with
+   its own credentials, and gets back `auth_req_id`, `expires_in` and `interval`.
+2. The user sees the request on their own device — a push notification in practice — and approves or
+   refuses it.
+3. The client polls `/oauth2/token` with `grant_type=urn:openid:params:grant-type:ciba`. Until the
+   user acts that is `authorization_pending`, then either a token or `access_denied`.
+
+**Against the device flow**, which also polls and also moves approval elsewhere: there, the *user*
+carries a code from the device to their browser and the device has no idea who they are. In CIBA the
+*client* says who it wants up front and the user is found for it. So CIBA only works where the client
+already knows the user, and the `binding_message` — shown on both sides — is what stops someone
+approving a request they did not trigger.
+
+**Spring Authorization Server has no CIBA support**, so:
+
+* the backchannel endpoint is a plain controller, including the client authentication the framework
+  would otherwise have done;
+* the grant is taught to the token endpoint with an `AuthenticationConverter` and an
+  `AuthenticationProvider`;
+* pending requests live in their own `ciba_request` table rather than being forced into
+  `oauth2_authorization`.
+
+An approval is single-use: collecting the token marks it consumed, and polling again is
+`invalid_grant`. Only the user the request names can answer it.
+
+Two things the demo does that a deployment would not: the approval page is reached by a link rather
+than a push notification, and running the client and the "phone" in one browser means they share a
+session, which is why the polling endpoint is exempt from CSRF.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -574,7 +627,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MtlsController.java              /mtls
 │   ├── MtlsJwkSetController.java        /mtls-jwks.json, the client's certificate
 │   ├── TokenExchangeController.java     /exchange
-│   └── RichAuthorizationController.java /rar
+│   ├── RichAuthorizationController.java /rar
+│   ├── CibaController.java              /ciba, /ciba/poll, /ciba/approve
+│   └── BackchannelAuthenticationController.java  /backchannel/authenticate
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -585,7 +640,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── DpopService.java                 signs proofs and proves a stolen token is useless
 │   ├── ClientAssertionService.java      authenticates with a signed JWT, three ways
 │   ├── MtlsService.java                 calls the TLS endpoint with and without a certificate
-│   └── TokenExchangeService.java        impersonation, delegation, and one that must fail
+│   ├── TokenExchangeService.java        impersonation, delegation, and one that must fail
+│   ├── CibaService.java                 pending backchannel requests and their outcome
+│   └── CibaClientService.java           the client side: open a request, then poll
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -606,12 +663,14 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── MtlsAttempt.java
     ├── TokenExchangeAttempt.java
     ├── RichAuthorizationDetail.java     parses and summarises authorization_details
-    └── RichAuthorizationRequestValidator.java  refuses types the server does not implement
+    ├── RichAuthorizationRequestValidator.java  refuses types the server does not implement
+    └── Ciba*.java                       the CIBA grant, added to the token endpoint
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
 ├── V2_13092026_1257__create_oauth2_authorization_server_tables.sql
-└── V3_13092026_1258__create_oauth2_authorized_client_table.sql
+├── V3_13092026_1258__create_oauth2_authorized_client_table.sql
+└── V4_13092026_1610__create_ciba_request_table.sql
 ```
 
 ## Notes worth knowing
