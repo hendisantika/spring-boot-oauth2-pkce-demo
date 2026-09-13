@@ -7,6 +7,7 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.AuthenticationContextLevel;
 import org.springframework.security.core.Authentication;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
@@ -169,7 +170,14 @@ public class AuthorizationServerConfig {
                                 authorizationServerSettings.getAuthorizationEndpoint(),
                                 () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
                                 properties.issuerUri()),
-                        StepUpRequiredFilter.class);
+                        StepUpRequiredFilter.class)
+                // RFC 9449 section 10. Runs ahead of the token endpoint so that a request which
+                // cannot prove possession of the key the code was bound to is turned away before
+                // the code is spent.
+                .addFilterAfter(
+                        new DpopBoundAuthorizationCodeFilter(
+                                authorizationServerSettings.getTokenEndpoint(), authorizationService),
+                        SecurityContextHolderFilter.class);
         return http.build();
     }
 
