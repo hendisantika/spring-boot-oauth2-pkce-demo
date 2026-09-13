@@ -23,6 +23,7 @@ public record DemoProperties(String issuerUri,
                              Client exchangeClient,
                              Client cibaClient,
                              Client fapiClient,
+                             Client codeBindingClient,
                              List<DemoUser> demoUsers) {
 
     /**

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Authorization code binding')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Binding the authorization code to a key</h1>
+    <p class="lead">
+        RFC 9449 section 10. An authorization code is a bearer credential for the few seconds it
+        lives: whoever redeems it first gets the tokens. PKCE ties it to a one-time secret; the
+        <code>dpop_jkt</code> parameter ties it to the client's DPoP key instead — the same key the
+        issued token ends up bound to, so the whole flow is held together by one private key that
+        never leaves the client.
+    </p>
+
+    <div class="alert" th:if="${bindingError}" th:text="${bindingError}">error</div>
+
+    <div class="card">
+        <h2>Run it both ways</h2>
+        <p class="hint">
+            Each run sends its own authorization request as
+            <strong th:text="${clientName}">PKCE Code Binding Client</strong>, a public client with
+            no secret, and gets a code back at <code th:text="${redirectUri}">/code-binding/callback</code>.
+            The code is then redeemed several times over — <strong>always with the correct
+            <code>code_verifier</code></strong>. The attacker being modelled holds the code
+            <em>and</em> the PKCE secret, because that is the only case where binding the code to a
+            key adds anything at all.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{/code-binding/start(bind=true)}">Run with dpop_jkt</a>
+            <a class="btn secondary" th:href="@{/code-binding/start(bind=false)}"
+               style="margin-left:8px">Run without it</a>
+            <a class="btn secondary" th:href="@{/code-binding/reset}" style="margin-left:8px">Clear</a>
+        </p>
+        <p class="hint" style="margin-top:14px">
+            Spring's OAuth2 client never sees these requests. It has no notion of
+            <code>dpop_jkt</code> and would drop the parameter, so the authorization request is built
+            and the code redeemed by hand.
+        </p>
+    </div>
+
+    <div class="card" th:if="${boundRun != null}">
+        <h2>With <code>dpop_jkt</code></h2>
+        <table>
+            <tr>
+                <th style="width:26%">Key thumbprint</th>
+                <td><code th:text="${boundRun.thumbprint}">-</code></td>
+            </tr>
+            <tr th:each="parameter : ${boundRun.authorizationParameters}">
+                <th th:text="${parameter.key}">dpop_jkt</th>
+                <td><code th:text="${parameter.value}">-</code></td>
+            </tr>
+            <tr>
+                <th>Authorization code</th>
+                <td><code th:text="${boundRun.authorizationCode}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            <code>dpop_jkt</code> is the thumbprint of the public key, nothing more — a fingerprint
+            in the clear, of no use to anyone who cannot sign with the private half.
+        </p>
+
+        <h3 style="margin-top:22px">Four attempts at redeeming it</h3>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:28%">Attempt</th>
+                <th style="width:22%">DPoP header</th>
+                <th style="width:8%">Status</th>
+                <th>What the server said</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${boundRun.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.proofDescription()}">-</code></td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">400</code>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}">-</span>
+                    <span class="hint" style="display:block" th:if="${attempt.confirmationThumbprint != null}">
+                        token_type <code th:text="${attempt.tokenType}">DPoP</code>,
+                        cnf.jkt <code th:text="${attempt.confirmationThumbprint}">-</code>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            The first two attempts have everything a stolen code comes with and are still refused.
+            The third succeeds and the token it returns carries <code>cnf.jkt</code> — the same
+            thumbprint the code was bound to, which is what "end-to-end" means here: the key that
+            asked for the code is the key that redeemed it and the key the token now belongs to.
+            The fourth shows the code was spent by the third.
+        </p>
+    </div>
+
+    <div class="card" th:if="${unboundRun != null}">
+        <h2>Without it</h2>
+        <table>
+            <tr th:each="parameter : ${unboundRun.authorizationParameters}">
+                <th style="width:26%" th:text="${parameter.key}">code_challenge</th>
+                <td><code th:text="${parameter.value}">-</code></td>
+            </tr>
+            <tr>
+                <th>Authorization code</th>
+                <td><code th:text="${unboundRun.authorizationCode}">-</code></td>
+            </tr>
+        </table>
+
+        <h3 style="margin-top:22px">The same code, redeemed with nothing</h3>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:28%">Attempt</th>
+                <th style="width:22%">DPoP header</th>
+                <th style="width:8%">Status</th>
+                <th>What the server said</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${unboundRun.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.proofDescription()}">-</code></td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">200</code>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}">-</span>
+                    <span class="hint" style="display:block" th:if="${attempt.tokenType != null}">
+                        token_type <code th:text="${attempt.tokenType}">Bearer</code>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" th:if="${unboundRun.redeemableWithoutTheKey()}">
+            No key was named, so holding the code and the verifier is the whole of it. That is not a
+            flaw in PKCE — it is doing exactly what it promises. It is the reason the verifier has to
+            be kept as carefully as a secret, and the gap <code>dpop_jkt</code> closes by adding a
+            second binding to a key that is never sent anywhere.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            RFC 9449 section 10 says the server must compute the thumbprint of the key in the DPoP
+            proof and reject the token request if it does not match <code>dpop_jkt</code>. It does
+            not name an error code; this server answers <code>invalid_grant</code>, since it is the
+            code that cannot be redeemed.
+        </p>
+        <p class="hint">
+            The section also warns that the protection is only as good as the key's uniqueness:
+            reuse one key across authorization requests and a code bound to it is redeemable by
+            anything else holding that key. Each run here generates its own.
+        </p>
+        <p class="hint">
+            Spring Authorization Server stores <code>dpop_jkt</code> with the rest of the
+            authorization request and then ignores it, so the check is a filter sitting in front of
+            the token endpoint. It runs <em>before</em> the endpoint on purpose: a request that fails
+            the check is turned away without the authorization code being spent, which is why the
+            third attempt above can still succeed after the first two were refused.
+        </p>
+        <p class="hint">
+            Section 10.1 covers the same parameter inside a pushed request, where it travels in the
+            POST body — see <a th:href="@{/par}">PAR</a>. <a th:href="@{/dpop}">DPoP</a> shows what
+            the binding buys once the token has been issued, and <a th:href="@{/fapi}">FAPI 2.0</a>
+            accepts either PKCE or <code>dpop_jkt</code> as the way a code is bound to its client.
+        </p>
+    </div>
+</main>
+</body>
+</html>

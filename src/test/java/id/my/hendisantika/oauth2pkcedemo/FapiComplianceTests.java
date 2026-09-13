@@ -112,8 +112,8 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     void everyRegisteredClientIsAccountedFor() {
         Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
 
-        // Seven clients, each demonstrating something; the page should hide none of them.
-        assertThat(checks).hasSize(7);
+        // Eight clients, each demonstrating something; the page should hide none of them.
+        assertThat(checks).hasSize(8);
         assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(4));
     }
 

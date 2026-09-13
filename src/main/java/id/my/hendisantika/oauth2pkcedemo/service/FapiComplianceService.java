@@ -100,7 +100,8 @@ public class FapiComplianceService {
     private List<DemoProperties.Client> configuredClients() {
         return List.of(properties.client(), properties.confidentialClient(),
                 properties.assertionClient(), properties.mtlsClient(),
-                properties.exchangeClient(), properties.cibaClient(), properties.fapiClient());
+                properties.exchangeClient(), properties.cibaClient(), properties.fapiClient(),
+                properties.codeBindingClient());
     }
 
     private static List<FapiCheck> checksFor(RegisteredClient client) {

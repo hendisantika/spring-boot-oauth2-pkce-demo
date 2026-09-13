@@ -101,6 +101,15 @@ app:
     scopes:
       - openid
       - profile
+  # Binds its authorization code to a DPoP key as well as to a PKCE verifier, so the code is
+  # worthless to anyone who cannot sign with that key.
+  code-binding-client:
+    registration-id: pkce-code-binding-client
+    client-id: pkce-code-binding-client
+    client-name: PKCE Code Binding Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

@@ -1,5 +1,6 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
+import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MtlsJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationToken;
@@ -58,6 +59,7 @@ public class DemoDataInitializer {
             seedExchangeClient(registeredClientRepository, passwordEncoder, properties);
             seedCibaClient(registeredClientRepository, passwordEncoder, properties);
             seedFapiClient(registeredClientRepository, properties);
+            seedCodeBindingClient(registeredClientRepository, properties);
         };
     }
 
@@ -223,6 +225,39 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered FAPI client [{}]", client.clientId());
+    }
+
+    /**
+     * A public client whose authorization codes can be bound to a DPoP key. It is registered
+     * separately from the other public client so the binding demo owns its own redirect URI, and so
+     * that a code redeemed there cannot be confused with one from the browser login.
+     */
+    void seedCodeBindingClient(RegisteredClientRepository registeredClientRepository,
+                               DemoProperties properties) {
+        DemoProperties.Client client = properties.codeBindingClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri()
+                        + AuthorizationCodeBindingController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        // Off so that one click makes one round trip. Consent is demonstrated by
+                        // every other authorization code page; this one is about the code itself.
+                        .requireAuthorizationConsent(false)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered code binding client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,
