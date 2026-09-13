@@ -62,6 +62,10 @@ public class WebSecurityConfig {
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
                         .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar").permitAll()
+                        // The client's backend calls the backchannel endpoint; the demo page
+                        // stands in for it and the user never visits either.
+                        .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",
+                                "/backchannel/**").permitAll()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage(LOGIN_PAGE_URI)
@@ -79,6 +83,11 @@ public class WebSecurityConfig {
                 // Must run before the redirect filter builds a second authorization request on top
                 // of an existing OAuth2 authentication.
                 .addFilterBefore(new RestartOAuth2LoginFilter(), OAuth2AuthorizationRequestRedirectFilter.class)
+                // Both stand in for calls the client's backend makes machine-to-machine, where no
+                // browser session exists to carry a CSRF token. /ciba/poll also has to survive the
+                // user signing in elsewhere in the same browser, which rotates the shared session's
+                // token - an artefact of running client and phone in one browser, not of CIBA.
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/backchannel/**", "/ciba/poll"))
                 .logout(logout -> logout
                         .logoutSuccessUrl("/")
                         .clearAuthentication(true)

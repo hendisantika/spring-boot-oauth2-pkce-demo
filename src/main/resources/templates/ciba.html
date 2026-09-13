@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('CIBA')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Backchannel authentication (CIBA)</h1>
+    <p class="lead">
+        OpenID Connect CIBA. The client names the user it wants to authenticate and waits; the user
+        approves on a device of their own. There is no redirect, no browser, and the user never
+        visits the client at all — which is what makes it work for a call centre agent asking you to
+        confirm something, or a payment terminal.
+    </p>
+
+    <div class="alert" th:if="${session['ciba.error']}" th:text="${session['ciba.error']}">error</div>
+
+    <div class="card" th:if="${authReqId == null}">
+        <h2>Ask for someone to authenticate</h2>
+        <p class="hint">
+            Posted to <code>/backchannel/authenticate</code> with the client's own credentials. The
+            <code>binding_message</code> is shown on both sides so the user can check the request is
+            the one in front of them, rather than approving whatever happens to arrive.
+        </p>
+        <form th:action="@{/ciba}" method="post" style="margin-top:16px">
+            <label for="login_hint">login_hint</label>
+            <select id="login_hint" name="login_hint"
+                    style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:7px;
+                           font-size:15px;margin-bottom:14px;background:var(--surface);color:var(--text)">
+                <option th:each="user : ${demoUsers}" th:value="${user.username}"
+                        th:text="${user.username} + ' — ' + ${user.fullName}">hendi
+                </option>
+            </select>
+
+            <label for="binding_message">binding_message</label>
+            <input type="text" id="binding_message" name="binding_message" value="Transfer 250.00 EUR">
+
+            <button class="btn" type="submit">Request authentication</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${authReqId != null}">
+        <h2>Waiting for <span th:text="${session['ciba.loginHint']}">hendi</span></h2>
+        <table>
+            <tr>
+                <th>auth_req_id</th>
+                <td><code th:text="${authReqId}">-</code></td>
+            </tr>
+            <tr>
+                <th>binding_message</th>
+                <td>
+                    <strong th:text="${session['ciba.bindingMessage']}">Transfer 250.00 EUR</strong>
+                    <span class="hint" style="display:block">
+                        The user should see exactly this on their device before approving.
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>interval</th>
+                <td><code th:text="${interval} + 's'">5s</code></td>
+            </tr>
+        </table>
+
+        <p id="poll-status" class="hint" style="margin-top:16px">Polling <code>/oauth2/token</code>…</p>
+
+        <p class="hint">
+            Open <a th:href="@{/ciba/approve}">the approval page</a> as that user — in a real
+            deployment this would be a push notification to their phone, not a link. Doing it in the
+            same browser means the client and the phone share one session, which they never would in
+            practice.
+        </p>
+
+        <form th:action="@{/ciba/reset}" method="post" style="margin-top:14px">
+            <button class="btn secondary" type="submit">Start over</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>How it differs from the device flow</h2>
+        <p class="hint">
+            Both poll, and both move approval to another device. The difference is who starts and who
+            is identified: in the device flow the <em>user</em> carries a code from the device to
+            their browser, and the device has no idea who they are. In CIBA the <em>client</em> says
+            who it wants up front and the user is found for it — so it only works where the client
+            already knows the user, and the binding message is what protects against approving a
+            request you did not trigger.
+        </p>
+        <p class="hint">
+            Spring Authorization Server has no CIBA support, so the backchannel endpoint is a plain
+            controller and the grant is added to the token endpoint with a converter and an
+            authentication provider.
+        </p>
+    </div>
+</main>
+
+<script th:if="${authReqId != null}" th:inline="javascript">
+    /*<![CDATA[*/
+    const interval = /*[[${interval}]]*/ 5;
+    const csrfHeader = /*[[${_csrf.headerName}]]*/ 'X-CSRF-TOKEN';
+    const csrfToken = /*[[${_csrf.token}]]*/ '';
+    const statusEl = document.getElementById('poll-status');
+
+    async function poll() {
+        const response = await fetch('/ciba/poll', {method: 'POST', headers: {[csrfHeader]: csrfToken}});
+        const body = await response.json();
+        if (body.status === 'PENDING') {
+            statusEl.textContent = 'authorization_pending — polling again in ' + interval + 's';
+            setTimeout(poll, interval * 1000);
+        } else if (body.status === 'GRANTED') {
+            statusEl.innerHTML = 'Approved. Access token <code>' + body.accessToken + '</code>';
+        } else {
+            statusEl.textContent = body.status + (body.error ? ' — ' + body.error : '');
+        }
+    }
+
+    setTimeout(poll, interval * 1000);
+    /*]]>*/
+</script>
+</body>
+</html>

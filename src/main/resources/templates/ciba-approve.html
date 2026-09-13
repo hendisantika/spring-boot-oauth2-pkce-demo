@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Approve a request')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main style="max-width:520px">
+    <h1>Waiting for you</h1>
+    <p class="lead">
+        This stands in for the user's phone. In a real deployment these arrive as push
+        notifications; nothing brought you here from the client.
+    </p>
+
+    <div class="card" th:if="${pending.isEmpty()}">
+        <p class="hint">Nothing is waiting for approval.</p>
+    </div>
+
+    <div class="card" th:each="request : ${pending}">
+        <h2 th:text="${request.bindingMessage} ?: 'A request from ' + ${request.clientId}">Transfer 250.00 EUR</h2>
+        <table>
+            <tr>
+                <th>Requested by</th>
+                <td><code th:text="${request.clientId}">pkce-ciba-client</code></td>
+            </tr>
+            <tr>
+                <th>Scopes</th>
+                <td><code th:text="${request.scopes}">api.read</code></td>
+            </tr>
+            <tr>
+                <th>Requested at</th>
+                <td><code th:text="${request.requestedAt}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:12px">
+            Check that message against what the client showed you. If it does not match, somebody
+            else started this.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:16px">
+            <form th:action="@{/ciba/approve}" method="post">
+                <input type="hidden" name="auth_req_id" th:value="${request.authReqId}">
+                <input type="hidden" name="decision" value="approve">
+                <button class="btn" type="submit">Approve</button>
+            </form>
+            <form th:action="@{/ciba/approve}" method="post">
+                <input type="hidden" name="auth_req_id" th:value="${request.authReqId}">
+                <input type="hidden" name="decision" value="deny">
+                <button class="btn secondary" type="submit">Deny</button>
+            </form>
+        </div>
+    </div>
+</main>
+</body>
+</html>
