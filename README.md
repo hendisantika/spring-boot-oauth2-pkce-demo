@@ -392,6 +392,18 @@ indistinguishable from where the server is standing.
 
 ![The cookie-less probes](docs/images/69-frontchannel-probes.png)
 
+**69. Session management** — what the session state is computed from.
+
+![The session state inputs](docs/images/70-session-state.png)
+
+**70. Session management** — the two iframes talking, with no request reaching the server.
+
+![unchanged](docs/images/71-session-unchanged.png)
+
+**71. Session management** — and after something changed the session at the provider.
+
+![changed](docs/images/72-session-changed.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -405,6 +417,48 @@ there is a second, confidential client; PKCE applies to it just the same.
 
 Refresh tokens are rotated (`reuseRefreshTokens(false)`), so replaying an old one fails — which is
 how a server notices a stolen token.
+
+## Session management (the OP iframe)
+
+`/session-management` answers "is the user still signed in at the provider?" without a single
+request reaching it. The provider serves a page, the client embeds it in a hidden iframe, and the two
+talk by `postMessage`.
+
+The value they compare is `session_state`, returned on the authorization response and computed as
+section 3.2's own pseudo-code has it:
+
+```
+SHA-256(client_id + " " + origin + " " + OP browser state + " " + salt) + "." + salt
+```
+
+The salt travels with the value so the browser can redo the sum; the OP browser state is a cookie at
+the provider's origin, which is why the iframe has to be loaded *from* the provider. The client posts
+`"<client_id> <session_state>"` and gets back one of three words:
+
+| Answer | What a client does |
+|---|---|
+| `unchanged` | nothing |
+| `changed` | re-authenticate with `prompt=none` to find out what happened |
+| `error` | **not** re-authenticate — that is how the infinite loops start |
+
+Notes:
+
+* **Neither half exists in Spring.** Spring Authorization Server emits no `session_state` and serves
+  no `check_session_iframe`; Spring Security's client has no field for the parameter and drops it, as
+  it dropped [`iss`](#mix-up-attack-defence-iss). Both are written out here, and both metadata
+  documents now advertise the iframe.
+* **The cookie must be readable by script**, since the iframe recomputes the hash in the browser. It
+  is only a random value, but a non-`HttpOnly` cookie is a decision rather than an oversight.
+* **Origin is not enough on its own.** The client and provider share an origin here, so anything else
+  on the page can post to the same window — a browser extension was doing exactly that while this
+  page was being written, and every one of its messages was being read as an answer. The RP script
+  checks the source frame as well, and ignores anything that is not one of the three defined words.
+* **Section 5.1 is unusually frank.** Browsers blocking third-party content can leave the iframe
+  unable to read that cookie, in which case it answers `changed` every time and a conforming client
+  re-authenticates every time, "resulting in infinite loops of re-authentications". The same
+  paragraph notes that [back-channel logout](#back-channel-logout) is not affected.
+* It works in this demo for the reason it usually does not: client and provider share an origin, so
+  the iframe is first-party and the cookie is there.
 
 ## Front-channel logout
 
@@ -1141,7 +1195,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── LogoutRevocationController.java   /logout-revocation
 │   ├── BackChannelLogoutController.java  /backchannel-logout
 │   ├── FrontChannelLogoutController.java /frontchannel-logout
-│   └── ClientFrontChannelLogoutController.java  the client endpoint the iframes load
+│   ├── ClientFrontChannelLogoutController.java  the client endpoint the iframes load
+│   ├── SessionManagementController.java  /session-management
+│   └── CheckSessionIframeController.java the OP iframe itself
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -1212,6 +1268,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── FrontChannelLogoutTarget.java    one client's front-channel URI
     ├── FrontChannelProbe.java
     ├── FrontChannelLogoutRun.java
+    ├── OpBrowserState.java              the cookie, and the session_state computed from it
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
