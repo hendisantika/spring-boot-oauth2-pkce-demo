@@ -1,5 +1,6 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
+import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.entity.User;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
@@ -49,6 +51,7 @@ public class DemoDataInitializer {
             seedRegisteredClient(registeredClientRepository, passwordEncoder, properties, properties.client());
             seedRegisteredClient(registeredClientRepository, passwordEncoder, properties,
                     properties.confidentialClient());
+            seedAssertionClient(registeredClientRepository, properties);
         };
     }
 
@@ -68,6 +71,35 @@ public class DemoDataInitializer {
                     .build());
             log.info("Seeded demo user [{}]", demoUser.username());
         }
+    }
+
+    /**
+     * A client that authenticates with a signed JWT instead of a secret. The server is told where to
+     * fetch its public keys and which algorithm to expect; nothing confidential is stored either
+     * side. It uses the client credentials grant because there is no user in this exchange at all.
+     */
+    void seedAssertionClient(RegisteredClientRepository registeredClientRepository,
+                             DemoProperties properties) {
+        DemoProperties.Client client = properties.assertionClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.PRIVATE_KEY_JWT)
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .clientSettings(ClientSettings.builder()
+                        .jwkSetUrl(properties.issuerUri() + ClientJwkSetController.CLIENT_JWK_SET_URI)
+                        .tokenEndpointAuthenticationSigningAlgorithm(SignatureAlgorithm.RS256)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered private_key_jwt client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

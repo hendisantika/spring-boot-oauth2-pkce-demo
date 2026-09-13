@@ -57,6 +57,14 @@ app:
       - openid
       - profile
       - email
+  # Machine-to-machine client. It holds no secret at all: it authenticates by signing a
+  # short-lived JWT with a private key the server only ever sees the public half of.
+  assertion-client:
+    registration-id: pkce-assertion-client
+    client-id: pkce-assertion-client
+    client-name: PKCE Assertion Client
+    scopes:
+      - api.read
   demo-users:
     - username: hendi
       password: password

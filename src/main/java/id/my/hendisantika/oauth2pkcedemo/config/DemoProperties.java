@@ -18,6 +18,7 @@ import java.util.List;
 public record DemoProperties(String issuerUri,
                              Client client,
                              Client confidentialClient,
+                             Client assertionClient,
                              List<DemoUser> demoUsers) {
 
     /**
