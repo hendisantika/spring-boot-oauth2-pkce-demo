@@ -29,8 +29,12 @@ Users, registered clients, authorizations, consents and the client's own tokens 
 
 ```bash
 docker compose up -d      # MySQL 9.6 on localhost:3312
-./mvnw spring-boot:run    # app on http://localhost:8080
+./mvnw spring-boot:run    # app on http://localhost:8080, plus https://localhost:8443 for mTLS
 ```
+
+The second listener exists only for the mTLS page; everything else is on 8080. Its certificates are
+generated in memory at startup and written to temp files for Tomcat to read, so nothing is committed
+and nothing needs installing.
 
 Open <http://localhost:8080> and press **Sign in with PKCE**.
 
@@ -50,6 +54,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-demo-client` | none (public) | required | no | code, refresh, **device** | **no** on the code grant — see below |
 | `pkce-confidential-client` | `client_secret_basic` | required | **yes** | code, refresh | yes, rotated on every use |
 | `pkce-assertion-client` | **`private_key_jwt`** | n/a | n/a | client credentials | no |
+| `pkce-mtls-client` | **`self_signed_tls_client_auth`** | n/a | n/a | client credentials | no |
 
 ## What the flow looks like
 
@@ -193,6 +198,15 @@ for an expired one.
 endpoint.
 
 ![The assertion's claims](docs/images/26-assertion-claims.png)
+
+**26. mTLS** — a client with no credential in the request at all, identified by its certificate.
+
+![mTLS client registration](docs/images/27-mtls-registration.png)
+
+**27. mTLS** — the same request twice; only the handshake differs, and the issued token carries the
+certificate's thumbprint.
+
+![Two attempts: 200 with cnf.x5t#S256, 302 without](docs/images/28-mtls-results.png)
 
 ## Refresh tokens and public clients
 
@@ -380,6 +394,40 @@ The upside over a shared secret is that nothing confidential exists on the serve
 confidential crosses the wire, and rotating the key means publishing a new JWK Set rather than
 coordinating a secret with the operator.
 
+## Certificate-bound tokens (mTLS)
+
+`/mtls` demonstrates RFC 8705. The client presents a TLS client certificate and nothing in the
+request body is a credential at all. The token that comes back carries `cnf.x5t#S256` — the SHA-256
+of that certificate — so it only works over a connection presenting the same one.
+
+The page sends the same form twice over `https://localhost:8443/oauth2/token`:
+
+| Attempt | Result |
+|---|---|
+| Handshake presents the client certificate | `200`, and `cnf.x5t#S256` equals the certificate thumbprint |
+| Identical request, no certificate offered | `302` to the login page — it never authenticated as a client |
+
+Only the handshake differs. That is the appeal: the credential never appears in anything the
+application layer can log or leak.
+
+This is the one page that needed infrastructure rather than just code:
+
+* **A second listener on 8443**, added as an extra Tomcat connector. Everything else stays on plain
+  HTTP 8080, and the issuer is unchanged.
+* **Certificate verification is `want`, not `need`.** A handshake with no certificate must still
+  succeed, or the failing case would be a dropped connection rather than an OAuth refusal — which
+  would demonstrate nothing about the protocol.
+* **Certificates are generated at startup** (BouncyCastle, since the JDK has no public API for
+  creating X.509 certificates) and written to temp files because Tomcat's SSL configuration takes
+  keystore paths. Nothing is committed, and they are regenerated on every boot.
+* **`self_signed_tls_client_auth`, not `tls_client_auth`** — the certificate is matched against the
+  `x5c` chain in the client's published JWK Set, so there is no CA to stand up. `tls_client_auth`
+  would need a real trust anchor and a registered subject DN.
+
+It is the same idea as DPoP one layer down: DPoP proves key possession with a signed header and needs
+nothing from the network, mTLS proves it with the transport and needs TLS to reach the application
+intact.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -428,7 +476,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── DpopController.java              /dpop
 │   ├── ProtectedApiController.java      /api/me, DPoP-only resource server
 │   ├── ClientAssertionController.java   /assertion
-│   └── ClientJwkSetController.java      /client-jwks.json, the client's public keys
+│   ├── ClientJwkSetController.java      /client-jwks.json, the client's public keys
+│   ├── MtlsController.java              /mtls
+│   └── MtlsJwkSetController.java        /mtls-jwks.json, the client's certificate
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -437,7 +487,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── TokenAdminService.java           introspects and revokes as the confidential client
 │   ├── PushedAuthorizationRequestService.java  pushes to /oauth2/par
 │   ├── DpopService.java                 signs proofs and proves a stolen token is useless
-│   └── ClientAssertionService.java      authenticates with a signed JWT, three ways
+│   ├── ClientAssertionService.java      authenticates with a signed JWT, three ways
+│   └── MtlsService.java                 calls the TLS endpoint with and without a certificate
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -453,7 +504,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── DpopKeyPair.java                 generates the key and signs proofs
     ├── DpopDemoResult.java
     ├── ClientAssertionKey.java          signs RFC 7523 assertions
-    └── ClientAssertionAttempt.java
+    ├── ClientAssertionAttempt.java
+    ├── MtlsMaterial.java                generates the demo certificates and keystores
+    └── MtlsAttempt.java
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
