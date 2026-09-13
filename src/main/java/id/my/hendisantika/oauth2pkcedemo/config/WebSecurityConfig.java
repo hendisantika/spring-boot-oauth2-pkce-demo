@@ -116,6 +116,11 @@ public class WebSecurityConfig {
                 // token - an artefact of running client and phone in one browser, not of CIBA.
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/backchannel/**", "/ciba/poll",
                         "/mixup/attacker/token"))
+                // The front-channel logout page embeds the client's own logout endpoint in
+                // iframes, and the default DENY would stop the browser loading them. In a real
+                // deployment the client and the server are different origins and this is the
+                // client's decision to make, not the server's.
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
                 .logout(logout -> logout
                         // Signing out of the client says nothing to the authorization server about
                         // the tokens it issued. This is what says it.
