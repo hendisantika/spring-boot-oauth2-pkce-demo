@@ -1,7 +1,9 @@
 package id.my.hendisantika.oauth2pkcedemo.controller;
 
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
+import id.my.hendisantika.oauth2pkcedemo.security.RevokingLogoutHandler;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
@@ -28,6 +30,7 @@ public class LogoutDemoController {
     public static final String END_SESSION_ENDPOINT = "end_session_endpoint";
 
     private final ClientRegistrationRepository clientRegistrationRepository;
+    private final RevokingLogoutHandler revokingLogoutHandler;
     private final DemoProperties properties;
 
     @GetMapping("/logout-demo")
@@ -49,9 +52,14 @@ public class LogoutDemoController {
      * application they share a session, so the server's invalidation ends both at once. Split across
      * two deployments these would be two separate sessions, and the client would also run its own
      * logout.
+     * <p>
+     * The tokens are revoked first, because ending a session is all the end session endpoint does -
+     * see <a href="/logout-revocation">what that leaves behind</a>.
      */
     @PostMapping("/logout/rp-initiated")
-    public String rpInitiatedLogout(@AuthenticationPrincipal OidcUser user) {
+    public String rpInitiatedLogout(@AuthenticationPrincipal OidcUser user,
+                                    OAuth2AuthenticationToken authentication) {
+        revokingLogoutHandler.revoke(authentication);
         String redirect = UriComponentsBuilder.fromUriString(endSessionEndpoint())
                 .queryParam("id_token_hint", user.getIdToken().getTokenValue())
                 .queryParam("post_logout_redirect_uri", postLogoutRedirectUri())

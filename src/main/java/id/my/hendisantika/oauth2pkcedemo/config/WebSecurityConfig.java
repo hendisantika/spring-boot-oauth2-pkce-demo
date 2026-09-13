@@ -5,6 +5,8 @@ import id.my.hendisantika.oauth2pkcedemo.security.PkceAuditingAuthorizationReque
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequestResolver;
 import id.my.hendisantika.oauth2pkcedemo.service.PushedAuthorizationRequestService;
 import id.my.hendisantika.oauth2pkcedemo.security.RestartOAuth2LoginFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.RevokingLogoutHandler;
+import id.my.hendisantika.oauth2pkcedemo.service.TokenAdminService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -52,7 +54,8 @@ public class WebSecurityConfig {
     public SecurityFilterChain defaultSecurityFilterChain(
             HttpSecurity http,
             DemoProperties properties,
-            PushedAuthorizationRequestResolver authorizationRequestResolver) throws Exception {
+            PushedAuthorizationRequestResolver authorizationRequestResolver,
+            RevokingLogoutHandler revokingLogoutHandler) throws Exception {
         String authorizationRequestUri = "/oauth2/authorization/" + properties.client().registrationId();
         http
                 .authorizeHttpRequests(requests -> requests
@@ -105,6 +108,9 @@ public class WebSecurityConfig {
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/backchannel/**", "/ciba/poll",
                         "/mixup/attacker/token"))
                 .logout(logout -> logout
+                        // Signing out of the client says nothing to the authorization server about
+                        // the tokens it issued. This is what says it.
+                        .addLogoutHandler(revokingLogoutHandler)
                         .logoutSuccessUrl("/")
                         .clearAuthentication(true)
                         .invalidateHttpSession(true)
@@ -123,6 +129,16 @@ public class WebSecurityConfig {
             DemoProperties properties) {
         return new PushedAuthorizationRequestResolver(clientRegistrationRepository,
                 pushedAuthorizationRequestService, properties.confidentialClient().registrationId());
+    }
+
+    /**
+     * Revokes the session's tokens as part of logging out. Nothing in either logout does this on its
+     * own, and without it signing out leaves a usable access token behind.
+     */
+    @Bean
+    public RevokingLogoutHandler revokingLogoutHandler(OAuth2AuthorizedClientService authorizedClientService,
+                                                       TokenAdminService tokenAdminService) {
+        return new RevokingLogoutHandler(authorizedClientService, tokenAdminService);
     }
 
     @Bean
