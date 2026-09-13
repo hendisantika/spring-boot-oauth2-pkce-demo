@@ -41,6 +41,9 @@ public final class IssuerIdentifierResponseHandler
     /** RFC 9207 section 3: what a server advertises so a client knows to expect the parameter. */
     public static final String ISS_PARAMETER_SUPPORTED = "authorization_response_iss_parameter_supported";
 
+    /** OpenID Connect Session Management section 2: required of a server that supports it. */
+    public static final String SESSION_STATE = "session_state";
+
     private final RedirectStrategy redirectStrategy = new DefaultRedirectStrategy();
     private final String issuerUri;
 
@@ -66,6 +69,7 @@ public final class IssuerIdentifierResponseHandler
                         .queryParam(OAuth2ParameterNames.CODE, authorizationCode.getTokenValue());
         appendState(redirect, authorizationCodeRequest.getState());
         appendIssuer(redirect);
+        appendSessionState(redirect, request, response, authorizationCodeRequest);
 
         log.debug("Sending an authorization response identified as {}", this.issuerUri);
         // build(true): the components above are already encoded, as they are in the handler this
@@ -103,6 +107,22 @@ public final class IssuerIdentifierResponseHandler
         appendIssuer(redirect);
 
         this.redirectStrategy.sendRedirect(request, response, redirect.build(true).toUriString());
+    }
+
+    /**
+     * OpenID Connect Session Management section 2. The value is a hash the browser can recompute
+     * from the same inputs, so an OP iframe can answer "is this still the session you were told
+     * about?" without a request reaching the server at all.
+     */
+    private static void appendSessionState(UriComponentsBuilder redirect, HttpServletRequest request,
+                                           HttpServletResponse response,
+                                           OAuth2AuthorizationCodeRequestAuthenticationToken authorizationCodeRequest) {
+        String clientId = authorizationCodeRequest.getClientId();
+        String origin = OpBrowserState.originOf(authorizationCodeRequest.getRedirectUri());
+        String browserState = OpBrowserState.ensure(request, response);
+        String sessionState = OpBrowserState.sessionState(clientId, origin, browserState,
+                OpBrowserState.newSalt());
+        redirect.queryParam(SESSION_STATE, UriUtils.encode(sessionState, StandardCharsets.UTF_8));
     }
 
     private void appendIssuer(UriComponentsBuilder redirect) {

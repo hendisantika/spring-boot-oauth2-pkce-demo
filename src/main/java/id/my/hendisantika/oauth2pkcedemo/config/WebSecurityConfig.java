@@ -1,5 +1,6 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
+import id.my.hendisantika.oauth2pkcedemo.controller.CheckSessionIframeController;
 import id.my.hendisantika.oauth2pkcedemo.controller.LogoutDemoController;
 import id.my.hendisantika.oauth2pkcedemo.security.PkceAuditingAuthorizationRequestRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequestResolver;
@@ -85,6 +86,11 @@ public class WebSecurityConfig {
                         // to be reachable with or without a session, since not having one is half of
                         // what the page is about.
                         .requestMatchers("/frontchannel-logout", "/frontchannel/logout/**").permitAll()
+                        // The page works signed out too - it just always answers "changed".
+                        .requestMatchers("/session-management", "/session-management/**").permitAll()
+                        // The provider's iframe is a page, loaded by a browser that may have no
+                        // session here at all - which is one of the answers it exists to give.
+                        .requestMatchers(CheckSessionIframeController.URI).permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",

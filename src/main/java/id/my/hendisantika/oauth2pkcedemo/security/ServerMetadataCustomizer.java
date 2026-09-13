@@ -1,6 +1,7 @@
 package id.my.hendisantika.oauth2pkcedemo.security;
 
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
+import id.my.hendisantika.oauth2pkcedemo.controller.CheckSessionIframeController;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationServerMetadata;
 import org.springframework.security.oauth2.server.authorization.oidc.OidcProviderConfiguration;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
@@ -23,6 +24,9 @@ import java.util.function.Consumer;
  * Time: 19.12
  */
 public final class ServerMetadataCustomizer {
+
+    /** OpenID Connect Session Management section 3.3. */
+    public static final String CHECK_SESSION_IFRAME = "check_session_iframe";
 
     /** RFC 9396 section 10: the authorization_details types a client may ask for. */
     public static final String AUTHORIZATION_DETAILS_TYPES_SUPPORTED =
@@ -59,6 +63,9 @@ public final class ServerMetadataCustomizer {
                        Consumer<Consumer<List<String>>> grantTypes,
                        Consumer<Consumer<List<String>>> scopes) {
         claim.accept(IssuerIdentifierResponseHandler.ISS_PARAMETER_SUPPORTED, true);
+        // OpenID Connect Session Management section 3.3: required of a server that supports it,
+        // and this one does - the endpoint is served and the responses carry session_state.
+        claim.accept(CHECK_SESSION_IFRAME, properties.issuerUri() + CheckSessionIframeController.URI);
         // RFC 8414 section 2 defines registration_endpoint and Spring Authorization Server puts it
         // in the OpenID document only, which is the drift this class exists to prevent.
         claim.accept("registration_endpoint",
