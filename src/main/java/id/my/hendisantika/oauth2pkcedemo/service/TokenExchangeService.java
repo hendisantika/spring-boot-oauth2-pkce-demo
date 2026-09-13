@@ -44,34 +44,43 @@ public class TokenExchangeService {
     }
 
     /**
-     * Runs the two shapes RFC 8693 distinguishes, plus one that must fail.
+     * Runs the exchanges a subject token carrying {@code may_act} allows, and the ones it does not.
      *
      * @param subjectToken the user's access token, as a downstream service would have received it
      */
     public List<TokenExchangeAttempt> run(String subjectToken) {
         List<TokenExchangeAttempt> attempts = new ArrayList<>();
+        DemoProperties.Client named = properties.exchangeClient();
+        DemoProperties.Client other = properties.relayClient();
 
         attempts.add(exchange("Impersonation",
-                "The service asks for a token of its own for this user. No actor token, so nothing "
-                        + "records that the service was involved.",
-                impersonationParameters(subjectToken)));
+                "A token of its own for this user, with no actor token - so nothing downstream "
+                        + "would record that a service was involved at all.",
+                impersonationParameters(subjectToken), named));
 
-        String actorToken = clientCredentialsToken();
-        if (actorToken != null) {
-            Map<String, String> delegation = impersonationParameters(subjectToken);
-            delegation.put("actor_token", actorToken);
-            delegation.put("actor_token_type", ACCESS_TOKEN_TYPE);
-            attempts.add(exchange("Delegation",
-                    "The same exchange, with the service's own token attached as the actor. The "
-                            + "result carries an act claim naming who is acting.",
-                    delegation));
+        String namedActor = clientCredentialsToken(named);
+        if (namedActor != null) {
+            attempts.add(exchange("Delegation by the service the token names",
+                    "The same exchange with the service's own token attached, by the client "
+                            + "may_act names.",
+                    delegationParameters(subjectToken, namedActor), named));
         }
 
-        Map<String, String> beyondScope = impersonationParameters(subjectToken);
-        beyondScope.put("scope", "api.read api.write admin.everything");
-        attempts.add(exchange("Asking for more than it may have",
-                "Same subject token, but requesting a scope the client is not registered for.",
-                beyondScope));
+        String otherActor = clientCredentialsToken(other);
+        if (otherActor != null) {
+            attempts.add(exchange("Delegation by another service",
+                    "A second service, holding the token exchange grant on its own registration, "
+                            + "acting for the same user.",
+                    delegationParameters(subjectToken, otherActor), other));
+        }
+
+        if (namedActor != null) {
+            Map<String, String> beyondScope = delegationParameters(subjectToken, namedActor);
+            beyondScope.put("scope", "api.read api.write admin.everything");
+            attempts.add(exchange("Asking for more than it may have",
+                    "Everything above in order, and a scope the client is not registered for.",
+                    beyondScope, named));
+        }
 
         return attempts;
     }
@@ -87,35 +96,43 @@ public class TokenExchangeService {
         return parameters;
     }
 
-    /** The exchange client's own identity, used as the actor in the delegation case. */
+    private Map<String, String> delegationParameters(String subjectToken, String actorToken) {
+        Map<String, String> parameters = impersonationParameters(subjectToken);
+        parameters.put("actor_token", actorToken);
+        parameters.put("actor_token_type", ACCESS_TOKEN_TYPE);
+        return parameters;
+    }
+
+    /** A client's own identity, used as the actor. */
     @SuppressWarnings("unchecked")
-    private String clientCredentialsToken() {
+    private String clientCredentialsToken(DemoProperties.Client client) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "client_credentials");
         form.add("scope", "api.read");
         try {
             Map<String, Object> body = restClient.post()
                     .uri("/oauth2/token")
-                    .header("Authorization", basicAuthHeader())
+                    .header("Authorization", basicAuthHeader(client))
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .body(form)
                     .retrieve()
                     .body(Map.class);
             return body == null ? null : (String) body.get("access_token");
         } catch (Exception ex) {
-            log.warn("Unable to mint an actor token: {}", ex.getMessage());
+            log.warn("Unable to mint an actor token for {}: {}", client.clientId(), ex.getMessage());
             return null;
         }
     }
 
     @SuppressWarnings("unchecked")
-    private TokenExchangeAttempt exchange(String label, String description, Map<String, String> parameters) {
+    private TokenExchangeAttempt exchange(String label, String description, Map<String, String> parameters,
+                                          DemoProperties.Client caller) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         parameters.forEach(form::add);
 
         return restClient.post()
                 .uri("/oauth2/token")
-                .header("Authorization", basicAuthHeader())
+                .header("Authorization", basicAuthHeader(caller))
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .body(form)
                 .exchange((request, response) -> {
@@ -150,8 +167,7 @@ public class TokenExchangeService {
         }
     }
 
-    private String basicAuthHeader() {
-        DemoProperties.Client client = properties.exchangeClient();
+    private static String basicAuthHeader(DemoProperties.Client client) {
         String credentials = client.clientId() + ":" + client.clientSecret();
         return "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
     }

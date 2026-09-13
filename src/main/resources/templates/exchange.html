@@ -33,9 +33,20 @@
                     </span>
                 </td>
             </tr>
+            <tr>
+                <th>Who may act for this user</th>
+                <td>
+                    <code th:text="${mayAct}">-</code>
+                    <span class="hint" style="display:block">
+                        The <code>may_act</code> claim on the subject token, naming the one service
+                        the authorization server will let act for them. A second service holds the
+                        same grant and is not named.
+                    </span>
+                </td>
+            </tr>
         </table>
         <form th:action="@{/exchange}" method="post" style="margin-top:18px">
-            <button class="btn" type="submit">Exchange it three ways</button>
+            <button class="btn" type="submit">Exchange it four ways</button>
         </form>
     </div>
 
@@ -85,16 +96,41 @@
     </div>
 
     <div class="card">
-        <h2>Why bother</h2>
+        <h2>What may_act decided</h2>
         <p class="hint">
-            <code>sub</code> stays the user in both shapes — the exchange does not change who the
-            call is for. What changes is the audience and the scope: the downstream service holds a
-            token good for its own work and nothing else, so a leak there costs less than a leak of
-            the original.
+            The user's token carries <code>may_act</code> — RFC 8693 section 4.4, a statement by the
+            authorization server about who is allowed to become the actor for this subject. It names
+            one service. Everything above follows from that.
         </p>
         <p class="hint">
-            The third attempt shows the limit. A service cannot exchange its way into privileges its
-            own registration does not allow, however broad the token it was handed.
+            <strong>Impersonation is refused outright.</strong> Not because the caller was the wrong
+            one — it was the named one — but because it brought no actor token. A subject token that
+            says who may act for it cannot be used by somebody acting anonymously, so
+            <code>may_act</code> does not merely restrict impersonation: it converts it into
+            delegation, and delegation leaves an <code>act</code> claim behind.
+        </p>
+        <p class="hint">
+            <strong>The second service is refused too</strong>, and its own registration is no less
+            trusted: it holds the token exchange grant and could exchange tokens belonging to
+            somebody else all day. What it does not have is this user's token naming it. Authority to
+            exchange is not authority to act for any particular person.
+        </p>
+        <p class="hint">
+            <code>sub</code> stays the user throughout — the exchange never changes who the call is
+            for. What changes is the audience and the scope: the downstream service holds a token
+            good for its own work and nothing else, so a leak there costs less than a leak of the
+            original. The last attempt shows that limit holding: a service cannot exchange its way
+            into privileges its own registration does not allow, however broad the token it was
+            handed.
+        </p>
+        <p class="hint">
+            <strong>One trap, found the hard way.</strong> Spring Authorization Server compares
+            <code>may_act</code> against the actor token with <code>Objects.equals</code>, claim by
+            claim — and an issued token's <code>iss</code> claim is a <code>java.net.URL</code> by
+            the time it is stored, because <code>JwtClaimsSet</code> converts it. A
+            <code>may_act</code> carrying <code>iss</code> as a string matches nothing, and every
+            exchange is refused with <code>invalid_grant</code> — the same answer as naming the wrong
+            actor entirely.
         </p>
     </div>
 </main>

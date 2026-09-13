@@ -40,6 +40,11 @@ public class TokenExchangeController {
         model.addAttribute("exchangeClientId", properties.exchangeClient().clientId());
         model.addAttribute("exchangeClientName", properties.exchangeClient().clientName());
         model.addAttribute("exchangeScopes", String.join(" ", properties.exchangeClient().scopes()));
+        // What the subject token says about who may act for this user, which is what decides every
+        // attempt on the page.
+        model.addAttribute("mayAct", "{ iss: " + properties.issuerUri()
+                + ", sub: " + properties.exchangeClient().clientId() + " }");
+        model.addAttribute("relayClientId", properties.relayClient().clientId());
         return "exchange";
     }
 
