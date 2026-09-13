@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Token exchange')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Token exchange</h1>
+    <p class="lead">
+        RFC 8693. A service that receives a user's token can trade it for one of its own: narrower,
+        aimed somewhere else, and optionally recording that the service — not the user — is the one
+        making the call. The alternative is passing the original token onwards, which hands every
+        downstream hop everything the user ever granted.
+    </p>
+
+    <div class="card">
+        <h2>The starting point</h2>
+        <table>
+            <tr>
+                <th>Token issued to</th>
+                <td><code th:text="${frontEndClientName}">PKCE Confidential Client</code></td>
+            </tr>
+            <tr>
+                <th>Its scopes</th>
+                <td><code th:text="${#strings.setJoin(subject.scopes, ' ')}">openid profile email</code></td>
+            </tr>
+            <tr>
+                <th>Exchanging service</th>
+                <td>
+                    <code th:text="${exchangeClientId}">pkce-exchange-client</code>
+                    <span class="hint" style="display:block">
+                        Registered for <code th:text="${exchangeScopes}">api.read api.write</code>
+                        and for the token exchange grant.
+                    </span>
+                </td>
+            </tr>
+        </table>
+        <form th:action="@{/exchange}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Exchange it three ways</button>
+        </form>
+    </div>
+
+    <div th:each="attempt : ${attempts}" class="card">
+        <h2>
+            <span th:text="${attempt.label}">Impersonation</span>
+            <code th:text="${attempt.statusCode}"
+                  th:style="${attempt.isSuccess()} ? 'color:#2f6f4f;font-size:15px' : 'color:#b3261e;font-size:15px'">200</code>
+        </h2>
+        <p class="hint" th:text="${attempt.description}">-</p>
+
+        <p class="hint" style="margin-top:14px">Sent to <code>/oauth2/token</code>:</p>
+        <table>
+            <tr th:each="parameter : ${attempt.requestParameters}">
+                <th th:text="${parameter.key}">grant_type</th>
+                <td><code th:text="${parameter.value}">-</code></td>
+            </tr>
+        </table>
+
+        <div th:if="${attempt.error != null}" class="alert" style="margin-top:16px">
+            <code th:text="${attempt.error}">invalid_scope</code>
+        </div>
+
+        <div th:if="${attempt.tokenClaims != null}" style="margin-top:16px">
+            <p class="hint">The token that came back:</p>
+            <table>
+                <tr>
+                    <th>issued_token_type</th>
+                    <td><code th:text="${attempt.issuedTokenType}">-</code></td>
+                </tr>
+                <tr th:each="claim : ${attempt.tokenClaims}">
+                    <th th:text="${claim.key}">sub</th>
+                    <td><code th:text="${claim.value}">-</code></td>
+                </tr>
+            </table>
+            <p class="hint" th:if="${attempt.isDelegation()}">
+                The <code>act</code> claim is what makes this delegation rather than impersonation:
+                the token still speaks for the user, but it records which service is doing the
+                speaking. An audit log downstream can tell the two apart.
+            </p>
+            <p class="hint" th:unless="${attempt.isDelegation()}">
+                No <code>act</code> claim, so nothing downstream can tell this apart from the user
+                calling directly. That is what impersonation means, and why delegation is usually the
+                better default.
+            </p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Why bother</h2>
+        <p class="hint">
+            <code>sub</code> stays the user in both shapes — the exchange does not change who the
+            call is for. What changes is the audience and the scope: the downstream service holds a
+            token good for its own work and nothing else, so a leak there costs less than a leak of
+            the original.
+        </p>
+        <p class="hint">
+            The third attempt shows the limit. A service cannot exchange its way into privileges its
+            own registration does not allow, however broad the token it was handed.
+        </p>
+    </div>
+</main>
+</body>
+</html>
