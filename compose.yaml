@@ -1,0 +1,26 @@
+services:
+  mysql:
+    image: mysql:9.6.0
+    container_name: oauth2-pkce-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: oauth2_pkce_demo
+      MYSQL_USER: pkce
+      MYSQL_PASSWORD: pkce
+      TZ: UTC
+    ports:
+      - "3312:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    volumes:
+      - oauth2-pkce-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot" ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  oauth2-pkce-mysql-data:
