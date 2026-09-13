@@ -60,7 +60,9 @@ public class RestartOAuth2LoginFilter extends OncePerRequestFilter {
             session.invalidate();
         }
         SecurityContextHolder.clearContext();
-        // Same URI, now without an authentication in the way.
-        response.sendRedirect(request.getRequestURI());
+        // Same URI *and* query string, now without an authentication in the way. Dropping the query
+        // would lose parameters the request carries, such as acr_values.
+        String query = request.getQueryString();
+        response.sendRedirect(request.getRequestURI() + (query == null ? "" : "?" + query));
     }
 }
