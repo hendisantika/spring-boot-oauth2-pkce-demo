@@ -37,6 +37,8 @@ public class HomeController {
     public String index(Model model) {
         model.addAttribute("authorizationRequestUri",
                 "/oauth2/authorization/" + properties.client().registrationId());
+        model.addAttribute("confidentialRequestUri",
+                "/oauth2/authorization/" + properties.confidentialClient().registrationId());
         model.addAttribute("issuerUri", properties.issuerUri());
         model.addAttribute("demoUsers", properties.demoUsers());
         return "index";

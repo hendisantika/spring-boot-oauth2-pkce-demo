@@ -25,6 +25,20 @@
     </div>
 
     <div class="card">
+        <h2>Or sign in as the confidential client</h2>
+        <p class="hint">
+            The same flow, but the client also holds a secret. PKCE still applies — it is not only for
+            public clients. The difference you can see: this one is issued a <strong>refresh
+            token</strong>, because Spring Authorization Server withholds refresh tokens from clients
+            that authenticate with nothing. That is what the
+            <a th:href="@{/refresh}">Refresh</a> page exercises.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn secondary" th:href="@{${confidentialRequestUri}}">Sign in (confidential client)</a>
+        </p>
+    </div>
+
+    <div class="card">
         <h2>Demo accounts</h2>
         <table>
             <thead>
