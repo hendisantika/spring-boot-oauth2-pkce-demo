@@ -65,6 +65,9 @@ public class WebSecurityConfig {
                         // Drives its own authorization request, so it is reachable signed out and
                         // its redirect URI is its own rather than Spring's client callback.
                         .requestMatchers("/code-binding", "/code-binding/**").permitAll()
+                        // Both the client and the rogue authorization server it was pointed at, so
+                        // a run can be followed from either side without signing in first.
+                        .requestMatchers("/mixup", "/mixup/**").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",
@@ -87,13 +90,15 @@ public class WebSecurityConfig {
                 // of an existing OAuth2 authentication. /code-binding/start is listed too: it builds
                 // its authorization request by hand and would otherwise hit the same 500.
                 .addFilterBefore(
-                        new RestartOAuth2LoginFilter("/oauth2/authorization/**", "/code-binding/start"),
+                        new RestartOAuth2LoginFilter("/oauth2/authorization/**", "/code-binding/start",
+                                "/mixup/start"),
                         OAuth2AuthorizationRequestRedirectFilter.class)
                 // Both stand in for calls the client's backend makes machine-to-machine, where no
                 // browser session exists to carry a CSRF token. /ciba/poll also has to survive the
                 // user signing in elsewhere in the same browser, which rotates the shared session's
                 // token - an artefact of running client and phone in one browser, not of CIBA.
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/backchannel/**", "/ciba/poll"))
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/backchannel/**", "/ciba/poll",
+                        "/mixup/attacker/token"))
                 .logout(logout -> logout
                         .logoutSuccessUrl("/")
                         .clearAuthentication(true)

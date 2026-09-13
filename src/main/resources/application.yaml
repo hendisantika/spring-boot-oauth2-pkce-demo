@@ -110,6 +110,15 @@ app:
     scopes:
       - openid
       - profile
+  # The client's registration at the honest server, used by the mix-up demo. The attacker knows
+  # this client id - client identifiers are not secrets - and that is all the attack needs.
+  mix-up-client:
+    registration-id: pkce-mixup-client
+    client-id: pkce-mixup-client
+    client-name: PKCE Mix-Up Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

@@ -1,6 +1,7 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
+import id.my.hendisantika.oauth2pkcedemo.controller.MixUpController;
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MtlsJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationToken;
@@ -60,6 +61,7 @@ public class DemoDataInitializer {
             seedCibaClient(registeredClientRepository, passwordEncoder, properties);
             seedFapiClient(registeredClientRepository, properties);
             seedCodeBindingClient(registeredClientRepository, properties);
+            seedMixUpClient(registeredClientRepository, properties);
         };
     }
 
@@ -258,6 +260,38 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered code binding client [{}]", client.clientId());
+    }
+
+    /**
+     * The client as the honest server knows it. Registered separately so the mix-up demo owns its
+     * own redirect URI - the one the attacker forwards the user's browser to, and the one the
+     * authorization code is therefore delivered to.
+     */
+    void seedMixUpClient(RegisteredClientRepository registeredClientRepository,
+                         DemoProperties properties) {
+        DemoProperties.Client client = properties.mixUpClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + MixUpController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        // Off so a run is one round trip. The mix-up fools the client, not the
+                        // user - what the user sees at the honest server is entirely genuine.
+                        .requireAuthorizationConsent(false)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered mix-up client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

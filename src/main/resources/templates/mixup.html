@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Mix-up attack defence')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Knowing which server answered</h1>
+    <p class="lead">
+        RFC 9207. A client that talks to more than one authorization server has a problem the
+        protocol did not originally solve: an authorization code arrives at its redirect URI with no
+        indication of who sent it. The client falls back on its own note — "I started this at server
+        A" — and a server that was never A can arrange for that note to be wrong. The fix is one
+        parameter: the server says who it is, and the client checks.
+    </p>
+
+    <div class="alert" th:if="${mixUpError}" th:text="${mixUpError}">error</div>
+
+    <div class="card">
+        <h2>The cast</h2>
+        <table>
+            <tr>
+                <th style="width:26%">Honest server</th>
+                <td><code th:text="${honestIssuer}">-</code>
+                    <span class="hint" style="display:block">
+                        This application. The user really does have an account here.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Attacker's server</th>
+                <td><code th:text="${attackerIssuer}">-</code>
+                    <span class="hint" style="display:block">
+                        A perfectly ordinary authorization server that the client supports, and that
+                        the user picked. Nothing about it has to be broken into.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Client's redirect URI</th>
+                <td><code th:text="${redirectUri}">-</code></td>
+            </tr>
+            <tr>
+                <th>Client id at the honest server</th>
+                <td><code th:text="${honestClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        Known to the attacker. Client identifiers are not secrets.
+                    </span></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Run the attack</h2>
+        <p class="hint">
+            Both runs are the same attack. The only difference is whether the client reads
+            <code th:text="${issParameter}">iss</code> before deciding where to send the
+            authorization code. You will be asked to sign in at the honest server, which is genuinely
+            what happens — the mix-up misleads the client, not the user.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{/mixup/start(check=true)}">Client checks the issuer</a>
+            <a class="btn secondary" th:href="@{/mixup/start(check=false)}"
+               style="margin-left:8px">Client ignores it</a>
+            <a class="btn secondary" th:href="@{/mixup/reset}" style="margin-left:8px">Clear</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${uncheckedRun != null}"
+         th:style="${uncheckedRun.codeLeaked} ? 'border-color:#f0b4ae;background:#fff7f6' : ''">
+        <h2>Without the check</h2>
+        <p class="hint" th:text="${uncheckedRun.outcome}">-</p>
+        <table style="margin-top:14px">
+            <thead>
+            <tr>
+                <th style="width:18%">Who</th>
+                <th style="width:44%">What happened</th>
+                <th>Detail</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="step : ${uncheckedRun.steps}">
+                <td><strong th:text="${step.actor}">Client</strong></td>
+                <td th:text="${step.what}"
+                    th:style="${step.harmful} ? 'color:#b3261e' : ''">-</td>
+                <td><code th:text="${step.detail}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" th:if="${uncheckedRun.stolenTokenSubject != null}">
+            The attacker now holds an access token for
+            <code th:text="${uncheckedRun.stolenTokenSubject}">hendi</code> at the honest server. It
+            got there without attacking anything: it was handed the authorization code and the PKCE
+            code verifier together, by the client, in an ordinary token request.
+        </p>
+    </div>
+
+    <div class="card" th:if="${checkedRun != null}">
+        <h2>With the check</h2>
+        <p class="hint" th:text="${checkedRun.outcome}">-</p>
+        <table style="margin-top:14px">
+            <thead>
+            <tr>
+                <th style="width:18%">Who</th>
+                <th style="width:44%">What happened</th>
+                <th>Detail</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="step : ${checkedRun.steps}">
+                <td><strong th:text="${step.actor}">Client</strong></td>
+                <td th:text="${step.what}"
+                    th:style="${step.harmful} ? 'color:#b3261e' : ''">-</td>
+                <td><code th:text="${step.detail}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            Everything up to the last two rows is identical. One string comparison is the whole
+            defence, and it has to happen before the token request, because the token request is the
+            disclosure.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>PKCE does not help here.</strong> It protects a code that was intercepted; this
+            code was not intercepted, it was delivered. The client sends the code verifier to the
+            token endpoint it believes in, so the attacker receives both halves at once. Neither does
+            <code>state</code>: the attacker forwards the client's own value, so it comes back
+            matching.
+        </p>
+        <p class="hint">
+            <strong>Neither half of RFC 9207 is in Spring.</strong> Spring Authorization Server's
+            response handlers send <code>code</code> and <code>state</code> and stop, so
+            <code>IssuerIdentifierResponseHandler</code> replaces them and adds
+            <code th:text="${issParameter}">iss</code> to success and error responses alike. On the
+            client side, <code>OAuth2AuthorizationResponse</code> has no field for it at all, so the
+            checking client here reads the parameter itself. The server also publishes
+            <code>authorization_response_iss_parameter_supported</code> in its
+            <a th:href="@{/.well-known/openid-configuration}">discovery document</a>, which is how a
+            client learns it may insist on it.
+        </p>
+        <p class="hint">
+            <strong>A single-provider client is not exposed to this.</strong> The attack needs a
+            client that supports several authorization servers, one of which the attacker controls or
+            has persuaded the client to register. That describes most "sign in with…" front doors.
+        </p>
+        <p class="hint">
+            Binding the code to a key would also have stopped the redemption — the attacker holds no
+            DPoP key, see <a th:href="@{/code-binding}">code binding</a> — but it would not tell the
+            client anything was wrong. <a th:href="@{/fapi}">FAPI 2.0</a> requires
+            <code th:text="${issParameter}">iss</code> for that reason, and now passes that check.
+        </p>
+    </div>
+</main>
+</body>
+</html>
