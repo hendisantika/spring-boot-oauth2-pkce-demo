@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Refresh token')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Refresh token grant</h1>
+    <p class="lead">
+        Exchange the refresh token for a new access token without sending the user back through the
+        browser. No <code>code_verifier</code> is involved — PKCE protects the authorization code,
+        not this grant.
+    </p>
+
+    <div class="alert" th:if="${refreshError}" th:text="${refreshError}">error</div>
+
+    <div class="card" th:if="${publicClient}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>This session has no refresh token</h2>
+        <p class="hint">
+            You signed in through <strong th:text="${clientName}">PKCE Demo Client</strong>, a
+            <em>public</em> client. Spring Authorization Server refuses to issue refresh tokens on the
+            authorization code grant when the client authenticates with
+            <code>ClientAuthenticationMethod.NONE</code> — see
+            <code>OAuth2RefreshTokenGenerator.isPublicClientForAuthorizationCodeGrant</code>. A token
+            that never expires in the hands of a client that cannot keep a secret is exactly what the
+            OAuth 2.0 Security BCP warns about.
+        </p>
+        <p class="hint">
+            The demo therefore registers a second client that keeps a secret <em>and</em> is still
+            required to use PKCE. Sign in through it to exercise the refresh grant.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${confidentialLoginUri}}">Sign in as the confidential client</a>
+        </p>
+    </div>
+
+    <div class="card" th:unless="${publicClient}">
+        <h2>Current access token</h2>
+        <table>
+            <tr>
+                <th>Type</th>
+                <td><code th:text="${current.tokenType}">Bearer</code></td>
+            </tr>
+            <tr>
+                <th>Scopes</th>
+                <td><code th:text="${#strings.setJoin(current.scopes, ' ')}">openid</code></td>
+            </tr>
+            <tr>
+                <th>Issued at</th>
+                <td><code th:text="${current.issuedAt}">-</code></td>
+            </tr>
+            <tr>
+                <th>Expires at</th>
+                <td>
+                    <code th:text="${current.expiresAt}">-</code>
+                    <span class="hint" th:text="'(' + ${secondsRemaining} + 's from now)'">(0s)</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Access token</th>
+                <td><code th:text="${current.accessTokenFingerprint()}">-</code></td>
+            </tr>
+            <tr>
+                <th>Refresh token</th>
+                <td><code th:text="${current.refreshTokenFingerprint()}">-</code></td>
+            </tr>
+        </table>
+
+        <form th:action="@{/refresh}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Refresh now</button>
+        </form>
+        <p class="hint">
+            POSTs <code>grant_type=refresh_token</code> to <code>/oauth2/token</code> as
+            <strong th:text="${clientName}">PKCE Confidential Client</strong>, authenticating with
+            <code th:text="${clientAuthenticationMethod}">client_secret_basic</code>.
+        </p>
+    </div>
+
+    <div class="card" th:if="${after}">
+        <h2>What changed</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>&nbsp;</th>
+                <th style="width:33%">Before</th>
+                <th style="width:33%">After</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <th>Access token</th>
+                <td><code th:text="${before.accessTokenFingerprint()}">-</code></td>
+                <td><code th:text="${after.accessTokenFingerprint()}">-</code></td>
+            </tr>
+            <tr>
+                <th>Expires at</th>
+                <td><code th:text="${before.expiresAt}">-</code></td>
+                <td><code th:text="${after.expiresAt}">-</code></td>
+            </tr>
+            <tr>
+                <th>Refresh token</th>
+                <td><code th:text="${before.refreshTokenFingerprint()}">-</code></td>
+                <td><code th:text="${after.refreshTokenFingerprint()}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" th:if="${rotated}">
+            The refresh token changed too: the authorization server is configured with
+            <code>reuseRefreshTokens(false)</code>, so every exchange rotates it and the old one is
+            burned. Reusing a rotated token is how a server detects a stolen one.
+        </p>
+        <p class="hint" th:unless="${rotated}">
+            The refresh token was reused rather than rotated.
+        </p>
+    </div>
+
+    <div class="card" th:if="${after}">
+        <h2>New access token (JWT)</h2>
+        <span class="token" th:text="${after.accessTokenValue}">-</span>
+        <p class="hint">
+            The ID token in your session is untouched — it described the login that already happened,
+            and this grant did not re-authenticate anyone.
+        </p>
+    </div>
+</main>
+</body>
+</html>
