@@ -1,6 +1,7 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
+import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MixUpController;
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MtlsJwkSetController;
@@ -65,6 +66,7 @@ public class DemoDataInitializer {
             seedRegistrarClient(registeredClientRepository, passwordEncoder, properties);
             seedRelayClient(registeredClientRepository, passwordEncoder, properties);
             seedMtlsRefreshClient(registeredClientRepository, properties);
+            seedFreshnessClient(registeredClientRepository, properties);
         };
     }
 
@@ -263,6 +265,35 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered code binding client [{}]", client.clientId());
+    }
+
+    /**
+     * The client the freshness probe drives. Public and PKCE like the browser clients, with consent
+     * off so that one run is one round trip - the page is about max_age, not about consent.
+     */
+    void seedFreshnessClient(RegisteredClientRepository registeredClientRepository,
+                             DemoProperties properties) {
+        DemoProperties.Client client = properties.freshnessClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + FreshnessController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered freshness client [{}]", client.clientId());
     }
 
     /**

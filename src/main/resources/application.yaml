@@ -148,6 +148,15 @@ app:
     scopes:
       - profile
       - email
+  # Its own registration so a freshness probe is one round trip: no consent screen in the way, and
+  # a redirect URI nothing else is listening on.
+  freshness-client:
+    registration-id: pkce-freshness-client
+    client-id: pkce-freshness-client
+    client-name: PKCE Freshness Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

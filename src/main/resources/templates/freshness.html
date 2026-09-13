@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Authentication freshness')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>How long ago did they prove it?</h1>
+    <p class="lead">
+        OpenID Connect Core 3.1.2.1 gives a client two questions to ask about an authentication.
+        <a th:href="@{/stepup}"><code>acr_values</code></a> asks <em>how strongly</em>;
+        <code>max_age</code> asks <em>how recently</em>, and the answer comes back as
+        <code>auth_time</code>. A session an hour old is still a valid session — it is just not
+        evidence that the person at the keyboard is the one who signed in.
+    </p>
+
+    <div class="alert" th:if="${freshnessError}" th:text="${freshnessError}">error</div>
+
+    <div class="card" th:if="${!hasIdToken}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Sign in first</h2>
+        <p class="hint">
+            The table below is about your own session, and only the OpenID Connect login gives it an
+            <code>auth_time</code> to be measured against.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${loginUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${hasIdToken}">
+        <h2>Your session, right now</h2>
+        <table>
+            <tr>
+                <th style="width:32%">auth_time</th>
+                <td><code th:text="${authTime}">-</code>
+                    <span class="hint" style="display:block">
+                        When the user last proved something. The authorization server takes the
+                        <strong>latest</strong> factor, not the first — so a step-up moves this
+                        forward.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Age</th>
+                <td><code th:text="${age} + ' seconds'">0 seconds</code></td>
+            </tr>
+            <tr>
+                <th>How</th>
+                <td><code th:text="${amr}">[pwd]</code>
+                    <span class="hint" style="display:block">
+                        at <code th:text="${acr}">urn:demo:loa:1</code> — a separate axis, and the
+                        subject of the <a th:href="@{/stepup}">step-up page</a>.
+                    </span></td>
+            </tr>
+        </table>
+        <table style="margin-top:18px">
+            <thead>
+            <tr>
+                <th style="width:32%">If a client asked for</th>
+                <th>against this session</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="entry : ${decisions}">
+                <td><code th:text="'max_age=' + ${entry.key}">max_age=60</code></td>
+                <td>
+                    <span th:if="${entry.value}" style="color:#2f6f4f">fresh enough — reused as it stands</span>
+                    <span th:unless="${entry.value}" style="color:#b3261e">too old — the login would be asked for again</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Watch it happen</h2>
+        <p class="hint">
+            The run below signs a <strong>separate</strong> session in and asks the authorization
+            endpoint the same question three ways, reading <code>auth_time</code> off the token each
+            time. It has to be a separate session: client and authorization server share one here, so
+            a second authorization request from <em>your</em> session restarts the login whatever it
+            carries, and every row would look identical.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:32%">Probe client</th>
+                <td><code th:text="${probeClientId}">pkce-freshness-client</code>
+                    <span class="hint" style="display:block">
+                        Public, PKCE, consent off — so one run is one round trip.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/freshness}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Run the probe</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Three ways of asking</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Asked</th>
+                <th style="width:14%">Re-authenticated</th>
+                <th>auth_time</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <code th:text="${attempt.parameter}">max_age=0</code>
+                    <span class="hint" style="display:block" th:text="${attempt.label}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.sentBackThroughLogin} ? 'yes' : 'no'"
+                          th:style="${attempt.sentBackThroughLogin} ? 'color:#2f6f4f' : 'color:#b3261e'">no</code>
+                </td>
+                <td>
+                    <code th:text="${attempt.authTime}">-</code>
+                    <span class="hint" style="display:block" th:text="${attempt.outcome}">-</span>
+                    <span class="hint" style="display:block" th:if="${attempt.movedAuthTime()}">
+                        Moved forward from
+                        <code th:text="${attempt.previousAuthTime}">-</code>.
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            The first row is the control: a session seconds old is inside an hour's grace, so the
+            endpoint had no business interrupting and did not. The second is the parameter doing its
+            work. The third asks for the same thing in the other language the specification
+            provides, and gets nothing.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/freshness/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server does not know the word <code>max_age</code>.</strong>
+            The string appears nowhere in it. The parameter is enforced by
+            <code>MaxAgeRequiredFilter</code>, sitting beside the filter that enforces
+            <code>acr_values</code> — two halves of one specification paragraph, neither implemented
+            by the server.
+        </p>
+        <p class="hint">
+            <strong><code>prompt=login</code> is validated and then ignored.</strong> The server
+            knows the value: <code>OidcPrompt</code> lists <code>none</code>, <code>login</code>,
+            <code>consent</code> and <code>select_account</code>, and it refuses a request that
+            combines <code>none</code> with any of the others. But <code>none</code> is the only one
+            ever acted on — answered with <code>login_required</code> or
+            <code>consent_required</code>. The value that means <em>do not interrupt the user</em> is
+            implemented; both values that ask the server to <em>start</em> an interaction are not.
+        </p>
+        <p class="hint">
+            <strong>Spring's OAuth2 client cannot send <code>max_age</code> either.</strong> No such
+            string in <code>spring-security-oauth2-client</code>, and the authorization request it
+            builds comes from a fixed set of parameters — so a browser client here passes it the way
+            it already passes <code>acr_values</code>, through the demo's own request resolver.
+        </p>
+        <p class="hint">
+            <strong>Re-authenticating costs the step-up.</strong> A forced login leaves the session
+            with one factor, so <code>acr</code> drops back to <code>urn:demo:loa:1</code> even as
+            <code>auth_time</code> moves forward. Recent and strong are genuinely different axes,
+            which is why the <a th:href="@{/stepup-challenge}">step-up challenge</a> names both in
+            one header.
+        </p>
+        <p class="hint">
+            <strong>The filter takes the authentication away without touching the session.</strong>
+            It has to: the client's own authorization request — its state and PKCE verifier — lives
+            in that session, and invalidating it would strand the callback with
+            <code>authorization_request_not_found</code>. So the security context is removed, the
+            same URL goes round again, and the ordinary entry point asks for a password.
+        </p>
+        <p class="hint">
+            <strong><code>max_age=0</code> needs a guard against itself.</strong> The login it forces
+            is moments old, so the resumed request is judged stale all over again and the browser
+            bounces between the two for ever. The filter therefore marks the one request it has
+            already sent back — by its <code>state</code>, in the session it deliberately kept — and
+            lets that request through when it returns. Read strictly, zero has the opposite problem:
+            an authentication that has just happened has an elapsed time of zero at any resolution,
+            zero is not greater than zero, and the parameter would ask for nothing at all. Everyone
+            reads it as "prove it again now", and so does this.
+        </p>
+        <p class="hint">
+            <strong>A pushed request would slip past it.</strong> Enforcement reads the query string
+            at the authorization endpoint, and <a th:href="@{/par}">PAR</a> leaves only a
+            <code>request_uri</code> there — the same limitation the
+            <a th:href="@{/stepup}">step-up page</a> documents for <code>acr_values</code>. Enforcing
+            either for pushed requests means checking at the push, where there is no user session yet
+            to judge.
+        </p>
+    </div>
+</main>
+</body>
+</html>

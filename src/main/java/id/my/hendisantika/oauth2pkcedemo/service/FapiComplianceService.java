@@ -109,7 +109,8 @@ public class FapiComplianceService {
                 properties.assertionClient(), properties.mtlsClient(),
                 properties.exchangeClient(), properties.cibaClient(), properties.fapiClient(),
                 properties.codeBindingClient(), properties.mixUpClient(), properties.registrarClient(),
-                properties.relayClient(), properties.mtlsRefreshClient());
+                properties.relayClient(), properties.mtlsRefreshClient(),
+                properties.freshnessClient());
     }
 
     private static List<FapiCheck> checksFor(RegisteredClient client) {
