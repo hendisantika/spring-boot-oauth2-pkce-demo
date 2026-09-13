@@ -67,6 +67,9 @@ public final class MaxAgeRequiredFilter extends OncePerRequestFilter {
 
         if (!this.authorizationEndpointMatcher.matches(request)
                 || maxAge == null
+                // prompt=none says the user may not be shown anything, so a stale session cannot be
+                // fixed by asking. PromptNoneFilter answers those with login_required instead.
+                || PromptNoneFilter.requestsNoInteraction(request)
                 || authentication == null
                 || !authentication.isAuthenticated()
                 // Not signed in yet: the login that is about to happen is as fresh as it gets.

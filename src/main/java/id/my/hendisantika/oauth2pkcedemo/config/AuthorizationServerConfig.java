@@ -18,6 +18,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequest
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.MaxAgeRequiredFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.PromptNoneFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.StepUpRequiredFilter;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationProvider;
@@ -205,6 +206,15 @@ public class AuthorizationServerConfig {
                 .addFilterAfter(
                         new MaxAgeRequiredFilter(authorizationServerSettings.getAuthorizationEndpoint()),
                         StepUpRequiredFilter.class)
+                // Anchored to SecurityContextHolderFilter like the other two: placed relative to
+                // them instead, it ran before the SecurityContext was loaded and judged every
+                // session to be missing. It still sits well ahead of the entry point that would
+                // redirect an unauthenticated request to the login page, which is the screen
+                // prompt=none exists to prevent.
+                .addFilterAfter(
+                        new PromptNoneFilter(authorizationServerSettings.getAuthorizationEndpoint(),
+                                registeredClientRepository, properties.issuerUri()),
+                        SecurityContextHolderFilter.class)
                 // Expands a signed request object before anything reads the request parameters, so
                 // acr_values and everything else are taken from the JWT rather than the query string.
                 .addFilterBefore(
