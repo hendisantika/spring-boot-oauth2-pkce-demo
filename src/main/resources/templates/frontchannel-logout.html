@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Front-channel logout')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Logging out through the browser</h1>
+    <p class="lead">
+        OpenID Connect Front-Channel Logout. The other way of telling several clients that a session
+        ended: instead of the server calling each of them,
+        <a th:href="@{/backchannel-logout}">as the back channel does</a>, it renders a page of hidden
+        iframes and lets the browser load them. Each one arrives at a client carrying that client's
+        own cookies, which is the one thing a server-to-server call can never do — and the reason
+        this mechanism fails quietly more often than it works.
+    </p>
+
+    <div class="card" th:if="${run == null and !canRun}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Sign in first</h2>
+        <p class="hint">
+            The iframes end the session that loads them, so there has to be one. The
+            <code>sid</code> on the URIs below comes from the ID token of that session.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${loginUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>What the server would render</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Client</th>
+                <th style="width:16%">Parameters</th>
+                <th>Front-channel URI</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="target : ${preview}">
+                <td><strong th:text="${target.clientName}">-</strong></td>
+                <td><span class="hint" th:text="${target.describeParameters()}">iss and sid</span></td>
+                <td><code th:text="${target.uri}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            A client that registers <code>frontchannel_logout_session_required</code> gets
+            <code>iss</code> and <code>sid</code> so it knows which of its sessions to end. One
+            without them has to guess — usually by ending whatever session the cookie identifies,
+            which is wrong the moment a user has two.
+        </p>
+        <form th:action="@{/frontchannel-logout}" method="post" style="margin-top:18px" th:if="${canRun}">
+            <button class="btn" type="submit">Render the logout page</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The document</h2>
+        <span class="token" th:text="${run.document}">-</span>
+        <p class="hint">
+            That is the whole of it. No token, nothing signed, nothing the client can verify — a URI
+            it registered, loaded by a browser it has to trust.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Loaded, for real</h2>
+        <p class="hint">
+            The iframes below are that document, rendered by this page. Your browser is loading them
+            now, with your cookies attached, and each client is ending your session as it does.
+        </p>
+        <iframe th:each="target : ${run.targets}" th:src="${target.uri}"
+                style="width:100%;height:2.2em;border:1px solid #e3e3e0;border-radius:4px;margin-top:8px"
+                th:title="${target.clientName}"></iframe>
+        <p class="hint" style="margin-top:14px">
+            Each frame shows what that client's endpoint answered. Reload this page afterwards: the
+            navigation above will have lost everything that needs a session.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The same URIs, without the cookies</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Request</th>
+                <th style="width:8%">Status</th>
+                <th>What the client answered</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="probe : ${run.probes}">
+                <td>
+                    <strong th:text="${probe.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${probe.description}">-</span>
+                </td>
+                <td>
+                    <code th:unless="${probe.unreachable()}" th:text="${probe.statusCode}">200</code>
+                    <span class="hint" th:if="${probe.unreachable()}">none</span>
+                </td>
+                <td><code th:text="${probe.outcome}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            Fetched by this server rather than by the browser, so no cookie goes with them. Nothing
+            about the requests is malformed; the clients simply cannot tell who is asking, end
+            nothing, and answer <code>200</code> — and the last one is never delivered at all. None
+            of which matters, because the server that rendered the iframes sees none of it: a logout
+            that worked, one that silently did nothing, and one that never arrived are the same
+            picture from where it is standing.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Neither half exists in Spring.</strong> Spring Authorization Server renders no
+            logout iframes and holds no <code>frontchannel_logout_uri</code>; Spring Security has no
+            endpoint to receive one. Both sides here are written out —
+            <code>FrontChannelLogoutService</code> builds the document,
+            <code>ClientFrontChannelLogoutController</code> answers it. Compare that with the
+            <a th:href="@{/backchannel-logout}">back channel</a>, where Spring Security had the
+            receiving half already.
+        </p>
+        <p class="hint">
+            <strong>Third-party cookies are what this runs on.</strong> Every client's iframe is a
+            cross-site request to that client, and browsers have spent years making those arrive
+            without cookies. When that happens the client sees an anonymous request, ends nothing,
+            and answers 200 — exactly as in the table above. It works here only because every client
+            in this demo happens to share an origin with the server.
+        </p>
+        <p class="hint">
+            <strong>The server had to allow framing.</strong> Spring Security sends
+            <code>X-Frame-Options: DENY</code> by default, which would have stopped the browser
+            loading any of this. Relaxing it is the client's decision in a real deployment, and one
+            more thing that has to be got right for a logout to reach anybody.
+        </p>
+        <p class="hint">
+            <strong>Four logouts now, and only one of them is reliable.</strong>
+            <a th:href="@{/logout-demo}">Local and RP-initiated</a> end one session each;
+            <a th:href="@{/logout-revocation}">revocation</a> ends the tokens;
+            <a th:href="@{/backchannel-logout}">back-channel</a> tells other clients and can be
+            checked; front-channel tells them too, and cannot.
+        </p>
+    </div>
+</main>
+</body>
+</html>

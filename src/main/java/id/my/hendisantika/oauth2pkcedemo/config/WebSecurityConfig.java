@@ -81,6 +81,10 @@ public class WebSecurityConfig {
                         .requestMatchers("/logout-revocation").permitAll()
                         // Same reason: a run ends with the session it was about already gone.
                         .requestMatchers("/backchannel-logout").permitAll()
+                        // The demo page, and the client endpoint the iframes on it load - which has
+                        // to be reachable with or without a session, since not having one is half of
+                        // what the page is about.
+                        .requestMatchers("/frontchannel-logout", "/frontchannel/logout/**").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",
