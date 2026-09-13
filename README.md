@@ -49,6 +49,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 |---|---|---|---|---|---|
 | `pkce-demo-client` | none (public) | required | no | code, refresh, **device** | **no** on the code grant — see below |
 | `pkce-confidential-client` | `client_secret_basic` | required | **yes** | code, refresh | yes, rotated on every use |
+| `pkce-assertion-client` | **`private_key_jwt`** | n/a | n/a | client credentials | no |
 
 ## What the flow looks like
 
@@ -177,6 +178,21 @@ offered, and the page says why.
 works.
 
 ![Three attempts: 200, 401, 401](docs/images/23-dpop-attempts.png)
+
+**23. Client assertions** — a client registered with no secret at all, only a pointer to its public
+keys.
+
+![Assertion client registration and published key](docs/images/24-assertion-registration.png)
+
+**24. Client assertions** — a token for a valid assertion, `invalid_client` for the wrong key and
+for an expired one.
+
+![Three attempts: 200, 401, 401](docs/images/25-assertion-results.png)
+
+**25. Client assertions** — the claims that make an assertion usable exactly once, at exactly one
+endpoint.
+
+![The assertion's claims](docs/images/26-assertion-claims.png)
 
 ## Refresh tokens and public clients
 
@@ -332,6 +348,38 @@ Notes:
 * `ath` binds a resource-request proof to one specific token, and `htm`/`htu`/`jti` pin it to one
   method, one URL, and one use.
 
+## JWT client assertions (private_key_jwt)
+
+`/assertion` demonstrates RFC 7523. Instead of sending a shared secret on every call, the client
+signs a short-lived JWT with a private key. The authorization server stores no secret for this
+client at all — only the URL where its public keys are published:
+
+```
+clientAuthenticationMethod   private_key_jwt
+jwkSetUrl                    http://localhost:8080/client-jwks.json
+signing algorithm            RS256
+grant                        client_credentials   (no user involved)
+```
+
+The page requests a token three times:
+
+| Attempt | Result |
+|---|---|
+| Assertion signed with the published key | `200` + access token |
+| Same claims, signed with a key the server has never seen | `401 invalid_client` |
+| Right key, but `exp` already past | `401 invalid_client` |
+
+The assertion's `iss` and `sub` are both the client id — it asserts its own identity, not a user's —
+`aud` is the token endpoint so it cannot be replayed elsewhere, and `exp` keeps the window short.
+
+One deviation worth knowing: **RFC 7523 makes `client_id` optional** on the request, since the
+assertion already names the client, but Spring Authorization Server's
+`JwtClientAssertionAuthenticationConverter` requires it and answers `invalid_request` without it.
+
+The upside over a shared secret is that nothing confidential exists on the server side, nothing
+confidential crosses the wire, and rotating the key means publishing a new JWK Set rather than
+coordinating a secret with the operator.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -378,7 +426,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── TokenAdminController.java        /introspect, /introspect/revoke
 │   ├── PushedAuthorizationController.java  /par
 │   ├── DpopController.java              /dpop
-│   └── ProtectedApiController.java      /api/me, DPoP-only resource server
+│   ├── ProtectedApiController.java      /api/me, DPoP-only resource server
+│   ├── ClientAssertionController.java   /assertion
+│   └── ClientJwkSetController.java      /client-jwks.json, the client's public keys
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -386,7 +436,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── DeviceFlowService.java           drives RFC 8628 over HTTP
 │   ├── TokenAdminService.java           introspects and revokes as the confidential client
 │   ├── PushedAuthorizationRequestService.java  pushes to /oauth2/par
-│   └── DpopService.java                 signs proofs and proves a stolen token is useless
+│   ├── DpopService.java                 signs proofs and proves a stolen token is useless
+│   └── ClientAssertionService.java      authenticates with a signed JWT, three ways
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -400,7 +451,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── PushedAuthorizationRequest.java
     ├── PushedAuthorizationRequestResolver.java  pushes before the browser is redirected
     ├── DpopKeyPair.java                 generates the key and signs proofs
-    └── DpopDemoResult.java
+    ├── DpopDemoResult.java
+    ├── ClientAssertionKey.java          signs RFC 7523 assertions
+    └── ClientAssertionAttempt.java
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
