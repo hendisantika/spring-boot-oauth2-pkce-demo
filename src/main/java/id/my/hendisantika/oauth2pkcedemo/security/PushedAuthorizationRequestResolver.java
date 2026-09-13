@@ -14,6 +14,7 @@ import java.time.Instant;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,6 +35,10 @@ public class PushedAuthorizationRequestResolver implements OAuth2AuthorizationRe
     public static final String AUTHORIZATION_DETAILS_ATTRIBUTE = SESSION_ATTRIBUTE + ".authorizationDetails";
     static final String REQUEST_URI = "request_uri";
 
+    /** Parameters the demo pages put on the incoming request for the authorization server to read. */
+    private static final List<String> PASSED_THROUGH =
+            List.of(StepUpRequiredFilter.ACR_VALUES, AuthenticationFreshness.MAX_AGE, "prompt");
+
     private final OAuth2AuthorizationRequestResolver delegate;
     private final PushedAuthorizationRequestService pushedAuthorizationRequestService;
     private final String parRegistrationId;
@@ -53,31 +58,39 @@ public class PushedAuthorizationRequestResolver implements OAuth2AuthorizationRe
 
     @Override
     public OAuth2AuthorizationRequest resolve(HttpServletRequest request) {
-        return push(withAcrValues(this.delegate.resolve(request), request), request);
+        return push(withPassedThroughParameters(this.delegate.resolve(request), request), request);
     }
 
     @Override
     public OAuth2AuthorizationRequest resolve(HttpServletRequest request, String clientRegistrationId) {
-        return push(withAcrValues(this.delegate.resolve(request, clientRegistrationId), request), request);
+        return push(withPassedThroughParameters(
+                this.delegate.resolve(request, clientRegistrationId), request), request);
     }
 
     /**
-     * Carries {@code acr_values} from the incoming request onto the authorization request. Spring
-     * builds the request from a fixed set of parameters, so anything else has to be added here or it
-     * simply never reaches the authorization server.
+     * Carries the OpenID Connect parameters this demo asks for from the incoming request onto the
+     * authorization request. Spring builds the request from a fixed set of parameters, so anything
+     * else has to be added here or it simply never reaches the authorization server - which is also
+     * true of {@code max_age}: Spring's OAuth2 client has no notion of it either.
      */
-    private static OAuth2AuthorizationRequest withAcrValues(OAuth2AuthorizationRequest authorizationRequest,
-                                                            HttpServletRequest request) {
-        String acrValues = request.getParameter(StepUpRequiredFilter.ACR_VALUES);
-        if (authorizationRequest == null || !StringUtils.hasText(acrValues)) {
+    private static OAuth2AuthorizationRequest withPassedThroughParameters(
+            OAuth2AuthorizationRequest authorizationRequest, HttpServletRequest request) {
+        if (authorizationRequest == null) {
             return authorizationRequest;
         }
         Map<String, Object> additional =
                 new LinkedHashMap<>(authorizationRequest.getAdditionalParameters());
-        additional.put(StepUpRequiredFilter.ACR_VALUES, acrValues);
-        return OAuth2AuthorizationRequest.from(authorizationRequest)
-                .additionalParameters(additional)
-                .build();
+        for (String name : PASSED_THROUGH) {
+            String value = request.getParameter(name);
+            if (StringUtils.hasText(value)) {
+                additional.put(name, value);
+            }
+        }
+        return additional.equals(authorizationRequest.getAdditionalParameters())
+                ? authorizationRequest
+                : OAuth2AuthorizationRequest.from(authorizationRequest)
+                        .additionalParameters(additional)
+                        .build();
     }
 
     /**

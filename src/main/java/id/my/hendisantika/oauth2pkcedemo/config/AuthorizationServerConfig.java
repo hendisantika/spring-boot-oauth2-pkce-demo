@@ -17,6 +17,7 @@ import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.MaxAgeRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.StepUpRequiredFilter;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationProvider;
@@ -198,6 +199,12 @@ public class AuthorizationServerConfig {
                 .addFilterAfter(
                         new StepUpRequiredFilter(authorizationServerSettings.getAuthorizationEndpoint()),
                         SecurityContextHolderFilter.class)
+                // The same idea for the other half of OpenID Connect section 3.1.2.1: acr_values
+                // asks how strongly, max_age asks how recently. Neither is read by the
+                // authorization server itself.
+                .addFilterAfter(
+                        new MaxAgeRequiredFilter(authorizationServerSettings.getAuthorizationEndpoint()),
+                        StepUpRequiredFilter.class)
                 // Expands a signed request object before anything reads the request parameters, so
                 // acr_values and everything else are taken from the JWT rather than the query string.
                 .addFilterBefore(
