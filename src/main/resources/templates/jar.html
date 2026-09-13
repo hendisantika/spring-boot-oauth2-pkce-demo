@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('JWT-secured authorization requests')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>JWT-secured authorization requests</h1>
+    <p class="lead">
+        RFC 9101. The authorization request travels as a JWT the client signed, so the authorization
+        server can tell it arrived exactly as it was written. <a th:href="@{/par}">PAR</a> keeps the
+        request off the front channel; JAR makes it tamper-evident wherever it travels. They compose,
+        and for the same reason.
+    </p>
+
+    <div class="card">
+        <h2>What the client wants to ask for</h2>
+        <table>
+            <tr th:each="parameter : ${parameters}">
+                <th th:text="${parameter.key}">scope</th>
+                <td><code th:text="${parameter.value}">openid profile email</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>The same thing, signed</h2>
+        <span class="token" th:text="${requestObject}">-</span>
+        <table style="margin-top:14px">
+            <tr th:each="claim : ${requestObjectClaims}">
+                <th th:text="${claim.key}">aud</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            <code>iss</code> is the client — it is issuing a statement about its own request.
+            <code>aud</code> is this authorization server, so the object cannot be replayed at
+            another. The server checks the signature against the key published at
+            <a th:href="@{${jwkSetUri}}" th:text="${jwkSetUri}">/jar-jwks.json</a>.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Try it</h2>
+        <p class="hint">
+            Each of these goes to <code>/oauth2/authorize</code> carrying only
+            <code>client_id</code> and <code>request</code>.
+        </p>
+
+        <table style="margin-top:12px">
+            <tr>
+                <th style="width:32%">A valid request object</th>
+                <td>
+                    <a th:href="${signedUri}">Start the flow</a>
+                    <span class="hint" style="display:block">
+                        Proceeds to sign-in exactly as if the parameters had been in the URL.
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>With a scope appended to the URL</th>
+                <td>
+                    <a th:href="${tamperedUri}">Try appending <code>scope=admin.everything</code></a>
+                    <span class="hint" style="display:block">
+                        The consent screen still shows the scopes from inside the object. RFC 9101
+                        section 6.1 says the server reads the request object and ignores what came
+                        alongside it, so appending to the URL achieves nothing.
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>With one character of the signature changed</th>
+                <td>
+                    <a th:href="${brokenUri}">Try a corrupted object</a>
+                    <span class="hint" style="display:block">
+                        Answered <code>invalid_request_object</code>.
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>Signed by a key the server has never seen</th>
+                <td>
+                    <a th:href="${foreignUri}">Try another signer</a>
+                    <span class="hint" style="display:block">
+                        Also <code>invalid_request_object</code>: the signature is well-formed, but
+                        not from the published key.
+                    </span>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Where this sits</h2>
+        <p class="hint">
+            Spring Authorization Server has no notion of the <code>request</code> parameter — it
+            would ignore it and act on whatever the query string said, which is precisely the
+            attack JAR exists to stop. A filter verifies the object and then serves the request
+            parameters from it and nothing else.
+        </p>
+        <p class="hint">
+            The key's location is kept in this demo's configuration rather than on the client
+            registration, so existing registrations need no migration. A deployment would read it
+            from the client's registered <code>jwkSetUrl</code>.
+        </p>
+    </div>
+</main>
+</body>
+</html>
