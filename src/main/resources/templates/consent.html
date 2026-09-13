@@ -14,6 +14,24 @@
         the other side of this.
     </p>
 
+    <div class="card" th:if="${!authorizationDetails.isEmpty()}"
+         style="border-color:#cfe0d6;background:#f4f9f6">
+        <h2 style="font-size:15px">Specifically</h2>
+        <div class="scope" th:each="detail : ${authorizationDetails}">
+            <div>
+                <strong th:text="${detail.summary()}">Initiate a payment</strong>
+                <span class="hint" style="display:block">
+                    <code th:text="${detail.type}">payment_initiation</code>
+                    <span th:if="${!detail.locations.isEmpty()}"
+                          th:text="' at ' + ${#strings.listJoin(detail.locations, ', ')}"> at …</span>
+                </span>
+            </div>
+        </div>
+        <p class="hint" style="margin-top:12px">
+            This is what the request actually asked for, rather than a scope name standing in for it.
+        </p>
+    </div>
+
     <div class="card">
         <form th:action="@{${formAction}}" method="post">
             <input type="hidden" name="client_id" th:value="${clientId}">

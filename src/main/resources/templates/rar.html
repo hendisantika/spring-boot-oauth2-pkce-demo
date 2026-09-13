@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Rich authorization requests')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Rich authorization requests</h1>
+    <p class="lead">
+        RFC 9396. A scope is a single word standing in for whatever the client wants. RAR replaces it
+        with a structured description of the actual request — which payment, of how much, to whom —
+        so the user approves the thing rather than the category.
+    </p>
+
+    <div class="alert" th:if="${refusal}">
+        The authorization server refused the request:
+        <code th:text="${refusal}">Unsupported authorization details type</code>
+        <span class="hint" style="display:block;color:inherit">
+            Answered <code>invalid_authorization_details</code> at the pushed request endpoint,
+            before anyone was asked to approve anything.
+        </span>
+    </div>
+
+    <div class="card">
+        <h2>Ask for something specific</h2>
+        <p class="hint">
+            This goes out as an <code>authorization_details</code> parameter, pushed with the rest of
+            the request. The consent screen shows what it means, and the issued token carries it back.
+        </p>
+        <form th:action="@{/rar}" method="post" style="margin-top:14px">
+            <textarea name="authorization_details" rows="8" th:text="${samplePayment}"
+                      style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+                             padding:11px;border:1px solid var(--border);border-radius:7px;
+                             background:var(--code-bg);color:var(--text)"></textarea>
+            <button class="btn" type="submit" style="margin-top:12px">Request this authorization</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Ask for something it may not have</h2>
+        <p class="hint">
+            The server accepts only the types it implements —
+            <code th:text="${#strings.setJoin(supportedTypes, ', ')}">payment_initiation</code> —
+            and answers <code>invalid_authorization_details</code> for anything else, before the user
+            is ever asked to approve it.
+        </p>
+        <form th:action="@{/rar}" method="post" style="margin-top:14px">
+            <textarea name="authorization_details" rows="5" th:text="${sampleUnsupported}"
+                      style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+                             padding:11px;border:1px solid var(--border);border-radius:7px;
+                             background:var(--code-bg);color:var(--text)"></textarea>
+            <button class="btn secondary" type="submit" style="margin-top:12px">Try the unsupported type</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${grantedDetails != null}">
+        <h2>What the token says was granted</h2>
+        <p class="hint">
+            Read from the ID token of the current session
+            (<code th:text="${signedInAs}">hendi</code>), so this is the authorization server's
+            record, not this page's memory of what it asked for.
+        </p>
+        <span class="token" th:text="${grantedDetails}">-</span>
+        <p class="hint">
+            A resource server reading this knows the payment was approved for that amount and that
+            creditor. With a scope alone it would know only that something payment-shaped was
+            allowed, and would have to trust the client about the rest.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Where this sits</h2>
+        <p class="hint">
+            Spring Authorization Server has no RFC 9396 support, so this is built on its extension
+            points: a converter on the authorization endpoint rejects types the server does not
+            implement, the consent screen reads the pending request to show what was asked, and a
+            token customizer copies the approved details into the issued token.
+        </p>
+        <p class="hint">
+            The details are pushed rather than put in the URL. RAR requests get large quickly, which
+            is much of why it pairs with <a th:href="@{/par}">PAR</a> in practice.
+        </p>
+    </div>
+</main>
+</body>
+</html>

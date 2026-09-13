@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Created by IntelliJ IDEA.
@@ -61,6 +62,42 @@ public class PushedAuthorizationRequestService {
         long expiresIn = body.get("expires_in") instanceof Number number ? number.longValue() : 60;
         log.debug("Pushed authorization request, request_uri={} expires_in={}s", requestUri, expiresIn);
         return new PushedRequestUri(requestUri, Duration.ofSeconds(expiresIn));
+    }
+
+    /**
+     * Pushes a throwaway request carrying only the given details, so the page can report the
+     * authorization server's own verdict rather than second-guessing it. The returned request_uri is
+     * discarded; it simply expires.
+     *
+     * @return the server's error description, or empty when the details are acceptable
+     */
+    @SuppressWarnings("unchecked")
+    public Optional<String> probe(String authorizationDetails) {
+        DemoProperties.Client client = properties.confidentialClient();
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("response_type", "code");
+        form.add("client_id", client.clientId());
+        form.add("scope", "openid");
+        form.add("state", "probe");
+        form.add("redirect_uri", properties.issuerUri() + "/login/oauth2/code/" + client.registrationId());
+        form.add("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        form.add("code_challenge_method", "S256");
+        form.add("authorization_details", authorizationDetails);
+
+        return restClient.post()
+                .uri("/oauth2/par")
+                .header("Authorization", basicAuthHeader())
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .exchange((request, response) -> {
+                    if (response.getStatusCode().is2xxSuccessful()) {
+                        return Optional.<String>empty();
+                    }
+                    Map<String, Object> body = response.bodyTo(Map.class);
+                    Object description = body == null ? null : body.getOrDefault("error_description",
+                            body.get("error"));
+                    return Optional.of(String.valueOf(description));
+                }, false);
     }
 
     private String basicAuthHeader() {

@@ -27,6 +27,9 @@ import java.util.Map;
 public class PushedAuthorizationRequestResolver implements OAuth2AuthorizationRequestResolver {
 
     public static final String SESSION_ATTRIBUTE = PushedAuthorizationRequestResolver.class.getName();
+
+    /** Where the RAR demo page leaves the details it wants pushed with the next login. */
+    public static final String AUTHORIZATION_DETAILS_ATTRIBUTE = SESSION_ATTRIBUTE + ".authorizationDetails";
     static final String REQUEST_URI = "request_uri";
 
     private final OAuth2AuthorizationRequestResolver delegate;
@@ -75,6 +78,14 @@ public class PushedAuthorizationRequestResolver implements OAuth2AuthorizationRe
         }
 
         Map<String, String> parameters = pushedParameters(authorizationRequest);
+        // If the demo page staged authorization_details for this session, push them too. RFC 9396
+        // details are often large, which is part of why PAR and RAR pair up so naturally.
+        Object stagedDetails = request.getSession().getAttribute(AUTHORIZATION_DETAILS_ATTRIBUTE);
+        if (stagedDetails != null) {
+            parameters.put(RichAuthorizationRequestValidator.AUTHORIZATION_DETAILS,
+                    String.valueOf(stagedDetails));
+            request.getSession().removeAttribute(AUTHORIZATION_DETAILS_ATTRIBUTE);
+        }
         PushedAuthorizationRequestService.PushedRequestUri pushed =
                 this.pushedAuthorizationRequestService.push(parameters);
 
