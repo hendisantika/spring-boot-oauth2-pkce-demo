@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Confirm it is you')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main style="max-width:460px">
+    <h1>One more step</h1>
+    <p class="lead">
+        This request asked for a stronger authentication than
+        <strong th:text="${username}">hendi</strong> currently has
+        (<code th:text="${currentAcr}">urn:demo:loa:1</code>). Confirm the code to continue.
+    </p>
+
+    <div class="alert" th:if="${error}" th:text="${error}">error</div>
+
+    <div class="card">
+        <p class="hint">
+            Your code is <strong style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+            font-size:20px;letter-spacing:3px" th:text="${code}">000000</strong>
+        </p>
+        <p class="hint" style="margin-bottom:18px">
+            Shown here because the demo has nowhere to send it. A real deployment puts this on a
+            device the user already holds, which is what makes it a second factor at all.
+        </p>
+        <form th:action="@{/stepup/verify}" method="post">
+            <label for="code">Code</label>
+            <input type="text" id="code" name="code" autocomplete="one-time-code" autofocus required
+                   style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:18px;letter-spacing:3px">
+            <button class="btn" type="submit" style="width:100%">Confirm</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

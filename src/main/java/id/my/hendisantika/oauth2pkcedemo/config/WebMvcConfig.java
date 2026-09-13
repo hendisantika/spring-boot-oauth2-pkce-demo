@@ -22,6 +22,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private static final String[] TOKEN_PAGES =
             {"/dashboard", "/tokens", "/refresh", "/introspect", "/introspect/**", "/dpop", "/exchange"};
 
+    /** Needs a signed-in user, but not tokens. */
+    private static final String[] SESSION_PAGES = {"/stepup", "/stepup/**"};
+
     private final OAuth2LoginRequiredInterceptor oAuth2LoginRequiredInterceptor;
     private final AuthorizedClientRequiredInterceptor authorizedClientRequiredInterceptor;
 
@@ -30,6 +33,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(oAuth2LoginRequiredInterceptor)
                 .addPathPatterns(TOKEN_PAGES)
                 .addPathPatterns("/logout-demo", "/logout/rp-initiated");
+        // /stepup is deliberately not here: stepping up happens mid-authorization, when the session
+        // holds only the form login and no OAuth2 token yet.
         // The logout pages only need the ID token off the principal, so they are left out here: a
         // session with no stored tokens can still sign itself out.
         registry.addInterceptor(authorizedClientRequiredInterceptor)

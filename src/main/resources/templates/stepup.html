@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Step-up authentication')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Step-up authentication</h1>
+    <p class="lead">
+        Not every action needs the same assurance. A client can ask for a stronger authentication
+        with <code>acr_values</code>, and the token comes back saying how strongly the user actually
+        authenticated — <code>acr</code> for the level, <code>amr</code> for the methods that got
+        there.
+    </p>
+
+    <div class="card" th:if="${tokenAcr != null}">
+        <h2>What the ID token says</h2>
+        <table>
+            <tr>
+                <th>acr</th>
+                <td><code th:text="${tokenAcr}">urn:demo:loa:1</code></td>
+            </tr>
+            <tr>
+                <th>amr</th>
+                <td><code th:text="${tokenAmr}">[pwd]</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The authorization server recorded this at the moment you authenticated. A token cannot be
+            talked into claiming more later — raising the level means getting a new one, which is
+            what the button below does.
+        </p>
+    </div>
+
+    <div class="card" th:unless="${tokenAcr != null}">
+        <h2>No ID token in this session yet</h2>
+        <p class="hint">
+            Signed in at the authorization server but not through a client, so there is no token to
+            read <code>acr</code> from. The buttons below start one.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Ask for a stronger authentication</h2>
+        <p class="hint">
+            Starts an authorization request carrying
+            <code th:text="'acr_values=' + ${loa2}">acr_values=urn:demo:loa:2</code>. If this session
+            only has a password, the authorization endpoint stops and asks for the missing factor
+            before issuing anything.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+            <a class="btn" th:href="@{${stepUpLoginUri}(acr_values=${loa2})}">Request LoA 2</a>
+            <a class="btn secondary" th:href="@{${stepUpLoginUri}(acr_values=${loa1})}">Request LoA 1</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>What this is for</h2>
+        <p class="hint">
+            A resource server that sees <code>acr</code> can refuse an operation the token is not
+            strong enough for, rather than accepting any valid token for everything. RFC 9470 goes
+            further and lets it say so in the challenge, so the client knows to re-authorize rather
+            than simply failing.
+        </p>
+        <p class="hint">
+            Spring Authorization Server ignores <code>acr_values</code>, so a filter on the
+            authorization endpoint enforces it. Without that a client could ask for a stronger
+            authentication and be handed a token that quietly says otherwise.
+        </p>
+        <p class="hint">
+            These links use the public client rather than the <a th:href="@{/par}">PAR</a> one: a
+            pushed request leaves only a <code>request_uri</code> in the browser, so
+            <code>acr_values</code> would never reach the endpoint that enforces it. Enforcing it for
+            pushed requests means checking at the push instead — where there is no user session yet.
+        </p>
+    </div>
+</main>
+</body>
+</html>
