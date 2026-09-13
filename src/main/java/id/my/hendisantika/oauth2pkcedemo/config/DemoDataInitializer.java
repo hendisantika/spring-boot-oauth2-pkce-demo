@@ -1,6 +1,7 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
+import id.my.hendisantika.oauth2pkcedemo.controller.MtlsJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.entity.User;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +53,7 @@ public class DemoDataInitializer {
             seedRegisteredClient(registeredClientRepository, passwordEncoder, properties,
                     properties.confidentialClient());
             seedAssertionClient(registeredClientRepository, properties);
+            seedMtlsClient(registeredClientRepository, properties);
         };
     }
 
@@ -100,6 +102,35 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered private_key_jwt client [{}]", client.clientId());
+    }
+
+    /**
+     * A client that authenticates with a TLS client certificate. Nothing in the request identifies
+     * it - the transport already did. The token it receives is bound to that certificate, so it can
+     * only be used over a connection presenting the same one.
+     */
+    void seedMtlsClient(RegisteredClientRepository registeredClientRepository, DemoProperties properties) {
+        DemoProperties.Client client = properties.mtlsClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.SELF_SIGNED_TLS_CLIENT_AUTH)
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .clientSettings(ClientSettings.builder()
+                        .jwkSetUrl(properties.issuerUri() + MtlsJwkSetController.MTLS_JWK_SET_URI)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        // RFC 8705 section 3: bind the access token to the client certificate.
+                        .x509CertificateBoundAccessTokens(true)
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered mTLS client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

@@ -19,6 +19,7 @@ public record DemoProperties(String issuerUri,
                              Client client,
                              Client confidentialClient,
                              Client assertionClient,
+                             Client mtlsClient,
                              List<DemoUser> demoUsers) {
 
     /**

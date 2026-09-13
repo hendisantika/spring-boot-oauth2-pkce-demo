@@ -65,6 +65,14 @@ app:
     client-name: PKCE Assertion Client
     scopes:
       - api.read
+  # Authenticates with a TLS client certificate instead of any credential in the request,
+  # and receives a token bound to that certificate.
+  mtls-client:
+    registration-id: pkce-mtls-client
+    client-id: pkce-mtls-client
+    client-name: PKCE mTLS Client
+    scopes:
+      - api.read
   demo-users:
     - username: hendi
       password: password
