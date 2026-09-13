@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Device flow')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Device authorization grant</h1>
+    <p class="lead">
+        RFC 8628, for things with no keyboard and no browser — a TV, a CLI, a set-top box. The device
+        shows a short code; the human approves it somewhere else; the device polls until it is told
+        what happened.
+    </p>
+
+    <div class="card" th:unless="${authorization != null}">
+        <h2>Pretend this page is a television</h2>
+        <p class="hint">
+            Requesting a device code posts <code>client_id</code> and <code>scope</code> to
+            <code>/oauth2/device_authorization</code>. No secret, no redirect URI, no browser
+            session — this page is not signed in, and does not need to be.
+        </p>
+        <p class="hint">
+            Scopes requested: <code th:text="${deviceScopes}">profile email</code>. Note the absence
+            of <code>openid</code>: Spring Authorization Server answers <code>invalid_scope</code> for
+            it here, because OpenID Connect is not defined over the device grant. This flow yields an
+            access token, never an ID token.
+        </p>
+        <form th:action="@{/device}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Request a device code</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${authorization != null}">
+        <h2>On the device</h2>
+        <p class="hint">Go to <strong th:text="${authorization.verificationUri}">/activate</strong> and enter:</p>
+        <p style="font:600 34px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:5px;margin:16px 0"
+           th:text="${authorization.userCode}">ABCD-EFGH</p>
+        <p class="hint">
+            <a th:href="${authorization.verificationUriComplete}" target="_blank"
+               th:text="${authorization.verificationUriComplete}">verification_uri_complete</a>
+            — the same link with the code filled in, which is what a QR code on a real device encodes.
+        </p>
+        <table style="margin-top:18px">
+            <tr>
+                <th>device_code</th>
+                <td><code th:text="${authorization.deviceCodeFingerprint()}">-</code></td>
+            </tr>
+            <tr>
+                <th>interval</th>
+                <td><code th:text="${authorization.intervalSeconds} + 's'">5s</code></td>
+            </tr>
+            <tr>
+                <th>expires in</th>
+                <td><code id="countdown" th:text="${authorization.secondsRemaining()} + 's'">300s</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${authorization != null and result == null}">
+        <h2>Polling <code>/oauth2/token</code></h2>
+        <p id="poll-status" class="hint">Waiting for approval…</p>
+        <p class="hint">
+            Each poll sends <code>grant_type=urn:ietf:params:oauth:grant-type:device_code</code> with
+            the device code. Until someone approves, the endpoint answers HTTP 400
+            <code>authorization_pending</code> — an expected step, not a failure.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:16px">
+            <form th:action="@{/device/reset}" method="post">
+                <button class="btn secondary" type="submit">Start over</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card" th:if="${result != null}">
+        <h2 th:if="${result.status.name() == 'GRANTED'}">Approved</h2>
+        <h2 th:unless="${result.status.name() == 'GRANTED'}">Not approved</h2>
+        <table>
+            <tr>
+                <th>status</th>
+                <td><code th:text="${result.status}">GRANTED</code></td>
+            </tr>
+            <tr th:if="${result.error != null}">
+                <th>error</th>
+                <td><code th:text="${result.error}">access_denied</code></td>
+            </tr>
+            <tr th:if="${result.accessToken != null}">
+                <th>access_token</th>
+                <td><code th:text="${result.accessTokenFingerprint()}">-</code></td>
+            </tr>
+            <tr th:if="${result.refreshToken != null}">
+                <th>refresh_token</th>
+                <td><code>issued</code></td>
+            </tr>
+            <tr th:if="${result.scopes != null and !result.scopes.isEmpty()}">
+                <th>scope</th>
+                <td><code th:text="${#strings.setJoin(result.scopes, ' ')}">openid</code></td>
+            </tr>
+        </table>
+        <p class="hint" th:if="${result.status.name() == 'GRANTED'}">
+            The device now holds a token it obtained without ever rendering a login form. Note it was
+            issued a refresh token: the restriction that withholds one from a public client applies to
+            the authorization code grant, not to this one.
+        </p>
+        <form th:action="@{/device/reset}" method="post" style="margin-top:16px">
+            <button class="btn secondary" type="submit">Start over</button>
+        </form>
+    </div>
+</main>
+
+<script th:if="${authorization != null and result == null}" th:inline="javascript">
+    /*<![CDATA[*/
+    const interval = /*[[${authorization.intervalSeconds}]]*/ 5;
+    let remaining = /*[[${authorization.secondsRemaining()}]]*/ 300;
+    const csrfHeader = /*[[${_csrf.headerName}]]*/ 'X-CSRF-TOKEN';
+    const csrfToken = /*[[${_csrf.token}]]*/ '';
+    const statusEl = document.getElementById('poll-status');
+    const countdownEl = document.getElementById('countdown');
+    let delay = interval * 1000;
+
+    setInterval(() => {
+        remaining = Math.max(0, remaining - 1);
+        if (countdownEl) countdownEl.textContent = remaining + 's';
+    }, 1000);
+
+    async function poll() {
+        const response = await fetch('/device/poll', {
+            method: 'POST',
+            headers: {[csrfHeader]: csrfToken}
+        });
+        const body = await response.json();
+        if (body.status === 'PENDING') {
+            statusEl.textContent = 'authorization_pending — polling again in ' + (delay / 1000) + 's';
+            setTimeout(poll, delay);
+        } else if (body.status === 'SLOW_DOWN') {
+            // RFC 8628 section 3.5: back off by five seconds and keep going.
+            delay += 5000;
+            statusEl.textContent = 'slow_down — backing off to ' + (delay / 1000) + 's';
+            setTimeout(poll, delay);
+        } else {
+            statusEl.textContent = body.status;
+            window.location.reload();
+        }
+    }
+
+    setTimeout(poll, delay);
+    /*]]>*/
+</script>
+</body>
+</html>

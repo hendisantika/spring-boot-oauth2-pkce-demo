@@ -70,6 +70,10 @@ public class ConsentController {
             }
         }
 
+        // A consent carrying a user_code belongs to a device flow and must be posted back to the
+        // device verification endpoint; the browser flow resumes at the authorization endpoint.
+        model.addAttribute("formAction", userCode != null ? "/oauth2/device_verification" : "/oauth2/authorize");
+        model.addAttribute("deviceFlow", userCode != null);
         model.addAttribute("clientId", clientId);
         model.addAttribute("clientName", registeredClient.getClientName());
         model.addAttribute("state", state);

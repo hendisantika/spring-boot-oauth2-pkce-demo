@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Activate a device')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main style="max-width:460px">
+    <h1>Activate a device</h1>
+    <p class="lead">Enter the code showing on the device.</p>
+
+    <div class="alert" th:if="${error == 'access_denied'}"
+         style="background:#eef4f0;border-color:#cfe0d6;color:#2f6f4f">
+        Access denied. The device has been told you refused.
+    </div>
+    <div class="alert" th:if="${error != null and error != 'access_denied'}">
+        That code was not accepted (<span th:text="${error}">invalid_request</span>). Codes expire
+        after a few minutes — check the device for a fresh one.
+    </div>
+
+    <div class="card">
+        <form th:action="@{/oauth2/device_verification}" method="get">
+            <label for="user_code">Device code</label>
+            <input type="text" id="user_code" name="user_code" th:value="${userCode}"
+                   autocomplete="off" autocapitalize="characters" spellcheck="false"
+                   placeholder="ABCD-EFGH" autofocus required
+                   style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:18px;letter-spacing:2px">
+            <button class="btn" type="submit" style="width:100%">Continue</button>
+        </form>
+        <p class="hint" style="margin-top:14px">
+            You will be asked to sign in, then to approve the scopes — the same consent screen the
+            browser flow uses. The device learns the outcome by polling; it never sees your password.
+        </p>
+    </div>
+</main>
+</body>
+</html>

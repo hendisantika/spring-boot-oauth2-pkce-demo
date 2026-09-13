@@ -9,9 +9,13 @@
         <strong th:text="${clientName}">PKCE Demo Client</strong> wants to access your account
         as <strong th:text="${principalName}">user</strong>.
     </p>
+    <p class="hint" th:if="${deviceFlow}" style="margin-top:-16px;margin-bottom:24px">
+        Approving code <code th:text="${userCode}">ABCD-EFGH</code> for a device that is waiting on
+        the other side of this.
+    </p>
 
     <div class="card">
-        <form th:action="@{/oauth2/authorize}" method="post">
+        <form th:action="@{${formAction}}" method="post">
             <input type="hidden" name="client_id" th:value="${clientId}">
             <input type="hidden" name="state" th:value="${state}">
             <input type="hidden" name="user_code" th:value="${userCode}" th:if="${userCode}">
@@ -42,9 +46,10 @@
 
         <!-- Denying means posting back with no scope at all, which the authorization endpoint
              treats as access_denied. -->
-        <form th:action="@{/oauth2/authorize}" method="post" style="margin-top:10px">
+        <form th:action="@{${formAction}}" method="post" style="margin-top:10px">
             <input type="hidden" name="client_id" th:value="${clientId}">
             <input type="hidden" name="state" th:value="${state}">
+            <input type="hidden" name="user_code" th:value="${userCode}" th:if="${userCode}">
             <button class="btn secondary" type="submit">Deny</button>
         </form>
     </div>
