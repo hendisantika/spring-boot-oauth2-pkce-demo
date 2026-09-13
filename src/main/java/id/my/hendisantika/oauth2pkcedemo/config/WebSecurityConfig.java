@@ -1,5 +1,6 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
+import id.my.hendisantika.oauth2pkcedemo.controller.LogoutDemoController;
 import id.my.hendisantika.oauth2pkcedemo.security.PkceAuditingAuthorizationRequestRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,6 +21,8 @@ import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+
+import java.util.Map;
 
 /**
  * Created by IntelliJ IDEA.
@@ -81,14 +84,17 @@ public class WebSecurityConfig {
      */
     @Bean
     public ClientRegistrationRepository clientRegistrationRepository(DemoProperties properties) {
+        return new InMemoryClientRegistrationRepository(
+                registrationFor(properties, properties.client()),
+                registrationFor(properties, properties.confidentialClient()));
+    }
+
+    private static ClientRegistration registrationFor(DemoProperties properties, DemoProperties.Client client) {
         String issuer = properties.issuerUri();
-        DemoProperties.Client client = properties.client();
-        ClientRegistration registration = ClientRegistration.withRegistrationId(client.registrationId())
+        ClientRegistration.Builder builder = ClientRegistration.withRegistrationId(client.registrationId())
                 .clientId(client.clientId())
                 .clientName(client.clientName())
-                // A public client: no secret to leak, so the authorization code is bound to the
-                // caller with PKCE instead.
-                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                // Force PKCE for both clients. Spring only applies it automatically to public ones.
                 .clientSettings(ClientRegistration.ClientSettings.builder().requireProofKey(true).build())
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
@@ -99,8 +105,19 @@ public class WebSecurityConfig {
                 .jwkSetUri(issuer + "/oauth2/jwks")
                 .userInfoUri(issuer + "/userinfo")
                 .userNameAttributeName(IdTokenClaimNames.SUB)
-                .build();
-        return new InMemoryClientRegistrationRepository(registration);
+                // Not part of ClientRegistration's typed surface, but RP-initiated logout needs it;
+                // discovery would normally supply it.
+                .providerConfigurationMetadata(Map.of(
+                        LogoutDemoController.END_SESSION_ENDPOINT, issuer + "/connect/logout"));
+
+        if (client.isPublic()) {
+            // No secret to leak, so the authorization code is bound to the caller by PKCE alone.
+            builder.clientAuthenticationMethod(ClientAuthenticationMethod.NONE);
+        } else {
+            builder.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                    .clientSecret(client.clientSecret());
+        }
+        return builder.build();
     }
 
     @Bean

@@ -36,10 +36,23 @@ app:
   # explicitly rather than through issuer-uri discovery, because discovery would
   # require the server to already be listening while the context is still starting.
   issuer-uri: http://localhost:8080
+  # Public client: no secret at all, so PKCE is the only thing binding the authorization
+  # code to the caller. Spring Authorization Server will not issue it a refresh token.
   client:
     registration-id: pkce-demo-client
     client-id: pkce-demo-client
     client-name: PKCE Demo Client
+    scopes:
+      - openid
+      - profile
+      - email
+  # Confidential client, still required to use PKCE. This one does get a refresh token,
+  # which is what the /refresh page exercises.
+  confidential-client:
+    registration-id: pkce-confidential-client
+    client-id: pkce-confidential-client
+    client-secret: confidential-secret
+    client-name: PKCE Confidential Client
     scopes:
       - openid
       - profile

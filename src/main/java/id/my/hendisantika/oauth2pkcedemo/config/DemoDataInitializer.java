@@ -36,7 +36,7 @@ import java.util.UUID;
 public class DemoDataInitializer {
 
     /**
-     * Seeds the demo users and the PKCE-only client. Both writes are idempotent, so restarting
+     * Seeds the demo users and both registered clients. Every write is idempotent, so restarting
      * against an existing MySQL volume is a no-op.
      */
     @Bean
@@ -46,7 +46,9 @@ public class DemoDataInitializer {
                                             DemoProperties properties) {
         return args -> {
             seedUsers(userRepository, passwordEncoder, properties);
-            seedRegisteredClient(registeredClientRepository, properties);
+            seedRegisteredClient(registeredClientRepository, passwordEncoder, properties, properties.client());
+            seedRegisteredClient(registeredClientRepository, passwordEncoder, properties,
+                    properties.confidentialClient());
         };
     }
 
@@ -68,16 +70,16 @@ public class DemoDataInitializer {
         }
     }
 
-    void seedRegisteredClient(RegisteredClientRepository registeredClientRepository, DemoProperties properties) {
-        DemoProperties.Client client = properties.client();
+    void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,
+                              PasswordEncoder passwordEncoder,
+                              DemoProperties properties,
+                              DemoProperties.Client client) {
         if (registeredClientRepository.findByClientId(client.clientId()) != null) {
             return;
         }
-        RegisteredClient registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId(client.clientId())
                 .clientName(client.clientName())
-                // No client secret: this is a public client, which is exactly the case PKCE exists for.
-                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
                 .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
@@ -87,16 +89,25 @@ public class DemoDataInitializer {
                 .scope(OidcScopes.EMAIL)
                 .clientSettings(ClientSettings.builder()
                         // Reject any authorization request that arrives without a code_challenge.
+                        // Set on both clients: PKCE is not only for public ones.
                         .requireProofKey(true)
                         .requireAuthorizationConsent(true)
                         .build())
                 .tokenSettings(TokenSettings.builder()
                         .accessTokenTimeToLive(Duration.ofMinutes(30))
                         .refreshTokenTimeToLive(Duration.ofHours(8))
+                        // Rotate the refresh token on every exchange, so replaying an old one fails.
                         .reuseRefreshTokens(false)
-                        .build())
-                .build();
-        registeredClientRepository.save(registeredClient);
-        log.info("Registered PKCE client [{}]", client.clientId());
+                        .build());
+
+        if (client.isPublic()) {
+            builder.clientAuthenticationMethod(ClientAuthenticationMethod.NONE);
+        } else {
+            builder.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                    .clientSecret(passwordEncoder.encode(client.clientSecret()));
+        }
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered {} client [{}]", client.isPublic() ? "public" : "confidential", client.clientId());
     }
 }

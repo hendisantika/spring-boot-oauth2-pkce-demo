@@ -15,12 +15,24 @@ import java.util.List;
  * Time: 12.56
  */
 @ConfigurationProperties(prefix = "app")
-public record DemoProperties(String issuerUri, Client client, List<DemoUser> demoUsers) {
+public record DemoProperties(String issuerUri,
+                             Client client,
+                             Client confidentialClient,
+                             List<DemoUser> demoUsers) {
 
+    /**
+     * @param clientSecret {@code null} marks a public client, which authenticates with nothing but
+     *                     its client id and a PKCE code verifier.
+     */
     public record Client(String registrationId,
                          String clientId,
+                         String clientSecret,
                          String clientName,
                          @DefaultValue({"openid", "profile", "email"}) List<String> scopes) {
+
+        public boolean isPublic() {
+            return clientSecret == null || clientSecret.isBlank();
+        }
     }
 
     public record DemoUser(String username,
