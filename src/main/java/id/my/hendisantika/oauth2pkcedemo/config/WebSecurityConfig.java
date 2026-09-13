@@ -2,6 +2,8 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.LogoutDemoController;
 import id.my.hendisantika.oauth2pkcedemo.security.PkceAuditingAuthorizationRequestRepository;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequestResolver;
+import id.my.hendisantika.oauth2pkcedemo.service.PushedAuthorizationRequestService;
 import id.my.hendisantika.oauth2pkcedemo.security.RestartOAuth2LoginFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,14 +49,16 @@ public class WebSecurityConfig {
      */
     @Bean
     @Order(2)
-    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http,
-                                                          DemoProperties properties) throws Exception {
+    public SecurityFilterChain defaultSecurityFilterChain(
+            HttpSecurity http,
+            DemoProperties properties,
+            PushedAuthorizationRequestResolver authorizationRequestResolver) throws Exception {
         String authorizationRequestUri = "/oauth2/authorization/" + properties.client().registrationId();
         http
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/", "/error", "/css/**", "/js/**", "/favicon.ico").permitAll()
                         // A device has no browser session; the human signs in later, on their phone.
-                        .requestMatchers("/device", "/device/**", "/activate").permitAll()
+                        .requestMatchers("/device", "/device/**", "/activate", "/par").permitAll()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage(LOGIN_PAGE_URI)
@@ -62,7 +66,8 @@ public class WebSecurityConfig {
                 .oauth2Login(oauth2 -> oauth2
                         .loginPage(authorizationRequestUri)
                         .authorizationEndpoint(endpoint -> endpoint
-                                .authorizationRequestRepository(authorizationRequestRepository()))
+                                .authorizationRequestRepository(authorizationRequestRepository())
+                                .authorizationRequestResolver(authorizationRequestResolver))
                         .defaultSuccessUrl("/dashboard", true))
                 // Both formLogin and oauth2Login register a default entry point; pin it explicitly so
                 // that hitting a protected page always starts the PKCE flow rather than the raw form.
@@ -77,6 +82,19 @@ public class WebSecurityConfig {
                         .invalidateHttpSession(true)
                         .deleteCookies("JSESSIONID"));
         return http.build();
+    }
+
+    /**
+     * Pushes the authorization request for the confidential registration before the browser is
+     * redirected, so the front channel carries only a client id and an opaque handle.
+     */
+    @Bean
+    public PushedAuthorizationRequestResolver pushedAuthorizationRequestResolver(
+            ClientRegistrationRepository clientRegistrationRepository,
+            PushedAuthorizationRequestService pushedAuthorizationRequestService,
+            DemoProperties properties) {
+        return new PushedAuthorizationRequestResolver(clientRegistrationRepository,
+                pushedAuthorizationRequestService, properties.confidentialClient().registrationId());
     }
 
     @Bean
