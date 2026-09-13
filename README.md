@@ -366,6 +366,18 @@ access tokens.
 
 ![Tokens revoked on logout](docs/images/63-revocation-with.png)
 
+**63. Back-channel logout** — the receiving endpoint, one per client registration.
+
+![The back-channel logout page](docs/images/64-backchannel-start.png)
+
+**64. Back-channel logout** — six logout tokens, five of which break one rule each.
+
+![Six logout tokens](docs/images/65-backchannel-tokens.png)
+
+**65. Back-channel logout** — the session ended, and the token that ended it.
+
+![The session ended and the logout token](docs/images/66-backchannel-session.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -379,6 +391,48 @@ there is a second, confidential client; PKCE applies to it just the same.
 
 Refresh tokens are rotated (`reuseRefreshTokens(false)`), so replaying an old one fails — which is
 how a server notices a stolen token.
+
+## Back-channel logout
+
+`/backchannel-logout` ends a session without the browser being involved at all. The authorization
+server posts a signed **logout token** straight to the client, and the client ends the session it
+names — which is the only way a logout can reach a client the user is not currently looking at.
+
+The page sends six, five of which break one rule from OpenID Connect Back-Channel Logout §2.6:
+
+| Logout token | Result |
+|---|---|
+| Without the `events` claim | `500` — see below |
+| With a `nonce` | `400`, "nonce claim must not be present" |
+| Addressed to another client | `400`, "aud claim value must include ClientRegistration#getClientId" |
+| Naming neither `sub` nor `sid` | `400`, "sub and sid claims must not both be null" |
+| Signed by a key the server does not publish | `400`, signature rejected |
+| Valid | `200`, and the session is gone |
+
+Notes:
+
+* **Spring Authorization Server has no sending half.** Nothing in it mentions back-channel logout —
+  no logout token, no `backchannel_logout_uri` on a registration, nothing sent when a session ends.
+  `BackChannelLogoutService` mints and posts the tokens here, signed with the server's own key.
+* **Spring Security has the receiving half, and it is one line.**
+  `oidcLogout(oidc -> oidc.backChannel(...))` puts `/logout/connect/back-channel/{registrationId}` in
+  place, validates the token against the issuer's published keys, and ends the matching sessions.
+* **One refusal is a 500 and should be a 400.** `OidcBackChannelLogoutTokenValidator` means to report
+  a missing `events` claim as an ordinary validation error — the line right after the check says so.
+  It never gets there: reading the claim goes through `LogoutTokenClaimAccessor.getEvents()`, which
+  asserts the claim is not null and throws first, and the filter turns that into a server error. The
+  token is refused either way; the status is wrong for a request that is merely malformed.
+* **The `sid` claim was already there.** Matching by session needs the ID token to carry one, and
+  Spring Authorization Server issues it from its session registry — so the logout tokens name that
+  same value rather than inventing one. Without a `sid`, a logout token can only name a subject and
+  the client ends every session that user has.
+* **Neither metadata document advertises it**, deliberately. `backchannel_logout_supported` would
+  mean this server sends a logout token whenever a session ends; it sends them when this page asks.
+  Advertising the flag would describe a server that does not exist.
+
+Three logouts now, doing different work: [local and RP-initiated](#logout) end sessions,
+[revocation](#revocation-on-logout) ends tokens, and back-channel logout is how the *other* clients
+find out at all.
 
 ## Revocation on logout
 
@@ -1029,7 +1083,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 │   ├── AuthorizationServerMetadataController.java  /metadata
 │   ├── DynamicClientRegistrationController.java   /dynamic-registration
-│   └── LogoutRevocationController.java   /logout-revocation
+│   ├── LogoutRevocationController.java   /logout-revocation
+│   └── BackChannelLogoutController.java  /backchannel-logout
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -1050,7 +1105,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
 │   ├── DynamicClientRegistrationService.java  registers a client, and fails to five ways
-│   └── LogoutRevocationService.java     signs out, then looks at the tokens
+│   ├── LogoutRevocationService.java     signs out, then looks at the tokens
+│   └── BackChannelLogoutService.java    mints logout tokens and posts them
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -1092,6 +1148,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RevokingLogoutHandler.java       revokes the session's tokens as part of logging out
     ├── LogoutStep.java
     ├── LogoutRevocationRun.java
+    ├── LogoutTokenFactory.java          signs logout tokens, and one that must not verify
+    ├── BackChannelAttempt.java
+    ├── BackChannelLogoutRun.java
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
