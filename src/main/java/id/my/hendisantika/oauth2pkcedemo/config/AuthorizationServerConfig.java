@@ -7,7 +7,11 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.AuthenticationContextLevel;
+import org.springframework.security.core.Authentication;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.StepUpRequiredFilter;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationProvider;
 import id.my.hendisantika.oauth2pkcedemo.service.CibaService;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -145,7 +149,14 @@ public class AuthorizationServerConfig {
                 .exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
                         new LoginUrlAuthenticationEntryPoint(WebSecurityConfig.LOGIN_PAGE_URI),
                         new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
-                .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()));
+                .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()))
+                // Anchored to SecurityContextHolderFilter: the SecurityContext is loaded by then,
+                // and the authorization server's own endpoint filters run later. Anchoring to
+                // OAuth2AuthorizationEndpointFilter is not possible - the configurer adds it outside
+                // Spring Security's registered filter order.
+                .addFilterAfter(
+                        new StepUpRequiredFilter(authorizationServerSettings.getAuthorizationEndpoint()),
+                        SecurityContextHolderFilter.class);
         return http.build();
     }
 
@@ -204,6 +215,13 @@ public class AuthorizationServerConfig {
             context.getClaims().claim("authorities", user.getAuthorities().stream()
                     .map(Object::toString)
                     .collect(Collectors.toCollection(ArrayList::new)));
+
+            // OpenID Connect Core section 2: say how strongly the user authenticated, and by what
+            // means. A resource server can then insist on a level rather than trusting that a token
+            // exists at all.
+            Authentication principal = context.getPrincipal();
+            context.getClaims().claim("acr", AuthenticationContextLevel.acrOf(principal));
+            context.getClaims().claim("amr", new ArrayList<>(AuthenticationContextLevel.amrOf(principal)));
 
             // RFC 9396 section 7: echo the approved authorization details into the token, so a
             // resource server sees what was actually granted rather than only a scope name.
