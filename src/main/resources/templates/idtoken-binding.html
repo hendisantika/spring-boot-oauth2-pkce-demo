@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('ID token binding')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>What binds an ID token?</h1>
+    <p class="lead">
+        The <a th:href="@{/code-binding}">authorization code</a>, the
+        <a th:href="@{/refresh-binding}">refresh token</a> and the
+        <a th:href="@{/mtls-refresh}">access token</a> can all be tied to something the client holds.
+        The ID token cannot: no deployed specification binds one to a key. What it has instead are
+        claims that say where it belongs — and this page takes the session's own ID token and tries
+        to put it somewhere else.
+    </p>
+
+    <div class="alert" th:if="${idTokenError}" th:text="${idTokenError}">error</div>
+
+    <div class="card" th:if="${!canRun}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Sign in first</h2>
+        <p class="hint">
+            There has to be an ID token to examine, and only the OpenID Connect login produces one —
+            the form login on this site produces a session and nothing else.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${loginUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${canRun and run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The ID token from this session is put through Spring Security's own
+            <code>OidcIdTokenValidator</code> five ways: once as it was issued, then four
+            substitutions. Two are caught. Two are not, and those are the point.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:34%">Replayed at</th>
+                <td><code th:text="${otherClientName}">PKCE Confidential Client</code></td>
+            </tr>
+            <tr>
+                <th>Substituted access token</th>
+                <td><code th:text="${otherTokenClientId}">pkce-exchange-client</code>
+                    <span class="hint" style="display:block">
+                        A real token, minted by client credentials, belonging to somebody else.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/idtoken-binding}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Try to move the ID token</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five ways</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:34%">Presented</th>
+                <th style="width:12%">Result</th>
+                <th>What decided it</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="check : ${run.checks}">
+                <td>
+                    <strong th:text="${check.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${check.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${check.outcome}"
+                          th:style="${check.isGap()} ? 'color:#b3261e' : 'color:#2f6f4f'">-</code>
+                </td>
+                <td><span th:text="${check.detail}">-</span></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            Red is where the substitution went unnoticed. Both refusals came from the claims naming
+            <em>where the token belongs</em>: one client, one authorization request. Nothing names
+            who is holding it.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The claim that is not there</h2>
+        <table>
+            <tr>
+                <th style="width:34%">at_hash</th>
+                <td><code th:text="${run.carriesAtHash} ? 'present' : 'absent'">absent</code></td>
+            </tr>
+            <tr>
+                <th>The access token it came with</th>
+                <td><code th:text="${run.atHashOfIssuedToken}">-</code>
+                    <span class="hint" style="display:block">
+                        What <code>at_hash</code> would be: the left half of the SHA-256 of the
+                        token, base64url encoded.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>The substituted one</th>
+                <td><code th:text="${run.atHashOfOtherToken}">-</code>
+                    <span class="hint" style="display:block">
+                        Issued to <code th:text="${run.otherTokenSubject}">-</code>, not to
+                        <code th:text="${run.subject}">-</code>.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>cnf</th>
+                <td><code th:text="${run.carriesConfirmation} ? 'present' : 'absent'">absent</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The two hashes differ, as they must — they are different tokens. The ID token carries
+            neither, so a client that received this ID token alongside the wrong access token would
+            go on believing it is holding one person's identity and that person's access.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Its claims</h2>
+        <table>
+            <tr th:each="claim : ${run.claims}">
+                <th style="width:26%" th:text="${claim.key}">iss</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Omitting <code>at_hash</code> is allowed, and that is the uncomfortable part.</strong>
+            OpenID Connect Core 3.1.3.6 requires it when the ID token comes from the
+            <em>authorization</em> endpoint — the implicit and hybrid flows, where the access token
+            travels through the browser — and makes it OPTIONAL when the token comes from the token
+            endpoint over a direct connection, as it does here. Spring Authorization Server never
+            emits it: the string <code>at_hash</code> appears nowhere in its sources.
+        </p>
+        <p class="hint">
+            <strong>Spring Security's client would not check it either.</strong>
+            <code>OidcIdTokenValidator.validate</code> takes one argument, the ID token, and the
+            access token is not among the things it can see. The reasoning holds for the code flow:
+            both tokens arrive in one response over one TLS connection from a server the client
+            authenticated, so there is no moment where one could be swapped for the other. It stops
+            holding the instant anything else carries that pair — a backend handing them to a front
+            end, a gateway, a log.
+        </p>
+        <p class="hint">
+            <strong>The <code>nonce</code> claim is a hash.</strong> Spring's client generates a
+            nonce, sends <code>createHash(nonce)</code> in the authorization request, and keeps the
+            value. The authorization server only ever sees the hash and copies it into the ID token,
+            so the claim above is not a secret and matching it means having made that exact request.
+        </p>
+        <p class="hint">
+            <strong>There is no <code>cnf</code>, and no specification to add one to.</strong>
+            <a th:href="@{/dpop}">DPoP</a> binds access and refresh tokens; RFC 8705 binds access
+            tokens; neither mentions ID tokens. One specification did — OpenID Connect Token Bound
+            Authentication, which put a <code>cnf.tbh</code> in the ID token naming a TLS Token
+            Binding (RFC 8471) — and it went nowhere when the browsers dropped Token Binding. An ID
+            token is a bearer assertion about a past event, and it is meant to be short-lived and
+            consumed once, at the client that asked for it.
+        </p>
+        <p class="hint">
+            <strong>What it is bound to is a session, not a key.</strong> The <code>sid</code> claim
+            names the authorization server session behind this login, which is what
+            <a th:href="@{/backchannel-logout}">back-channel logout</a> uses to end the right one,
+            and what the <a th:href="@{/session-management}">session iframe</a> watches. That is the
+            binding an ID token really has: not to a holder, but to a moment.
+        </p>
+    </div>
+</main>
+</body>
+</html>
