@@ -76,6 +76,8 @@ public class WebSecurityConfig {
                         // Registration is machine to machine from end to end; no session is
                         // involved in any of it.
                         .requestMatchers("/dynamic-registration", "/dynamic-registration/**").permitAll()
+                        // A run ends signed out, and the result has to be readable afterwards.
+                        .requestMatchers("/logout-revocation").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",

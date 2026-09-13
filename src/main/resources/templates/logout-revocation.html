@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Revocation on logout')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Signing out does not take the tokens with it</h1>
+    <p class="lead">
+        Logging out ends a session. It does not, on its own, do anything at all to the access token
+        already issued, or to the refresh token that can mint more of them. Those are two different
+        systems, and nothing connects them unless the client says so — with RFC 7009, the same
+        revocation endpoint the <a th:href="@{/introspect}">introspection page</a> uses.
+    </p>
+
+    <div class="card" th:if="${run == null and !canRun}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2 th:if="${!signedIn}">Sign in first</h2>
+        <h2 th:if="${signedIn}">This session has no refresh token</h2>
+        <p class="hint">
+            The run needs a refresh token to show the more alarming half of this, and revocation
+            needs a client that can authenticate — RFC 7009 only lets a client revoke tokens it was
+            itself issued, so the public client cannot revoke anything, even its own.
+            <span th:if="${signedIn}">
+                You are signed in as <strong th:text="${clientName}">PKCE Demo Client</strong>.
+            </span>
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${confidentialLoginUri}}">Sign in as the confidential client</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${canRun}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Both buttons sign you out for real. The only difference is whether anything tells the
+            authorization server about it. Your tokens are introspected before and after, and the
+            refresh token is then used — after you have signed out — to see whether it still works.
+        </p>
+        <form th:action="@{/logout-revocation}" method="post" style="margin-top:18px">
+            <input type="hidden" name="revoke" value="false">
+            <button class="btn secondary" type="submit">Log out, and nothing else</button>
+        </form>
+        <form th:action="@{/logout-revocation}" method="post" style="margin-top:10px">
+            <input type="hidden" name="revoke" value="true">
+            <button class="btn" type="submit">Log out and revoke</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}"
+         th:style="${run.sessionEndedButAccessDidNot()} ? 'border-color:#f0b4ae;background:#fff7f6' : ''">
+        <h2 th:text="${run.revoked} ? 'Logged out, and revoked' : 'Logged out, and nothing else'">-</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Step</th>
+                <th style="width:34%">What it was</th>
+                <th>Result</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="step : ${run.steps}">
+                <td><strong th:text="${step.label}">-</strong></td>
+                <td><span class="hint" th:text="${step.description}">-</span></td>
+                <td>
+                    <span th:text="${step.outcome}"
+                          th:style="${step.tokenUsable} ? 'color:#b3261e' : ''">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" th:if="${run.sessionEndedButAccessDidNot()}">
+            The session is gone and the user is signed out — and a resource server handed that access
+            token would still serve it, for as long as it has left to live. Worse, the refresh token
+            just minted a new one <em>after</em> the logout, with a fresh lifetime of its own. Nothing
+            is broken here; nothing was ever told.
+        </p>
+        <p class="hint" th:unless="${run.sessionEndedButAccessDidNot()}">
+            Both tokens are inactive and the refresh grant has nothing to work with. Revoking the
+            refresh token is what did most of that: it invalidates the authorization it came from,
+            and the access token goes with it.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn secondary" th:href="@{${confidentialLoginUri}}">Sign in again to try the other one</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Neither logout touches a token.</strong> Spring Security's
+            <code>/logout</code> clears the security context, invalidates the session and drops the
+            cookie. Spring Authorization Server's RP-initiated logout, at
+            <code>/connect/logout</code>, runs a <code>SecurityContextLogoutHandler</code> and nothing
+            else — that is the whole of <code>OidcLogoutAuthenticationSuccessHandler</code>. Ending a
+            session and ending an authorization are separate acts.
+        </p>
+        <p class="hint">
+            <strong>This application now revokes on both paths.</strong>
+            <code>RevokingLogoutHandler</code> is registered as a logout handler on
+            <code>/logout</code> and called explicitly before the RP-initiated redirect, so signing
+            out through the nav does the right thing. The run above with revocation is that same
+            handler; the run without it is what the framework does unaided.
+        </p>
+        <p class="hint">
+            <strong>A public client cannot clean up after itself.</strong> RFC 7009 requires an
+            authenticated client, and only lets one revoke tokens it was itself issued. Revocation
+            here is done as <code th:text="${revokingClientId}">pkce-confidential-client</code>, which
+            is why this page asks for that login — and why a client with no credentials has no way to
+            withdraw what it holds. The <a th:href="@{/introspect}">introspection page</a> shows the
+            same asymmetry from the other side.
+        </p>
+        <p class="hint">
+            <strong>Short access token lifetimes are the other half of the answer.</strong> Revocation
+            closes the window; a short expiry decides how big the window is when revocation is
+            impossible or is never called. Neither substitutes for the other.
+        </p>
+    </div>
+</main>
+</body>
+</html>
