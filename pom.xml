@@ -97,6 +97,14 @@
 			<artifactId>flyway-mysql</artifactId>
 		</dependency>
 
+		<!-- Generates the demo's self-signed certificates at startup. The JDK has no public API
+		     for creating X.509 certificates, and this keeps key material out of the repository. -->
+		<dependency>
+			<groupId>org.bouncycastle</groupId>
+			<artifactId>bcpkix-jdk18on</artifactId>
+			<version>1.85</version>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>
