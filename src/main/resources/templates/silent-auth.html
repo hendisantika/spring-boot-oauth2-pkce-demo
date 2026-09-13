@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Silent authentication')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Asking without asking</h1>
+    <p class="lead">
+        OpenID Connect Core 3.1.2.1. <code>prompt=none</code> is how a client asks a question it does
+        not want the user to see: <em>is there still a session, and may I have a token for it?</em>
+        The authorization server must show nothing at all — if it cannot answer without the user, it
+        says <code>login_required</code> and the client decides what to do about it. This is the
+        request behind every silent renewal in a hidden iframe.
+    </p>
+
+    <div class="alert" th:if="${silentError}" th:text="${silentError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The probe takes one client through the whole life of the parameter: before there is a
+            session, after there is one but before the user has agreed to anything, after they have,
+            and two ways of asking for something silence cannot deliver. Nothing is followed — where
+            the first response points <em>is</em> the answer.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">Client</th>
+                <td><code th:text="${clientId}">pkce-silent-client</code>
+                    <span class="hint" style="display:block">
+                        Consent required, deliberately: silent authentication turns on whether the
+                        user has already said yes.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Endpoint</th>
+                <td><code th:text="${authorizationEndpoint}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/silent-auth}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Ask five times</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five questions, no screens</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:32%">Asked</th>
+                <th style="width:20%">Answer</th>
+                <th>What came back to the client</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <code th:text="${attempt.request}">prompt=none</code>
+                    <span class="hint" style="display:block" th:text="${attempt.label}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.outcome()}"
+                          th:style="${attempt.isSilent()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code>
+                </td>
+                <td>
+                    <span th:if="${attempt.gotCode}" class="hint">
+                        An authorization code, with nothing shown to anybody.
+                    </span>
+                    <span th:if="${attempt.errorDescription != null}" class="hint"
+                          th:text="${attempt.errorDescription}">-</span>
+                    <span th:if="${!attempt.isSilent()}" class="hint">
+                        A page of this application, which is the one thing the parameter forbids.
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px" th:if="${run.everythingStayedSilent()}">
+            Every answer went to the client's redirect URI. That is the contract: an error a program
+            can read, not a screen a person has to look at.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/silent-auth/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server implements this one.</strong> Unlike
+            <a th:href="@{/stepup}"><code>acr_values</code></a> and
+            <a th:href="@{/freshness}"><code>max_age</code></a>, which it does not read at all,
+            <code>prompt</code> is parsed, validated and acted on: <code>none</code> combined with any
+            other value is <code>invalid_request</code>, a consent screen that would have been shown
+            becomes <code>consent_required</code>, and an unauthenticated request becomes
+            <code>login_required</code>. Of the four values <code>OidcPrompt</code> names, though,
+            only <code>none</code> does anything — the ones that ask the server to <em>start</em> an
+            interaction are accepted and ignored.
+        </p>
+        <p class="hint">
+            <strong>The <code>login_required</code> it implements could never run here.</strong> Its
+            endpoints sit behind <code>anyRequest().authenticated()</code> with a login entry point —
+            the arrangement in its own sample, and in this demo. An unauthenticated request is
+            therefore redirected to the login page several filters before the authorization server
+            sees it, which is exactly what <code>prompt=none</code> forbids: the client asked a
+            question in a hidden iframe and got a login form nobody will ever look at.
+            <code>PromptNoneFilter</code> answers those requests instead, and leaves every other case
+            to the server.
+        </p>
+        <p class="hint">
+            <strong>The last row is two of this demo's own rules colliding.</strong>
+            <code>max_age=0</code> says the session must be newly authenticated;
+            <code>prompt=none</code> says the user may not be asked for anything. Both cannot hold, so
+            the answer is <code>login_required</code> — and the
+            <a th:href="@{/freshness}">freshness filter</a> has to stand down rather than redirect to
+            the login page it would otherwise use. A parameter that enforces something must know
+            about the parameter that forbids the enforcement.
+        </p>
+        <p class="hint">
+            <strong>An error may only be sent where the client registered it.</strong> The filter
+            looks the client up and checks the <code>redirect_uri</code> against the registration
+            before sending anything to it — the same rule the authorization server applies, and the
+            reason a refusal cannot simply be echoed back to whatever URI the request carried.
+            Without that check, an error response is an open redirect.
+        </p>
+        <p class="hint">
+            <strong>Two of the specification's four errors never appear.</strong>
+            <code>interaction_required</code> and <code>account_selection_required</code> are not in
+            Spring Authorization Server at all. The first would be for a server that needs to show
+            something other than a login or a consent screen; the second only means anything where a
+            user can be signed in as several people at once, which is not this server.
+        </p>
+        <p class="hint">
+            <strong>Where this is really used.</strong> A single-page application loads the
+            authorization endpoint in a hidden iframe with <code>prompt=none</code> every few minutes:
+            a code means the session is alive and a fresh token is on its way, and
+            <code>login_required</code> means it is gone and the user has to be sent to sign in. The
+            <a th:href="@{/session-management}">session management page</a> shows the other half of
+            that arrangement — the iframe that says <em>something changed</em>, which is what
+            prompts this request in the first place.
+        </p>
+    </div>
+</main>
+</body>
+</html>

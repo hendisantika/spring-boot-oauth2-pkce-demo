@@ -29,6 +29,7 @@ public record DemoProperties(String issuerUri,
                              Client relayClient,
                              Client mtlsRefreshClient,
                              Client freshnessClient,
+                             Client silentClient,
                              List<DemoUser> demoUsers) {
 
     /**

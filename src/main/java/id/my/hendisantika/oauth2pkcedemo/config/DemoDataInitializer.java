@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
 import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
+import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MixUpController;
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MtlsJwkSetController;
@@ -67,6 +68,7 @@ public class DemoDataInitializer {
             seedRelayClient(registeredClientRepository, passwordEncoder, properties);
             seedMtlsRefreshClient(registeredClientRepository, properties);
             seedFreshnessClient(registeredClientRepository, properties);
+            seedSilentClient(registeredClientRepository, properties);
         };
     }
 
@@ -265,6 +267,36 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered code binding client [{}]", client.clientId());
+    }
+
+    /**
+     * The client the prompt=none probe drives. Consent is required on purpose: silent
+     * authentication turns on whether the user has already agreed, and the page shows both sides of
+     * that.
+     */
+    void seedSilentClient(RegisteredClientRepository registeredClientRepository,
+                          DemoProperties properties) {
+        DemoProperties.Client client = properties.silentClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + SilentAuthController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(true)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered silent client [{}]", client.clientId());
     }
 
     /**

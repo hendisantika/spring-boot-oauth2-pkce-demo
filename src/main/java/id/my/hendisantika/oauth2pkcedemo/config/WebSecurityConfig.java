@@ -67,6 +67,8 @@ public class WebSecurityConfig {
                         // Stands in for a device, which has no session here either.
                         .requestMatchers("/refresh-binding", "/refresh-binding/**").permitAll()
                         .requestMatchers("/mtls-refresh", "/mtls-refresh/**").permitAll()
+                        // Its probe brings its own session; the page itself shows nobody's data.
+                        .requestMatchers("/silent-auth", "/silent-auth/**").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
                         .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/fapi").permitAll()

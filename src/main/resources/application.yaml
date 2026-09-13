@@ -157,6 +157,15 @@ app:
     scopes:
       - openid
       - profile
+  # Consent stays on for this one: the prompt=none page is about the difference between a user who
+  # has already said yes and one who has not.
+  silent-client:
+    registration-id: pkce-silent-client
+    client-id: pkce-silent-client
+    client-name: PKCE Silent Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password
