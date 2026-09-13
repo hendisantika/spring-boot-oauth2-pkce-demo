@@ -61,7 +61,7 @@ public class WebSecurityConfig {
                         .requestMatchers("/device", "/device/**", "/activate", "/par").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
-                        .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json").permitAll()
+                        .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/fapi").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",

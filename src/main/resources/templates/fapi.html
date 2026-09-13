@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('FAPI 2.0')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>FAPI 2.0 security profile</h1>
+    <p class="lead">
+        FAPI 2.0 does not invent anything. It takes the mechanisms on the other pages here and says
+        which combination is mandatory: pushed requests, PKCE, sender-constrained tokens, and client
+        authentication that does not involve a shared secret. This page checks the running
+        configuration against that, and reports what fails.
+    </p>
+
+    <div class="alert" th:if="${serverFailures > 0}">
+        <strong>This demo is not FAPI 2.0 compliant.</strong>
+        <span th:text="${serverFailures} + ' server requirement(s) are not met.'">0</span>
+        They are listed below rather than left out.
+    </div>
+
+    <div class="card">
+        <h2>The authorization server</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:34%">Requirement</th>
+                <th style="width:10%">Result</th>
+                <th>Observed</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="check : ${serverChecks}">
+                <td>
+                    <strong th:text="${check.requirement}">Requirement</strong>
+                    <span class="hint" style="display:block" th:text="${check.reference}">FAPI 2.0</span>
+                </td>
+                <td>
+                    <code th:text="${check.outcome}"
+                          th:style="${check.outcome.name() == 'PASS'} ? 'color:#2f6f4f'
+                                  : (${check.outcome.name() == 'FAIL'} ? 'color:#b3261e' : 'color:#5c6672')">PASS</code>
+                </td>
+                <td><span class="hint" style="color:inherit" th:text="${check.observed}">-</span></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card" th:each="client : ${clientChecks}">
+        <h2 th:text="${client.key}">PKCE Demo Client</h2>
+        <table>
+            <tbody>
+            <tr th:each="check : ${client.value}">
+                <td style="width:34%">
+                    <strong th:text="${check.requirement}">Requirement</strong>
+                    <span class="hint" style="display:block" th:text="${check.reference}">FAPI 2.0</span>
+                </td>
+                <td style="width:10%">
+                    <code th:text="${check.outcome}"
+                          th:style="${check.outcome.name() == 'PASS'} ? 'color:#2f6f4f'
+                                  : (${check.outcome.name() == 'FAIL'} ? 'color:#b3261e' : 'color:#5c6672')">PASS</code>
+                </td>
+                <td><span class="hint" style="color:inherit" th:text="${check.observed}">-</span></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint" th:if="${!compliantClients.isEmpty()}">
+            <strong th:text="${#strings.listJoin(compliantClients, ', ')}">PKCE FAPI Client</strong>
+            meets every client requirement. The others do not, and that is deliberate: each exists to
+            demonstrate a mechanism the profile happens to forbid — a public client with no
+            authentication, a shared secret, tokens that are not sender-constrained.
+        </p>
+        <p class="hint">
+            The server-side failures are real gaps rather than configuration choices. Spring
+            Authorization Server emits no <code>iss</code> in the authorization response (RFC 9207),
+            and has no per-client way to require pushed requests, so a client can always fall back to
+            an ordinary authorization request. Both would need implementing before this server could
+            be certified.
+        </p>
+        <p class="hint">
+            A profile check that only ever passes tells you nothing. This one is worth reading
+            because it fails.
+        </p>
+    </div>
+</main>
+</body>
+</html>
