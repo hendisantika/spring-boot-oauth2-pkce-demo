@@ -8,6 +8,8 @@ import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationProvider;
+import id.my.hendisantika.oauth2pkcedemo.security.RichAuthorizationDetail;
+import id.my.hendisantika.oauth2pkcedemo.security.RichAuthorizationRequestValidator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,6 +25,8 @@ import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.StandardClaimNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
@@ -44,6 +48,7 @@ import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -77,10 +82,18 @@ public class AuthorizationServerConfig {
         http
                 .securityMatcher(authorizationServer.getEndpointsMatcher())
                 .with(authorizationServer, server -> server
-                        .authorizationEndpoint(endpoint -> endpoint.consentPage(CONSENT_PAGE_URI))
+                        .authorizationEndpoint(endpoint -> endpoint
+                                .consentPage(CONSENT_PAGE_URI)
+                                // Nothing in Spring Authorization Server validates RFC 9396
+                                // authorization_details, so this inspects the request before it is
+                                // stored and consented to.
+                                .authorizationRequestConverter(new RichAuthorizationRequestValidator()))
                         // RFC 9126. Off by default, and absent from the discovery document until it
                         // is switched on here.
-                        .pushedAuthorizationRequestEndpoint(Customizer.withDefaults())
+                        .pushedAuthorizationRequestEndpoint(endpoint -> endpoint
+                                // A pushed request carries authorization_details in the push, not in
+                                // the later redirect, so this is where they have to be checked.
+                                .pushedAuthorizationRequestConverter(new RichAuthorizationRequestValidator()))
                         // Lets a public client identify itself with client_id alone at the device
                         // authorization endpoint, which nothing built in covers.
                         .clientAuthentication(clientAuthentication -> clientAuthentication
@@ -163,6 +176,11 @@ public class AuthorizationServerConfig {
                     .map(Object::toString)
                     .collect(Collectors.toCollection(ArrayList::new)));
 
+            // RFC 9396 section 7: echo the approved authorization details into the token, so a
+            // resource server sees what was actually granted rather than only a scope name.
+            richAuthorizationDetails(context).ifPresent(details ->
+                    context.getClaims().claim(RichAuthorizationRequestValidator.AUTHORIZATION_DETAILS, details));
+
             userRepository.findByUsername(user.getUsername()).ifPresent(account -> {
                 // Only release what the user actually consented to.
                 if (context.getAuthorizedScopes().contains(OidcScopes.PROFILE)) {
@@ -175,6 +193,36 @@ public class AuthorizationServerConfig {
                 }
             });
         };
+    }
+
+    /**
+     * Digs the authorization_details out of the stored authorization request. They are kept as a raw
+     * JSON string, so they are parsed back into a list for the claim.
+     */
+    private static Optional<Object> richAuthorizationDetails(JwtEncodingContext context) {
+        OAuth2Authorization authorization = context.getAuthorization();
+        if (authorization == null) {
+            return Optional.empty();
+        }
+        OAuth2AuthorizationRequest authorizationRequest =
+                authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
+        if (authorizationRequest == null) {
+            return Optional.empty();
+        }
+        Object raw = authorizationRequest.getAdditionalParameters()
+                .get(RichAuthorizationRequestValidator.AUTHORIZATION_DETAILS);
+        if (raw == null) {
+            return Optional.empty();
+        }
+        try {
+            // An ArrayList, because the JDBC store's Jackson allow-list rejects immutable lists.
+            return Optional.of(new ArrayList<>(
+                    RichAuthorizationDetail.parse(String.valueOf(raw)).stream()
+                            .map(RichAuthorizationDetail::asClaim)
+                            .toList()));
+        } catch (IllegalArgumentException ex) {
+            return Optional.empty();
+        }
     }
 
     /**

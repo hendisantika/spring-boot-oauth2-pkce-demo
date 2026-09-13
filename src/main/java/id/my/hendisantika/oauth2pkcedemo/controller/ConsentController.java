@@ -1,11 +1,17 @@
 package id.my.hendisantika.oauth2pkcedemo.controller;
 
+import id.my.hendisantika.oauth2pkcedemo.security.RichAuthorizationDetail;
+import id.my.hendisantika.oauth2pkcedemo.security.RichAuthorizationRequestValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsent;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.stereotype.Controller;
@@ -16,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
@@ -35,6 +42,7 @@ public class ConsentController {
 
     private final RegisteredClientRepository registeredClientRepository;
     private final OAuth2AuthorizationConsentService authorizationConsentService;
+    private final OAuth2AuthorizationService authorizationService;
 
     /**
      * Renders the scope approval screen the authorization endpoint redirects to. Submitting the
@@ -79,9 +87,36 @@ public class ConsentController {
         model.addAttribute("state", state);
         model.addAttribute("userCode", userCode);
         model.addAttribute("principalName", principal.getName());
+        // RFC 9396: when the request carried authorization_details, approving a scope name is not
+        // what the user is being asked. Show what was actually requested.
+        model.addAttribute("authorizationDetails", richAuthorizationDetails(state));
         model.addAttribute("scopes", withDescription(scopesToApprove));
         model.addAttribute("previouslyApprovedScopes", withDescription(previouslyApproved));
         return "consent";
+    }
+
+    /**
+     * The consent screen is reached by redirect and only carries the state, so the pending
+     * authorization has to be looked up to find what was requested.
+     */
+    private List<RichAuthorizationDetail> richAuthorizationDetails(String state) {
+        OAuth2Authorization authorization = this.authorizationService.findByToken(
+                state, new OAuth2TokenType(OAuth2ParameterNames.STATE));
+        if (authorization == null) {
+            return List.of();
+        }
+        OAuth2AuthorizationRequest authorizationRequest =
+                authorization.getAttribute(OAuth2AuthorizationRequest.class.getName());
+        if (authorizationRequest == null) {
+            return List.of();
+        }
+        Object raw = authorizationRequest.getAdditionalParameters()
+                .get(RichAuthorizationRequestValidator.AUTHORIZATION_DETAILS);
+        try {
+            return raw == null ? List.of() : RichAuthorizationDetail.parse(String.valueOf(raw));
+        } catch (IllegalArgumentException ex) {
+            return List.of();
+        }
     }
 
     private static Set<ScopeWithDescription> withDescription(Set<String> scopes) {
