@@ -54,6 +54,7 @@ public class DemoDataInitializer {
                     properties.confidentialClient());
             seedAssertionClient(registeredClientRepository, properties);
             seedMtlsClient(registeredClientRepository, properties);
+            seedExchangeClient(registeredClientRepository, passwordEncoder, properties);
         };
     }
 
@@ -131,6 +132,33 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered mTLS client [{}]", client.clientId());
+    }
+
+    /**
+     * A downstream service that exchanges a token it was given for one scoped to its own work. It
+     * also holds the client credentials grant so it can mint an actor token to present alongside,
+     * which is what turns impersonation into delegation.
+     */
+    void seedExchangeClient(RegisteredClientRepository registeredClientRepository,
+                            PasswordEncoder passwordEncoder, DemoProperties properties) {
+        DemoProperties.Client client = properties.exchangeClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .clientSecret(passwordEncoder.encode(client.clientSecret()))
+                .authorizationGrantType(AuthorizationGrantType.TOKEN_EXCHANGE)
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered token exchange client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

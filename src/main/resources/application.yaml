@@ -73,6 +73,16 @@ app:
     client-name: PKCE mTLS Client
     scopes:
       - api.read
+  # A downstream service that trades a user's token for a narrower one of its own,
+  # either impersonating the user or acting on their behalf.
+  exchange-client:
+    registration-id: pkce-exchange-client
+    client-id: pkce-exchange-client
+    client-secret: exchange-secret
+    client-name: PKCE Exchange Client
+    scopes:
+      - api.read
+      - api.write
   demo-users:
     - username: hendi
       password: password
