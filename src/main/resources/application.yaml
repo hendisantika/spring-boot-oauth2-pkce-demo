@@ -1,3 +1,65 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: spring-boot-oauth2-pkce-demo
+
+  datasource:
+    url: jdbc:mysql://localhost:3312/oauth2_pkce_demo?preserveInstants=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    username: pkce
+    password: pkce
+    hikari:
+      pool-name: oauth2-pkce-pool
+      maximum-pool-size: 10
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only checks that the entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  thymeleaf:
+    cache: false
+
+app:
+  # Issuer of the authorization server. The client registration below points at
+  # the same host, so this one app plays both roles. Endpoints are configured
+  # explicitly rather than through issuer-uri discovery, because discovery would
+  # require the server to already be listening while the context is still starting.
+  issuer-uri: http://localhost:8080
+  client:
+    registration-id: pkce-demo-client
+    client-id: pkce-demo-client
+    client-name: PKCE Demo Client
+    scopes:
+      - openid
+      - profile
+      - email
+  demo-users:
+    - username: hendi
+      password: password
+      full-name: Hendi Santika
+      email: hendisantika@gmail.com
+      authorities:
+        - ROLE_ADMIN
+        - ROLE_USER
+    - username: itadmin
+      password: password
+      full-name: IT Administrator
+      email: itadmin@example.com
+      authorities:
+        - ROLE_USER
+
+logging:
+  level:
+    org.springframework.security: INFO
+    id.my.hendisantika.oauth2pkcedemo: DEBUG
