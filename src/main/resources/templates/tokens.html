@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Tokens')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Raw tokens</h1>
+    <p class="lead">Everything this client received from the token endpoint.</p>
+
+    <div class="card" th:if="${pkce}">
+        <h2>Authorization request</h2>
+        <span class="token" th:text="${pkce.authorizationRequestUri}">-</span>
+        <p class="hint">Started at <span th:text="${pkce.startedAt}">-</span></p>
+    </div>
+
+    <div class="card">
+        <h2>ID token (JWT)</h2>
+        <span class="token" th:text="${idTokenValue}">-</span>
+    </div>
+
+    <div class="card">
+        <h2>Access token (JWT)</h2>
+        <span class="token" th:text="${accessToken.tokenValue}">-</span>
+    </div>
+
+    <div class="card" th:if="${refreshToken}">
+        <h2>Refresh token</h2>
+        <span class="token" th:text="${refreshToken.tokenValue}">-</span>
+    </div>
+
+    <div class="card" th:if="${!userInfoClaims.isEmpty()}">
+        <h2>/userinfo response</h2>
+        <table>
+            <tr th:each="claim : ${userInfoClaims}">
+                <th th:text="${claim.key}">sub</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+    </div>
+</main>
+</body>
+</html>

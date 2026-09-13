@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<head th:fragment="head(title)">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${title}">OAuth2 PKCE Demo</title>
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<header class="site" th:fragment="header">
+    <span class="brand">Spring Boot OAuth2 PKCE Demo</span>
+    <nav>
+        <a th:href="@{/}">Home</a>
+        <a th:href="@{/dashboard}" sec:authorize="isAuthenticated()">Dashboard</a>
+        <a th:href="@{/tokens}" sec:authorize="isAuthenticated()">Tokens</a>
+        <form th:action="@{/logout}" method="post" style="display:inline" sec:authorize="isAuthenticated()">
+            <button class="btn secondary" type="submit">Sign out</button>
+        </form>
+    </nav>
+</header>
+</body>
+</html>

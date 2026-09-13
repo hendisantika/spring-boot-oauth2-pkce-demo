@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Dashboard')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1 th:text="'Signed in as ' + ${user.getClaimAsString('preferred_username') ?: user.subject}">Signed in</h1>
+    <p class="lead">The login below completed through Authorization Code + PKCE against this same app.</p>
+
+    <div class="card" th:if="${pkce}">
+        <h2>The PKCE exchange</h2>
+        <table>
+            <tr>
+                <th>code_challenge_method</th>
+                <td><code th:text="${pkce.codeChallengeMethod}">S256</code></td>
+            </tr>
+            <tr>
+                <th>code_challenge</th>
+                <td><code th:text="${pkce.codeChallenge}">-</code></td>
+            </tr>
+            <tr>
+                <th>code_verifier</th>
+                <td><code th:text="${pkce.codeVerifier}">-</code></td>
+            </tr>
+            <tr>
+                <th>state</th>
+                <td><code th:text="${pkce.state}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The challenge travelled in the browser redirect; the verifier never left this app until
+            the token request. The server recomputed SHA-256 of the verifier and compared it to the
+            challenge before releasing a token.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>ID token claims</h2>
+        <table>
+            <tr th:each="claim : ${idTokenClaims}">
+                <th th:text="${claim.key}">sub</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Access token</h2>
+        <table>
+            <tr>
+                <th>Type</th>
+                <td><code th:text="${accessToken.tokenType.value}">Bearer</code></td>
+            </tr>
+            <tr>
+                <th>Scopes</th>
+                <td><code th:text="${#strings.setJoin(accessToken.scopes, ' ')}">openid profile</code></td>
+            </tr>
+            <tr>
+                <th>Expires at</th>
+                <td><code th:text="${accessToken.expiresAt}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            Persisted in the MySQL <code>oauth2_authorized_client</code> table.
+            <a th:href="@{/tokens}">See the raw tokens</a>.
+        </p>
+    </div>
+</main>
+</body>
+</html>

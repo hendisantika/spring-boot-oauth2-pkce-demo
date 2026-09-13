@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Approve access')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main style="max-width:520px">
+    <h1>Approve access</h1>
+    <p class="lead">
+        <strong th:text="${clientName}">PKCE Demo Client</strong> wants to access your account
+        as <strong th:text="${principalName}">user</strong>.
+    </p>
+
+    <div class="card">
+        <form th:action="@{/oauth2/authorize}" method="post">
+            <input type="hidden" name="client_id" th:value="${clientId}">
+            <input type="hidden" name="state" th:value="${state}">
+            <input type="hidden" name="user_code" th:value="${userCode}" th:if="${userCode}">
+
+            <div class="scope" th:each="scope : ${scopes}">
+                <input type="checkbox" name="scope" th:value="${scope.scope}" th:id="${scope.scope}" checked>
+                <label th:for="${scope.scope}" style="margin:0;color:inherit;font-size:15px">
+                    <strong th:text="${scope.scope}">profile</strong>
+                    <span class="hint" style="display:block" th:text="${scope.description}">Read your name.</span>
+                </label>
+            </div>
+
+            <div th:if="${!previouslyApprovedScopes.isEmpty()}" style="margin-top:16px">
+                <p class="hint">Already approved earlier:</p>
+                <div class="scope" th:each="scope : ${previouslyApprovedScopes}">
+                    <input type="checkbox" th:value="${scope.scope}" th:id="'prev-' + ${scope.scope}" checked disabled>
+                    <label th:for="'prev-' + ${scope.scope}" style="margin:0;color:inherit;font-size:15px">
+                        <strong th:text="${scope.scope}">email</strong>
+                        <span class="hint" style="display:block" th:text="${scope.description}">Read your email.</span>
+                    </label>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:10px;margin-top:22px">
+                <button class="btn" type="submit">Allow</button>
+            </div>
+        </form>
+
+        <!-- Denying means posting back with no scope at all, which the authorization endpoint
+             treats as access_denied. -->
+        <form th:action="@{/oauth2/authorize}" method="post" style="margin-top:10px">
+            <input type="hidden" name="client_id" th:value="${clientId}">
+            <input type="hidden" name="state" th:value="${state}">
+            <button class="btn secondary" type="submit">Deny</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

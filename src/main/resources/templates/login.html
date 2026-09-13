@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Sign in')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main style="max-width:420px">
+    <h1>Sign in</h1>
+    <p class="lead">The authorization server needs to know who you are before it can issue a code.</p>
+
+    <div class="alert" th:if="${param.error}">Invalid username or password.</div>
+    <div class="alert" th:if="${param.logout}" style="background:#eef4f0;border-color:#cfe0d6;color:#2f6f4f">
+        You have been signed out.
+    </div>
+
+    <div class="card">
+        <form th:action="@{/login}" method="post">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+            <button class="btn" type="submit" style="width:100%">Sign in</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

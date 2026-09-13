@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('OAuth2 PKCE Demo')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Authorization Code flow with PKCE</h1>
+    <p class="lead">
+        This one application plays both roles: it is the authorization server that issues the
+        tokens, and the public client that logs in against it. The client holds no secret, so the
+        authorization code is bound to the caller with a PKCE code challenge instead.
+    </p>
+
+    <div class="card">
+        <h2>Start the flow</h2>
+        <p class="hint">
+            You will be sent to <code th:text="${issuerUri} + '/oauth2/authorize'">/oauth2/authorize</code>
+            with a <code>code_challenge</code>, asked to sign in, asked to approve the scopes, and
+            redirected back with an authorization code that is only redeemable with the matching
+            <code>code_verifier</code>.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${authorizationRequestUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Demo accounts</h2>
+        <table>
+            <thead>
+            <tr>
+                <th>Username</th>
+                <th>Password</th>
+                <th>Authorities</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="user : ${demoUsers}">
+                <td><code th:text="${user.username}">hendi</code></td>
+                <td><code th:text="${user.password}">password</code></td>
+                <td><span th:text="${#strings.listJoin(user.authorities, ', ')}">ROLE_USER</span></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">Seeded into MySQL on first start, with BCrypt-hashed passwords.</p>
+    </div>
+</main>
+</body>
+</html>
