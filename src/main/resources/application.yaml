@@ -119,6 +119,16 @@ app:
     scopes:
       - openid
       - profile
+  # Holds the initial access token that RFC 7591 section 3 talks about: the credential that lets
+  # something register a new client. Its two scopes are used one at a time, never together.
+  registrar-client:
+    registration-id: pkce-registrar-client
+    client-id: pkce-registrar-client
+    client-secret: registrar-secret
+    client-name: PKCE Registrar Client
+    scopes:
+      - client.create
+      - client.read
   demo-users:
     - username: hendi
       password: password

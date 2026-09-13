@@ -164,7 +164,10 @@ public class AuthorizationServerConfig {
                                 // The same additions again: one server, two documents, and no
                                 // reason for them to disagree.
                                 .providerConfigurationEndpoint(endpoint -> endpoint
-                                        .providerConfigurationCustomizer(serverMetadataCustomizer::customize))))
+                                        .providerConfigurationCustomizer(serverMetadataCustomizer::customize))
+                                // RFC 7591 by way of OpenID Connect Registration. Off by default,
+                                // and absent from both metadata documents until it is switched on.
+                                .clientRegistrationEndpoint(Customizer.withDefaults())))
                 .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
                 // A browser hitting /oauth2/authorize while signed out is sent to the form login,
@@ -237,8 +240,9 @@ public class AuthorizationServerConfig {
      * to both metadata documents.
      */
     @Bean
-    public ServerMetadataCustomizer serverMetadataCustomizer(DemoProperties properties) {
-        return new ServerMetadataCustomizer(properties);
+    public ServerMetadataCustomizer serverMetadataCustomizer(AuthorizationServerSettings settings,
+                                                             DemoProperties properties) {
+        return new ServerMetadataCustomizer(settings, properties);
     }
 
     /** Generated per boot, like the server's own signing key. */

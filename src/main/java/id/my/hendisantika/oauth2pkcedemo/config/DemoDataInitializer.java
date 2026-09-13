@@ -62,6 +62,7 @@ public class DemoDataInitializer {
             seedFapiClient(registeredClientRepository, properties);
             seedCodeBindingClient(registeredClientRepository, properties);
             seedMixUpClient(registeredClientRepository, properties);
+            seedRegistrarClient(registeredClientRepository, passwordEncoder, properties);
         };
     }
 
@@ -292,6 +293,33 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered mix-up client [{}]", client.clientId());
+    }
+
+    /**
+     * The one client allowed to create others. RFC 7591 section 3 leaves the registration endpoint's
+     * protection open: this server requires an access token, and this is what obtains one.
+     */
+    void seedRegistrarClient(RegisteredClientRepository registeredClientRepository,
+                             PasswordEncoder passwordEncoder, DemoProperties properties) {
+        DemoProperties.Client client = properties.registrarClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .clientSecret(passwordEncoder.encode(client.clientSecret()))
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .tokenSettings(TokenSettings.builder()
+                        // Short-lived on purpose: an initial access token is spent as soon as it is
+                        // used, so there is nothing to gain from a long one.
+                        .accessTokenTimeToLive(Duration.ofMinutes(5))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered registrar client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

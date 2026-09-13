@@ -3,6 +3,7 @@ package id.my.hendisantika.oauth2pkcedemo.security;
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationServerMetadata;
 import org.springframework.security.oauth2.server.authorization.oidc.OidcProviderConfiguration;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,9 +28,11 @@ public final class ServerMetadataCustomizer {
     public static final String AUTHORIZATION_DETAILS_TYPES_SUPPORTED =
             "authorization_details_types_supported";
 
+    private final AuthorizationServerSettings settings;
     private final DemoProperties properties;
 
-    public ServerMetadataCustomizer(DemoProperties properties) {
+    public ServerMetadataCustomizer(AuthorizationServerSettings settings, DemoProperties properties) {
+        this.settings = settings;
         this.properties = properties;
     }
 
@@ -56,6 +59,10 @@ public final class ServerMetadataCustomizer {
                        Consumer<Consumer<List<String>>> grantTypes,
                        Consumer<Consumer<List<String>>> scopes) {
         claim.accept(IssuerIdentifierResponseHandler.ISS_PARAMETER_SUPPORTED, true);
+        // RFC 8414 section 2 defines registration_endpoint and Spring Authorization Server puts it
+        // in the OpenID document only, which is the drift this class exists to prevent.
+        claim.accept("registration_endpoint",
+                properties.issuerUri() + settings.getOidcClientRegistrationEndpoint());
         // An ArrayList, because these documents are cached and serialised like any other claims.
         claim.accept(AUTHORIZATION_DETAILS_TYPES_SUPPORTED,
                 new ArrayList<>(RichAuthorizationDetail.SUPPORTED_TYPES));
