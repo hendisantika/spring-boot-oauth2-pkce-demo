@@ -261,6 +261,19 @@ approve it.
 
 ![Approved, with an access token](docs/images/40-ciba-granted.png)
 
+**40. Step-up** — after a password login the token says one factor.
+
+![acr loa:1, amr pwd](docs/images/41-stepup-loa1.png)
+
+**41. Step-up** — asking for a higher level stops the authorization endpoint and collects the
+missing factor.
+
+![The step-up prompt](docs/images/42-stepup-prompt.png)
+
+**42. Step-up** — the new token records both the level and the methods that reached it.
+
+![acr loa:2, amr pwd and otp](docs/images/43-stepup-loa2.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -575,6 +588,37 @@ Two things the demo does that a deployment would not: the approval page is reach
 than a push notification, and running the client and the "phone" in one browser means they share a
 session, which is why the polling endpoint is exempt from CSRF.
 
+## Step-up authentication (acr / amr)
+
+`/stepup` demonstrates authentication levels. A token does not only say *who* the user is — `acr`
+says how strongly they authenticated and `amr` says by what means, so a resource server can insist on
+a level rather than accepting any valid token for everything.
+
+| | `acr` | `amr` |
+|---|---|---|
+| Password only | `urn:demo:loa:1` | `[pwd]` |
+| After the step-up | `urn:demo:loa:2` | `[pwd, otp]` |
+
+A client asks with `acr_values`. If the session falls short, the authorization endpoint saves the
+request, collects the missing factor, and resumes — so the token is only ever issued once the level
+is genuinely met. An existing token is never upgraded in place: raising the level means getting a new
+one.
+
+The levels come from Spring Security 7's `FactorGrantedAuthority`, which records each factor and when
+it was satisfied. The form login contributes `FACTOR_PASSWORD`; the step-up *adds*
+`FACTOR_OTT` rather than replacing the authentication, which is what makes `amr` list both.
+
+Three things worth knowing:
+
+* **`acr_values` is ignored by Spring Authorization Server**, so a filter on the authorization
+  endpoint enforces it. Without it a client could ask for a stronger authentication and be handed a
+  token that quietly says otherwise.
+* **The demo uses the public client, not the PAR one.** A pushed request leaves only a `request_uri`
+  in the browser, so `acr_values` would never reach the endpoint that enforces it — enforcing it for
+  pushed requests means checking at the push, where there is no user session yet.
+* **The one-time code is shown on screen**, because the demo has nowhere to send it. That is the one
+  part that is not faithful: a real second factor lives on a device the user already holds.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -629,7 +673,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── TokenExchangeController.java     /exchange
 │   ├── RichAuthorizationController.java /rar
 │   ├── CibaController.java              /ciba, /ciba/poll, /ciba/approve
-│   └── BackchannelAuthenticationController.java  /backchannel/authenticate
+│   ├── BackchannelAuthenticationController.java  /backchannel/authenticate
+│   └── StepUpController.java            /stepup, /stepup/verify
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -642,7 +687,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MtlsService.java                 calls the TLS endpoint with and without a certificate
 │   ├── TokenExchangeService.java        impersonation, delegation, and one that must fail
 │   ├── CibaService.java                 pending backchannel requests and their outcome
-│   └── CibaClientService.java           the client side: open a request, then poll
+│   ├── CibaClientService.java           the client side: open a request, then poll
+│   └── StepUpService.java               adds a second factor to the session
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -664,7 +710,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── TokenExchangeAttempt.java
     ├── RichAuthorizationDetail.java     parses and summarises authorization_details
     ├── RichAuthorizationRequestValidator.java  refuses types the server does not implement
-    └── Ciba*.java                       the CIBA grant, added to the token endpoint
+    ├── Ciba*.java                       the CIBA grant, added to the token endpoint
+    ├── AuthenticationContextLevel.java  factors in, acr and amr out
+    └── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
