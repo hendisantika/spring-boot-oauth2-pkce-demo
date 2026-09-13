@@ -413,6 +413,16 @@ indistinguishable from where the server is standing.
 
 ![Delegation allowed and refused](docs/images/74-mayact-delegation.png)
 
+**74. Refresh binding** — a DPoP-bound access token *and* a refresh token, issued to a client with
+no credentials.
+
+![What the device was issued](docs/images/75-refresh-binding-issued.png)
+
+**75. Refresh binding** — the wrong key is refused, no key at all is not, and afterwards the right
+key is refused too.
+
+![Three refresh attempts](docs/images/76-refresh-binding-attempts.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -1116,6 +1126,41 @@ The checks read the live configuration (registered clients, authorization server
 than a hand-maintained list, so they stay honest as the demo changes. A profile check that only ever
 passes is worth nothing.
 
+## Refresh token binding
+
+`/refresh-binding` asks whether the *refresh* token is bound to the DPoP key too. RFC 9449 §5 says a
+refresh token issued to a **public** client must be — a client with no credentials has nothing else
+to prove it is the one the token was issued to.
+
+Getting one to ask about takes the device grant: the authorization code grant withholds refresh
+tokens from public clients, so that is the only place here where the question arises. What comes back
+is `token_type: DPoP`, a `cnf.jkt`, and a refresh token. Then, in order:
+
+| Refresh request | Result |
+|---|---|
+| A proof from another key | `400 invalid_dpop_proof` — "jwk header is invalid" |
+| **No proof at all** | `200`, `Bearer`, **no `cnf`** |
+| A proof from the bound key, afterwards | `400 invalid_dpop_proof` — "jkt claim is missing" |
+
+The second row is the gap: `OAuth2RefreshTokenAuthenticationProvider` verifies the proof's key
+against the current access token's `cnf.jkt`, but only *if a proof was sent*. No proof, no
+comparison, and the request is served as though DPoP had never been involved.
+
+The third row is what that costs. **The binding lives on the access token, not on the refresh
+token** — nothing stored says "this refresh token belongs to key K" — so the unbound token issued in
+the second row becomes the one the check reads. Spending the refresh token once without a proof does
+not merely slip past the binding: it removes it, and the client still holding the key is the one
+locked out.
+
+For a confidential client there is nothing to check and that is correct — the secret already says who
+is asking. The rule exists for clients with no credential at all, which is why this page had to reach
+for the device grant to find one.
+
+Asking the question at all needed a small fix: a public client could be *issued* a refresh token by
+the device grant and then had no way to spend it, since nothing in Spring Authorization Server
+authenticates a public client on a refresh request. `DeviceClientAuthenticationConverter` now covers
+that request as well as the two device endpoints.
+
 ## Authorization code binding (`dpop_jkt`)
 
 `/code-binding` demonstrates RFC 9449 section 10. An authorization code is a bearer credential for
@@ -1214,6 +1259,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarJwkSetController.java         /jar-jwks.json, the request object signing key
 │   ├── FapiController.java              /fapi
 │   ├── AuthorizationCodeBindingController.java  /code-binding and its own callback
+│   ├── RefreshTokenBindingController.java  /refresh-binding
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 │   ├── AuthorizationServerMetadataController.java  /metadata
@@ -1240,6 +1286,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── StepUpService.java               adds a second factor to the session
 │   ├── FapiComplianceService.java       checks the configuration against the profile
 │   ├── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
+│   ├── RefreshTokenBindingService.java  device grant with a key, then three refreshes
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1296,6 +1343,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── FrontChannelLogoutRun.java
     ├── OpBrowserState.java              the cookie, and the session_state computed from it
     ├── PendingCodeBinding.java          what the client remembers between the two legs
+    ├── PendingRefreshBinding.java       the device codes, and the key they were asked for with
+    ├── RefreshBindingAttempt.java
+    ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
 
