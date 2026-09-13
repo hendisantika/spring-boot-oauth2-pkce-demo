@@ -28,6 +28,7 @@
         <a th:href="@{/dpop}" sec:authorize="isAuthenticated()">DPoP</a>
         <a th:href="@{/code-binding}">Code binding</a>
         <a th:href="@{/mixup}">Mix-up</a>
+        <a th:href="@{/metadata}">Metadata</a>
         <a th:href="@{/logout-demo}" sec:authorize="isAuthenticated()">Logout</a>
         <form th:action="@{/logout}" method="post" style="display:inline" sec:authorize="isAuthenticated()">
             <button class="btn secondary" type="submit">Sign out</button>

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Authorization server metadata')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>What the server says about itself</h1>
+    <p class="lead">
+        RFC 8414. Everything the other pages configure by hand — endpoints, grant types, which PKCE
+        methods are accepted, whether tokens can be bound to a certificate — is also published as a
+        JSON document at a well-known URL, so a client can be pointed at an issuer and work the rest
+        out. This page reads that document back over HTTP, the way a client would.
+    </p>
+
+    <div class="card">
+        <h2>Two documents, one server</h2>
+        <table>
+            <tr>
+                <th style="width:26%">RFC 8414</th>
+                <td><code th:text="${oauthUri}">-</code>
+                    <span class="hint" style="display:block">
+                        <span th:text="${comparison.oauthFieldCount}">0</span> fields.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>OpenID Connect Discovery</th>
+                <td><code th:text="${oidcUri}">-</code>
+                    <span class="hint" style="display:block">
+                        <span th:text="${comparison.oidcFieldCount}">0</span> fields.
+                    </span></td>
+            </tr>
+        </table>
+        <p class="hint">
+            Different specifications, overlapping content, and no requirement that a server publish
+            both. Here the OpenID document is the larger one: it adds what OpenID Connect defines and
+            OAuth alone has no use for.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Only in the OAuth document</th>
+                <td>
+                    <code th:if="${!comparison.onlyInOauthDocument.isEmpty()}"
+                          th:text="${#strings.listJoin(comparison.onlyInOauthDocument, ', ')}">-</code>
+                    <span class="hint" th:if="${comparison.onlyInOauthDocument.isEmpty()}">nothing</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Only in the OpenID document</th>
+                <td>
+                    <code th:if="${!comparison.onlyInOidcDocument.isEmpty()}"
+                          th:text="${#strings.listJoin(comparison.onlyInOidcDocument, ', ')}">-</code>
+                    <span class="hint" th:if="${comparison.onlyInOidcDocument.isEmpty()}">nothing</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Fields they disagree on</th>
+                <td>
+                    <span th:if="${comparison.consistent()}" style="color:#2f6f4f">none</span>
+                    <code th:unless="${comparison.consistent()}" style="color:#b3261e"
+                          th:text="${#strings.listJoin(comparison.disagreeing, ', ')}">-</code>
+                </td>
+            </tr>
+        </table>
+        <p class="hint">
+            The overlap matters more than the difference. Where both documents name the same field
+            they have to agree, or a client's behaviour depends on which URL it happened to fetch.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>The document, field by field</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Field</th>
+                <th style="width:17%">RFC 8414</th>
+                <th style="width:14%">Defined by</th>
+                <th>Value</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="entry : ${entries}">
+                <td>
+                    <code th:text="${entry.name}">issuer</code>
+                    <span class="hint" style="display:block" th:unless="${entry.inBothDocuments}">
+                        not in the OpenID document
+                    </span>
+                </td>
+                <td>
+                    <span th:text="${entry.requirement}"
+                          th:style="${entry.required()} ? 'color:#2f6f4f;font-weight:600' : ''">-</span>
+                </td>
+                <td><span class="hint" th:text="${entry.definedBy}">-</span></td>
+                <td><code th:text="${entry.value}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            Four fields are all RFC 8414 actually demands: <code>issuer</code>,
+            <code>authorization_endpoint</code>, <code>token_endpoint</code> and
+            <code>response_types_supported</code>. Everything past that is a decade of later
+            specifications each registering what it needed — the device flow, pushed requests, DPoP,
+            certificate binding, rich authorization details — which is why the document is a fair
+            summary of what this demo can do.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>A client reading it</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Attempt</th>
+                <th style="width:10%">Result</th>
+                <th>What happened</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                    <span class="hint" style="display:block">
+                        <code th:text="${attempt.fetchedFrom}">-</code>
+                    </span>
+                </td>
+                <td>
+                    <span th:text="${attempt.accepted} ? 'accepted' : 'rejected'"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}">-</span>
+                    <span class="hint" style="display:block" th:if="${attempt.documentIssuer != null}">
+                        expected <code th:text="${attempt.expectedIssuer}">-</code>,
+                        document says <code th:text="${attempt.documentIssuer}">-</code>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            The second attempt reaches a document that exists and is perfectly valid — it just
+            belongs to someone else. RFC 8414 section 3.3 is one sentence: the <code>issuer</code>
+            returned must be identical to the one the URL was built from, or none of the response may
+            be used. That is the same reasoning as the <a th:href="@{/mixup}">iss parameter</a>, one
+            step earlier in the conversation.
+        </p>
+        <table style="margin-top:14px" th:if="${!configured.isEmpty()}">
+            <tr th:each="endpoint : ${configured}">
+                <th style="width:26%" th:text="${endpoint.key}">token_endpoint</th>
+                <td><code th:text="${endpoint.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            Read from the accepted document rather than configured. This application does not
+            configure its own clients that way, and the reason is worth knowing: a registration with
+            an <code>issuer-uri</code> performs discovery while the context is starting, and the
+            provider it would be discovering is this same application, not yet listening.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Where the document lives</h2>
+        <p class="hint">
+            RFC 8414 section 3 inserts the well-known string <strong>between the host and the
+            path</strong>. OpenID Connect Discovery appends it. For an issuer with no path component
+            the two rules produce the same URL, which is why the difference goes unnoticed until
+            someone deploys a tenant per path.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Issuer</th>
+                <td><code th:text="${tenantedIssuer}">-</code></td>
+            </tr>
+            <tr>
+                <th>RFC 8414</th>
+                <td><code th:text="${tenantedOauthUri}">-</code></td>
+            </tr>
+            <tr>
+                <th>OpenID Connect</th>
+                <td><code th:text="${tenantedOidcUri}">-</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server publishes only what it knows about.</strong> The CIBA
+            grant, the <code>authorization_details</code> types this demo validates, the
+            <code>iss</code> parameter it now returns and the scopes its clients are registered for
+            are all additions made by this application — and they go into both documents, from one
+            place, so the two cannot drift apart.
+        </p>
+        <p class="hint">
+            <strong th:unless="${httpsIssuer}">The issuer here is not an https URL.</strong>
+            <span th:unless="${httpsIssuer}">
+                RFC 8414 section 2 requires one, so a client that enforces the specification would
+                refuse this document before reading a field of it. The same gap the
+                <a th:href="@{/fapi}">FAPI page</a> reports.
+            </span>
+            <span th:if="${httpsIssuer}">The issuer is an https URL, as RFC 8414 section 2 requires.</span>
+        </p>
+        <p class="hint">
+            Metadata is a promise, not proof. Nothing here is signed, and a client that fetched it
+            over a connection it could not trust would be believing whatever it was handed — which is
+            why the transport, and the issuer check above, do the work that the document itself
+            cannot.
+        </p>
+    </div>
+</main>
+</body>
+</html>

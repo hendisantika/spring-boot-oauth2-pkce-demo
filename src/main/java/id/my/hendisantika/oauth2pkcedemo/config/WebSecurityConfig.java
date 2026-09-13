@@ -68,6 +68,8 @@ public class WebSecurityConfig {
                         // Both the client and the rogue authorization server it was pointed at, so
                         // a run can be followed from either side without signing in first.
                         .requestMatchers("/mixup", "/mixup/**").permitAll()
+                        // Reads the published documents back over HTTP, which anyone may do.
+                        .requestMatchers("/metadata").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",
