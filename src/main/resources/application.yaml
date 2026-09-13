@@ -92,6 +92,15 @@ app:
     client-name: PKCE CIBA Client
     scopes:
       - api.read
+  # Shaped to the FAPI 2.0 security profile: no shared secret, PKCE required, and tokens
+  # bound to the client's certificate.
+  fapi-client:
+    registration-id: pkce-fapi-client
+    client-id: pkce-fapi-client
+    client-name: PKCE FAPI Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

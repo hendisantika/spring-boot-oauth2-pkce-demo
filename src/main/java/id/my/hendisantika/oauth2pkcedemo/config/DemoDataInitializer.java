@@ -57,6 +57,7 @@ public class DemoDataInitializer {
             seedMtlsClient(registeredClientRepository, properties);
             seedExchangeClient(registeredClientRepository, passwordEncoder, properties);
             seedCibaClient(registeredClientRepository, passwordEncoder, properties);
+            seedFapiClient(registeredClientRepository, properties);
         };
     }
 
@@ -187,6 +188,41 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered CIBA client [{}]", client.clientId());
+    }
+
+    /**
+     * A client shaped to the FAPI 2.0 security profile, so the compliance page has something that
+     * passes next to the ones that do not: no shared secret, PKCE required, refresh tokens rotated,
+     * and access tokens bound to the client's certificate.
+     */
+    void seedFapiClient(RegisteredClientRepository registeredClientRepository, DemoProperties properties) {
+        DemoProperties.Client client = properties.fapiClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                // The profile permits private_key_jwt or mTLS; a client secret is not an option.
+                .clientAuthenticationMethod(ClientAuthenticationMethod.PRIVATE_KEY_JWT)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(true)
+                        .jwkSetUrl(properties.issuerUri() + ClientJwkSetController.CLIENT_JWK_SET_URI)
+                        .tokenEndpointAuthenticationSigningAlgorithm(SignatureAlgorithm.RS256)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .reuseRefreshTokens(false)
+                        .x509CertificateBoundAccessTokens(true)
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered FAPI client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,
