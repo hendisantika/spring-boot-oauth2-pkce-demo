@@ -11,6 +11,8 @@ import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.Instant;
+import org.springframework.util.StringUtils;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -51,12 +53,31 @@ public class PushedAuthorizationRequestResolver implements OAuth2AuthorizationRe
 
     @Override
     public OAuth2AuthorizationRequest resolve(HttpServletRequest request) {
-        return push(this.delegate.resolve(request), request);
+        return push(withAcrValues(this.delegate.resolve(request), request), request);
     }
 
     @Override
     public OAuth2AuthorizationRequest resolve(HttpServletRequest request, String clientRegistrationId) {
-        return push(this.delegate.resolve(request, clientRegistrationId), request);
+        return push(withAcrValues(this.delegate.resolve(request, clientRegistrationId), request), request);
+    }
+
+    /**
+     * Carries {@code acr_values} from the incoming request onto the authorization request. Spring
+     * builds the request from a fixed set of parameters, so anything else has to be added here or it
+     * simply never reaches the authorization server.
+     */
+    private static OAuth2AuthorizationRequest withAcrValues(OAuth2AuthorizationRequest authorizationRequest,
+                                                            HttpServletRequest request) {
+        String acrValues = request.getParameter(StepUpRequiredFilter.ACR_VALUES);
+        if (authorizationRequest == null || !StringUtils.hasText(acrValues)) {
+            return authorizationRequest;
+        }
+        Map<String, Object> additional =
+                new LinkedHashMap<>(authorizationRequest.getAdditionalParameters());
+        additional.put(StepUpRequiredFilter.ACR_VALUES, acrValues);
+        return OAuth2AuthorizationRequest.from(authorizationRequest)
+                .additionalParameters(additional)
+                .build();
     }
 
     /**
