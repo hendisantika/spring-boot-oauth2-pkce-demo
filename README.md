@@ -444,6 +444,15 @@ neither hash.
 
 ![The claim that is not there](docs/images/80-idtoken-missing-at-hash.png)
 
+**80. Step-up challenge** — the resource server refuses a token that was not earned strongly enough,
+and names the level it wants.
+
+![The RFC 9470 challenge](docs/images/81-stepup-challenge.png)
+
+**81. Step-up challenge** — the same call after the step-up. Same client, same endpoint, same user.
+
+![The loop closes](docs/images/82-stepup-loop-closed.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -968,6 +977,49 @@ Three things worth knowing:
 * **The one-time code is shown on screen**, because the demo has nowhere to send it. That is the one
   part that is not faithful: a real second factor lives on a device the user already holds.
 
+The client here decides in advance that it wants a stronger authentication. For the case where it
+does not know until it is refused, see [the step-up challenge](#step-up-challenge-rfc-9470).
+
+## Step-up challenge (RFC 9470)
+
+`/stepup-challenge` is the other half of the page above, and the half that happens in practice. There
+the client decides in advance that it wants a stronger authentication; here it has no idea, calls the
+operation with the token it holds, and the **resource server** tells it what is missing.
+
+`/resource/transfer` has its own resource server chain: an ordinary bearer token, then a look at the
+`acr` claim on it.
+
+| Called with | Result |
+|---|---|
+| A token carrying `urn:demo:loa:1` | `401` + `WWW-Authenticate: Bearer error="insufficient_user_authentication", acr_values="urn:demo:loa:2", max_age="300"` |
+| The same call after re-authorizing | `200`, and the body echoes `acr: urn:demo:loa:2`, `amr: [pwd, otp]` |
+
+In between, the client does the only thing the challenge leaves it: starts a new authorization
+request carrying the `acr_values` it was handed — read off the header, not chosen by the page — which
+runs into the enforcement filter from the section above and collects the second factor.
+
+Notes:
+
+* **Spring Security writes no such challenge.** The string `insufficient_user_authentication` appears
+  in no Spring Security 7.1.1 module. `BearerTokenAccessDeniedHandler` answers `403` with
+  `insufficient_scope` (RFC 6750 §3.1), which is right for a missing scope and wrong here: a scope is
+  granted once and the user cannot fix it by trying harder, while an authentication level can be
+  raised by asking for one more factor. The status carries that difference — `401` says authenticate
+  again, `403` says do not bother. `InsufficientUserAuthenticationHandler` exists because nothing
+  shipped does this; a test pins both behaviours side by side.
+* **The challenge is the only way the client could know.** Without it a refusal is a dead end:
+  retrying is pointless and re-authorizing blindly means guessing which of the server's levels was
+  meant. RFC 9470 §3 defines exactly `acr_values` and `max_age` for that reason.
+* **The client's record of the challenge cannot live in the session.** Acting on it starts a new
+  authorization request, and `RestartOAuth2LoginFilter` invalidates the session when it does — so the
+  run is kept per user in the service instead. That is not a workaround: a challenge is the client's
+  own state, and a real client would not keep it where the authorization server's login could discard
+  it either.
+* **`max_age` is sent and not enforced.** RFC 9470 lets a resource server say how fresh it wants the
+  authentication to be, and the challenge carries it. Spring Authorization Server has no `max_age`
+  handling at all — the parameter appears nowhere in its sources — so passing it on would change
+  nothing, and the page does not pretend the round trip refreshes anything but the `acr`.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -1342,6 +1394,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 ├── config/
 │   ├── AuthorizationServerConfig.java   filter chain 1 — /oauth2/**, /userinfo, JWKs, claims
 │   ├── WebSecurityConfig.java           filter chain 2 — login form, oauth2Login, client registration
+│   ├── StrongResourceSecurityConfig.java  /resource/** — a bearer token, then a look at its acr
 │   ├── DemoDataInitializer.java         seeds users + the PKCE client (idempotent)
 │   └── DemoProperties.java              typed binding for the `app.*` properties
 │   ├── OAuth2LoginRequiredInterceptor.java  keeps form-login-only sessions off the demo pages
@@ -1372,6 +1425,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RefreshTokenBindingController.java  /refresh-binding
 │   ├── MtlsRefreshController.java       /mtls-refresh
 │   ├── IdTokenBindingController.java    /idtoken-binding
+│   ├── StepUpChallengeController.java   /stepup-challenge
+│   ├── StrongResourceController.java    /resource/transfer, the operation being protected
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 │   ├── AuthorizationServerMetadataController.java  /metadata
@@ -1401,6 +1456,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RefreshTokenBindingService.java  device grant with a key, then three refreshes
 │   ├── MtlsRefreshService.java          device grant over mTLS, then three connections
 │   ├── IdTokenBindingService.java       the session's ID token, presented five ways
+│   ├── StepUpChallengeService.java      calls the operation, keeps the challenge it was given
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1463,6 +1519,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── MtlsRefreshRun.java              what was issued, and how the three attempts went
     ├── IdTokenCheck.java                one way of presenting an ID token, and what decided it
     ├── IdTokenBindingRun.java           the claims, the hashes that are not there, the checks
+    ├── StepUpChallenge.java             a WWW-Authenticate header, read the way a client reads it
+    ├── InsufficientUserAuthenticationHandler.java  the 401 Spring Security does not write
+    ├── ResourceCallAttempt.java         one call to the protected operation
+    ├── StepUpChallengeRun.java          the calls so far, and the challenge still outstanding
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
