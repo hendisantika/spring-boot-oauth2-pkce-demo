@@ -87,10 +87,12 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     void theCheckerReportsTheServerGapsRatherThanHidingThem() {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
 
-        // The three known gaps: no RFC 9207 iss, no per-client PAR requirement, and plain HTTP.
-        assertThat(failures(checks)).isEqualTo(3);
-        assertThat(checks).anySatisfy(check ->
-                assertThat(check.requirement()).contains("iss"));
+        // The two that remain: no per-client PAR requirement, and plain HTTP.
+        assertThat(failures(checks)).isEqualTo(2);
+        assertThat(checks).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("pushed authorization requests");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+        });
     }
 
     @Test
@@ -98,7 +100,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
 
         for (String requirement : List.of("Pushed authorization requests", "PKCE S256",
-                "Sender-constrained tokens", "private_key_jwt and mTLS")) {
+                "Sender-constrained tokens", "private_key_jwt and mTLS", "carries iss")) {
             assertThat(checks)
                     .as("requirement containing '%s'", requirement)
                     .anySatisfy(check -> {

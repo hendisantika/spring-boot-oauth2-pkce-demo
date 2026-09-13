@@ -8,6 +8,7 @@ import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
 import id.my.hendisantika.oauth2pkcedemo.security.AuthenticationContextLevel;
 import org.springframework.security.core.Authentication;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
@@ -103,6 +104,7 @@ public class AuthorizationServerConfig {
             JWKSource<SecurityContext> jwkSource,
             OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer,
             JarRequestSigner jarRequestSigner,
+            IssuerIdentifierResponseHandler issuerIdentifierResponseHandler,
             DemoProperties properties) throws Exception {
         // A generator of its own rather than a shared bean. Supplying an OAuth2TokenGenerator bean
         // replaces the one Spring Authorization Server assembles internally, and that one carries
@@ -121,7 +123,12 @@ public class AuthorizationServerConfig {
                                 // Nothing in Spring Authorization Server validates RFC 9396
                                 // authorization_details, so this inspects the request before it is
                                 // stored and consented to.
-                                .authorizationRequestConverter(new RichAuthorizationRequestValidator()))
+                                .authorizationRequestConverter(new RichAuthorizationRequestValidator())
+                                // RFC 9207. The built-in handlers send code and state and stop
+                                // there, leaving a client that talks to several authorization
+                                // servers unable to tell which one answered.
+                                .authorizationResponseHandler(issuerIdentifierResponseHandler)
+                                .errorResponseHandler(issuerIdentifierResponseHandler))
                         // RFC 9126. Off by default, and absent from the discovery document until it
                         // is switched on here.
                         .pushedAuthorizationRequestEndpoint(endpoint -> endpoint
@@ -147,7 +154,13 @@ public class AuthorizationServerConfig {
                         .tokenEndpoint(endpoint -> endpoint
                                 .accessTokenRequestConverter(new CibaAuthenticationConverter())
                                 .authenticationProvider(cibaAuthenticationProvider))
-                        .oidc(Customizer.withDefaults()))
+                        .oidc(oidc -> oidc
+                                // RFC 9207 section 3: say so, or a client has no way to know it may
+                                // insist on the parameter.
+                                .providerConfigurationEndpoint(endpoint -> endpoint
+                                        .providerConfigurationCustomizer(configuration -> configuration
+                                                .claim(IssuerIdentifierResponseHandler.ISS_PARAMETER_SUPPORTED,
+                                                        true)))))
                 .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
                 // A browser hitting /oauth2/authorize while signed out is sent to the form login,
@@ -203,6 +216,16 @@ public class AuthorizationServerConfig {
         } catch (java.text.ParseException ex) {
             throw new IllegalStateException("Unable to read the request object signing keys", ex);
         }
+    }
+
+    /**
+     * A bean rather than an inline handler, so that anything asking whether this server identifies
+     * its authorization responses - the FAPI compliance page does - is asking about the object that
+     * actually sends them.
+     */
+    @Bean
+    public IssuerIdentifierResponseHandler issuerIdentifierResponseHandler(DemoProperties properties) {
+        return new IssuerIdentifierResponseHandler(properties.issuerUri());
     }
 
     /** Generated per boot, like the server's own signing key. */

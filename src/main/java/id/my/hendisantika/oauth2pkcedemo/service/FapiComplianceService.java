@@ -2,7 +2,9 @@ package id.my.hendisantika.oauth2pkcedemo.service;
 
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
+import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -37,6 +39,8 @@ public class FapiComplianceService {
 
     private final RegisteredClientRepository registeredClientRepository;
     private final AuthorizationServerSettings settings;
+    /** The handler that actually sends authorization responses, so the check below is about it. */
+    private final ObjectProvider<IssuerIdentifierResponseHandler> issuerIdentifierResponseHandler;
     private final DemoProperties properties;
 
     /**
@@ -66,12 +70,15 @@ public class FapiComplianceService {
                 "FAPI 2.0 §5.3.1",
                 "No registered client holds either, and Spring Authorization Server implements neither"));
 
-        // Honest failures follow. A profile check that only ever passes is worth nothing.
-        checks.add(FapiCheck.fail("The authorization response carries iss",
-                "FAPI 2.0 §5.3.1, RFC 9207",
-                "Spring Authorization Server does not emit the iss parameter, so a client here "
-                        + "cannot detect a mix-up attack from the response alone"));
+        checks.add(FapiCheck.of(issuerIdentifierResponseHandler.getIfAvailable() != null,
+                "The authorization response carries iss", "FAPI 2.0 §5.3.1, RFC 9207",
+                issuerIdentifierResponseHandler.getIfAvailable() != null
+                        ? "IssuerIdentifierResponseHandler sends every authorization response, and "
+                        + IssuerIdentifierResponseHandler.ISS_PARAMETER_SUPPORTED
+                        + " is published in the discovery document"
+                        : "Spring Authorization Server does not emit the iss parameter on its own"));
 
+        // Honest failures follow. A profile check that only ever passes is worth nothing.
         checks.add(FapiCheck.fail("The server requires pushed authorization requests",
                 "FAPI 2.0 §5.3.1",
                 "ClientSettings has no require_pushed_authorization_requests, so a client may still "
