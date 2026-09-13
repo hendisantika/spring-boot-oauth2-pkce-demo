@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Certificate-bound tokens')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Certificate-bound tokens (mTLS)</h1>
+    <p class="lead">
+        RFC 8705. The client proves who it is by presenting a TLS client certificate — nothing in the
+        request body is a credential at all. The token that comes back is bound to that certificate,
+        so it only works over a connection presenting the same one.
+    </p>
+
+    <div class="card">
+        <h2>How this client is registered</h2>
+        <table>
+            <tr>
+                <th>client_id</th>
+                <td><code th:text="${clientId}">pkce-mtls-client</code></td>
+            </tr>
+            <tr>
+                <th>Authentication</th>
+                <td>
+                    <code>self_signed_tls_client_auth</code>
+                    <span class="hint" style="display:block">
+                        The certificate is self-signed and matched against the client's published
+                        JWK Set, so there is no CA to run.
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>Certificate subject</th>
+                <td><code th:text="${subjectDn}">CN=pkce-mtls-client</code></td>
+            </tr>
+            <tr>
+                <th>Thumbprint (x5t#S256)</th>
+                <td><code th:text="${thumbprint}">-</code></td>
+            </tr>
+            <tr>
+                <th>jwkSetUrl</th>
+                <td><a th:href="@{${jwkSetUri}}" th:text="${jwkSetUri}">/mtls-jwks.json</a></td>
+            </tr>
+            <tr>
+                <th>Token endpoint</th>
+                <td>
+                    <code th:text="${tokenEndpoint}">https://localhost:8443/oauth2/token</code>
+                    <span class="hint" style="display:block">
+                        A second listener, because the rest of the demo runs on plain HTTP and only
+                        this flow needs a TLS handshake. It <em>asks</em> for a certificate rather
+                        than demanding one, so the failing case is refused by the token endpoint
+                        instead of dropped at the connection.
+                    </span>
+                </td>
+            </tr>
+        </table>
+
+        <form th:action="@{/mtls}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Request a token twice</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${attempts != null}">
+        <h2>Results</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Attempt</th>
+                <th style="width:12%">Status</th>
+                <th>Response</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">Presenting the client certificate</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">200</code>
+                </td>
+                <td>
+                    <code th:text="${attempt.outcome}">-</code>
+                    <span class="hint" style="display:block" th:if="${attempt.boundThumbprint != null}">
+                        <code>cnf.x5t#S256</code> =
+                        <code th:text="${attempt.boundThumbprint}">-</code>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            Both requests send exactly the same form. The only difference is the TLS handshake, which
+            is the point: the credential never appears in anything the application layer can leak.
+        </p>
+        <p class="hint">
+            The <code>cnf.x5t#S256</code> above is the certificate thumbprint from the registration
+            table — the authorization server put it in the token, tying that token to this
+            certificate.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>What the binding buys</h2>
+        <p class="hint">
+            The issued token carries <code>cnf.x5t#S256</code> — the SHA-256 of the client's
+            certificate, the same value shown above. A resource server that honours the binding will
+            compare it against the certificate on its own TLS connection, so a copied token is
+            useless without the private key behind that certificate.
+        </p>
+        <p class="hint">
+            This is the same idea as DPoP, moved down a layer: DPoP proves possession of a key with a
+            signed header, mTLS proves it with the transport. DPoP needs nothing from the network
+            path; mTLS needs TLS to reach the application intact.
+        </p>
+    </div>
+</main>
+</body>
+</html>

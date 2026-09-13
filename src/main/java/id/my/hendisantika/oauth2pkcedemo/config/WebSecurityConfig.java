@@ -61,7 +61,7 @@ public class WebSecurityConfig {
                         .requestMatchers("/device", "/device/**", "/activate", "/par").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
-                        .requestMatchers("/assertion", "/client-jwks.json").permitAll()
+                        .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json").permitAll()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage(LOGIN_PAGE_URI)
