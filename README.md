@@ -378,6 +378,20 @@ access tokens.
 
 ![The session ended and the logout token](docs/images/66-backchannel-session.png)
 
+**66. Front-channel logout** — one URI per client, and only the one that asked for it is told which
+session.
+
+![The front-channel targets](docs/images/67-frontchannel-targets.png)
+
+**67. Front-channel logout** — the whole of what the server renders: iframes, and nothing else.
+
+![The logout document](docs/images/68-frontchannel-document.png)
+
+**68. Front-channel logout** — the same URIs without cookies, and one that never arrives. All
+indistinguishable from where the server is standing.
+
+![The cookie-less probes](docs/images/69-frontchannel-probes.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -391,6 +405,47 @@ there is a second, confidential client; PKCE applies to it just the same.
 
 Refresh tokens are rotated (`reuseRefreshTokens(false)`), so replaying an old one fails — which is
 how a server notices a stolen token.
+
+## Front-channel logout
+
+`/frontchannel-logout` is the other way of telling several clients that a session ended: instead of
+the server calling each one, it renders a page of hidden iframes and lets the browser load them. Each
+arrives at a client carrying *that client's* cookies — the one thing a server-to-server call can
+never do, and the reason this mechanism fails quietly.
+
+The page builds the document, renders it for real (the iframes end your session as they load), and
+then fetches the same URIs from the server, without cookies:
+
+| Request | Status | Answer |
+|---|---|---|
+| A client's URI, no cookie attached | `200` | `no session to end` |
+| The other client's URI, no cookie | `200` | `no session to end` |
+| A host that refuses the connection | — | the request never arrived |
+
+Nothing there is malformed. The clients simply cannot tell who is asking, end nothing, and answer
+`200` — and the last one is never delivered at all. **None of which the server can see**: it rendered
+an iframe. A logout that worked, one that silently did nothing, and one that never arrived are the
+same picture from where it stands.
+
+Notes:
+
+* **Neither half exists in Spring.** Spring Authorization Server renders no logout iframes and holds
+  no `frontchannel_logout_uri`; Spring Security has no endpoint to receive one. Both sides are
+  written out here — compare [back-channel logout](#back-channel-logout), where Spring Security had
+  the receiving half already.
+* **Only a client that registers `frontchannel_logout_session_required` is told which session.** It
+  gets `iss` and `sid` on the query string; one that does not has to guess, usually by ending
+  whatever session the cookie identifies — wrong the moment a user has two.
+* **Third-party cookies are what this runs on.** Every iframe is a cross-site request to that client,
+  and browsers have spent years making those arrive without cookies. It works in this demo only
+  because every client shares an origin with the server.
+* **The server had to allow framing.** Spring Security sends `X-Frame-Options: DENY` by default,
+  which would stop the browser loading any of it.
+
+Four logouts now, and only one of them can be checked: [local and RP-initiated](#logout) end one
+session each, [revocation](#revocation-on-logout) ends the tokens,
+[back-channel](#back-channel-logout) tells other clients and gets an answer, front-channel tells them
+and does not.
 
 ## Back-channel logout
 
@@ -1084,7 +1139,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── AuthorizationServerMetadataController.java  /metadata
 │   ├── DynamicClientRegistrationController.java   /dynamic-registration
 │   ├── LogoutRevocationController.java   /logout-revocation
-│   └── BackChannelLogoutController.java  /backchannel-logout
+│   ├── BackChannelLogoutController.java  /backchannel-logout
+│   ├── FrontChannelLogoutController.java /frontchannel-logout
+│   └── ClientFrontChannelLogoutController.java  the client endpoint the iframes load
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -1106,7 +1163,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
 │   ├── DynamicClientRegistrationService.java  registers a client, and fails to five ways
 │   ├── LogoutRevocationService.java     signs out, then looks at the tokens
-│   └── BackChannelLogoutService.java    mints logout tokens and posts them
+│   ├── BackChannelLogoutService.java    mints logout tokens and posts them
+│   └── FrontChannelLogoutService.java   builds the iframe document, and probes it
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -1151,6 +1209,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── LogoutTokenFactory.java          signs logout tokens, and one that must not verify
     ├── BackChannelAttempt.java
     ├── BackChannelLogoutRun.java
+    ├── FrontChannelLogoutTarget.java    one client's front-channel URI
+    ├── FrontChannelProbe.java
+    ├── FrontChannelLogoutRun.java
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
