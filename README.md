@@ -61,6 +61,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-code-binding-client` | none (public) | required | n/a | code | no |
 | `pkce-mixup-client` | none (public) | required | n/a | code | no |
 | `pkce-registrar-client` | `client_secret_basic` | n/a | n/a | client credentials | no |
+| `pkce-relay-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
 
 ## What the flow looks like
 
@@ -403,6 +404,14 @@ indistinguishable from where the server is standing.
 **71. Session management** — and after something changed the session at the provider.
 
 ![changed](docs/images/72-session-changed.png)
+
+**72. Token exchange** — impersonation refused, because the user's token says who may act.
+
+![Impersonation refused by may_act](docs/images/73-mayact-impersonation.png)
+
+**73. Token exchange** — delegation by the named service, and the same exchange by another.
+
+![Delegation allowed and refused](docs/images/74-mayact-delegation.png)
 
 ## Refresh tokens and public clients
 
@@ -792,21 +801,38 @@ intact.
 own rather than passing the original onwards — which would hand every downstream hop everything the
 user ever granted.
 
-Starting from a token scoped `openid profile email` and issued to the front end, the page runs three
-exchanges:
+The user's access token carries **`may_act`** (RFC 8693 §4.4): a statement by the authorization
+server naming who is allowed to become the actor for this subject. Everything the page does follows
+from it:
 
 | | Result |
 |---|---|
-| **Impersonation** — no actor token | `200`. `sub` is still the user, `aud` is now the service, scope is down to `api.read`. No `act` claim, so nothing downstream can tell this from the user calling directly. |
-| **Delegation** — the service's own token attached as `actor_token` | `200`, and the token carries `act: {sub: pkce-exchange-client}`. Still speaks for the user, but records who is speaking. |
-| **Asking for more than it may have** | `400 invalid_scope`. A service cannot exchange its way into privileges its own registration does not allow, however broad the token it was handed. |
+| **Impersonation** — no actor token | `400 invalid_grant`. Not because the caller was wrong — it was the named one — but because it brought no actor token at all. |
+| **Delegation by the service the token names** | `200`, and the token carries `act: {iss, sub: pkce-exchange-client}`. |
+| **Delegation by another service** | `400 invalid_grant`. Its own registration holds the token exchange grant; what it lacks is this user's token naming it. |
+| **Asking for more than it may have** | `400 invalid_scope`. A service cannot exchange its way into privileges its own registration does not allow. |
+
+**`may_act` does not merely restrict impersonation — it abolishes it.** A subject token that names
+who may act cannot be exchanged by somebody acting anonymously, so the only way through is delegation,
+and delegation leaves an `act` claim behind for an audit log downstream to read. That is the whole
+argument for setting it: impersonation is exactly the case where nothing downstream can tell the
+service from the user.
 
 `sub` never changes — the exchange does not change who the call is *for*. What changes is the
 audience and the scope, so a leak at the downstream service costs less than a leak of the original
-token. Delegation is usually the better default, because `act` is what lets an audit log downstream
-tell the two apart.
+token.
 
-The grant is given only to the exchange client. The browser-facing clients do not have it: exchanging
+Two things worth knowing:
+
+* **`may_act.iss` must be a `java.net.URL`, not a `String`.** Spring Authorization Server compares
+  `may_act` against the actor token claim by claim with `Objects.equals`, and an issued token's `iss`
+  claim is a `URL` by the time it is stored, because `JwtClaimsSet` converts it. A string refuses
+  every exchange with `invalid_grant` — indistinguishable from naming the wrong party. Found by
+  watching the delegation case fail when it should not have.
+* **Authority to exchange is not authority to act for a person.** `pkce-relay-client` exists to make
+  that concrete: same grants, same registration quality, refused all the same.
+
+The grant is given only to those two services. The browser-facing clients do not have it: exchanging
 is what a downstream service does with a token it received, not something a front end needs.
 
 ## Rich authorization requests
