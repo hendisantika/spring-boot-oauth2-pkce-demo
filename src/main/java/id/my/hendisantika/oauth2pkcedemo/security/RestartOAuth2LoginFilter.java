@@ -10,10 +10,12 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 /**
  * Created by IntelliJ IDEA.
@@ -27,8 +29,19 @@ import java.io.IOException;
 @Slf4j
 public class RestartOAuth2LoginFilter extends OncePerRequestFilter {
 
-    private final RequestMatcher authorizationRequestMatcher =
-            PathPatternRequestMatcher.withDefaults().matcher("/oauth2/authorization/**");
+    private final RequestMatcher authorizationRequestMatcher;
+
+    /**
+     * @param authorizationRequestPatterns every URI from which this application starts an
+     *                                     authorization request - Spring's own client endpoint, and
+     *                                     the demo pages that build a request themselves
+     */
+    public RestartOAuth2LoginFilter(String... authorizationRequestPatterns) {
+        this.authorizationRequestMatcher = new OrRequestMatcher(
+                Arrays.stream(authorizationRequestPatterns)
+                        .map(pattern -> PathPatternRequestMatcher.withDefaults().matcher(pattern))
+                        .toList());
+    }
 
     /**
      * Client and authorization server run in one application and therefore share one
@@ -40,8 +53,9 @@ public class RestartOAuth2LoginFilter extends OncePerRequestFilter {
      * "authenticationTime cannot be null" and the user gets a 500.
      * <p>
      * Reachable by signing in, then starting any login again - switching between the two demo
-     * clients, or simply pressing the sign-in button twice. Clear the session and let the flow begin
-     * from a clean slate.
+     * clients, pressing the sign-in button twice, or starting a run on the code binding page while
+     * a login from elsewhere is still in the session. Clear the session and let the flow begin from
+     * a clean slate.
      */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,

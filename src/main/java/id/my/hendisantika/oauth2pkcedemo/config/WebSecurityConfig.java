@@ -84,8 +84,11 @@ public class WebSecurityConfig {
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new LoginUrlAuthenticationEntryPoint(authorizationRequestUri)))
                 // Must run before the redirect filter builds a second authorization request on top
-                // of an existing OAuth2 authentication.
-                .addFilterBefore(new RestartOAuth2LoginFilter(), OAuth2AuthorizationRequestRedirectFilter.class)
+                // of an existing OAuth2 authentication. /code-binding/start is listed too: it builds
+                // its authorization request by hand and would otherwise hit the same 500.
+                .addFilterBefore(
+                        new RestartOAuth2LoginFilter("/oauth2/authorization/**", "/code-binding/start"),
+                        OAuth2AuthorizationRequestRedirectFilter.class)
                 // Both stand in for calls the client's backend makes machine-to-machine, where no
                 // browser session exists to carry a CSRF token. /ciba/poll also has to survive the
                 // user signing in elsewhere in the same browser, which rotates the shared session's

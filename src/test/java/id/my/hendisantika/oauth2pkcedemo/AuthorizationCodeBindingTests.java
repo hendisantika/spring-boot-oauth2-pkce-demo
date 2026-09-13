@@ -40,8 +40,10 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oauth2Login;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -193,6 +195,19 @@ class AuthorizationCodeBindingTests extends AbstractMySqlIntegrationTest {
     @Test
     void theCodeBindingPageIsReachableWithoutSigningIn() throws Exception {
         mockMvc().perform(get("/code-binding")).andExpect(status().isOk());
+    }
+
+    /**
+     * Client and authorization server share a session here, and an authorization request made on
+     * top of an existing OAuth2 login cannot produce an {@code auth_time} - it fails with a 500 when
+     * the ID token is minted. Starting a run therefore sends the visitor back through a fresh login
+     * rather than borrowing the one already in the session.
+     */
+    @Test
+    void aRunStartedOnTopOfAnExistingOAuth2LoginBeginsAgain() throws Exception {
+        mockMvc().perform(get("/code-binding/start?bind=true").with(oauth2Login()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/code-binding/start?bind=true"));
     }
 
     /**
