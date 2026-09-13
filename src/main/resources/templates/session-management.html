@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Session management')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Asking whether the session is still there</h1>
+    <p class="lead">
+        OpenID Connect Session Management. A client that wants to know whether the user is still
+        signed in at the provider could re-authenticate with <code>prompt=none</code> every few
+        seconds, and generate a request every time. This does it without any: the provider serves a
+        page, the client embeds it in a hidden iframe, and the two talk by <code>postMessage</code>.
+        Nothing below reaches the server at all.
+    </p>
+
+    <div class="card" th:unless="${signedIn}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Sign in first</h2>
+        <p class="hint">
+            The session state is computed from the client the session belongs to, so there has to be
+            one. Everything below still works signed out — it simply always answers
+            <code>changed</code>, which is its own kind of demonstration.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${loginUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>What the session state is made of</h2>
+        <table>
+            <tr>
+                <th style="width:26%">client_id</th>
+                <td><code th:text="${clientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>origin</th>
+                <td><code th:text="${origin}">-</code>
+                    <span class="hint" style="display:block">
+                        RFC 6454: scheme, host and port of where the authorization response went.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>OP browser state</th>
+                <td><code th:text="${browserState}">-</code>
+                    <span class="hint" style="display:block">
+                        A cookie named <code th:text="${cookieName}">op_browser_state</code>, readable
+                        by script, which is how the provider's iframe can see it.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>salt</th>
+                <td><code th:text="${salt}">-</code></td>
+            </tr>
+            <tr>
+                <th>session_state</th>
+                <td><code th:text="${sessionState}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            <code>SHA-256(client_id + " " + origin + " " + browser state + " " + salt) + "." +
+            salt</code>, which is section 3.2's own pseudo-code. The salt travels with the value so
+            that the browser can recompute it later; the browser state never leaves the provider's
+            origin.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>The two iframes, talking</h2>
+        <p class="hint">
+            The provider's iframe is below — it is loaded, invisible, and this page posts
+            <code th:text="'&quot;' + ${clientId} + ' &lt;session_state&gt;&quot;'">-</code> to it
+            every five seconds.
+        </p>
+        <div id="rp-iframe-config"
+             th:data-client-id="${clientId}"
+             th:data-session-state="${sessionState}"
+             th:data-op-origin="${origin}"></div>
+        <iframe id="op-iframe" th:src="${checkSessionUri}" style="display:none" title="OP iframe"></iframe>
+
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Last answer</th>
+                <td><code id="session-status">waiting…</code></td>
+            </tr>
+        </table>
+        <p style="margin-top:16px">
+            <a class="btn secondary" href="#" id="poll-now">Poll now</a>
+            <a class="btn secondary" href="#" id="send-rubbish" style="margin-left:8px">Send a malformed message</a>
+        </p>
+        <form th:action="@{/session-management/change}" method="post" id="change-state"
+              style="margin-top:10px">
+            <button class="btn" type="submit">Change the session at the provider</button>
+        </form>
+        <p class="hint" style="margin-top:14px">
+            The last button stands in for whatever else would change it — a sign-out in another tab,
+            a different user, an administrator ending the session. It does not reload this page, on
+            purpose: a client goes on holding the session state it was given, and finding that the
+            provider no longer agrees is the entire point. What it will not tell you is
+            <em>which</em> of those things happened; that is what the <code>prompt=none</code> round
+            trip is for.
+        </p>
+        <div id="session-log" class="token" style="margin-top:14px;max-height:16em;overflow:auto"></div>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Neither half exists in Spring.</strong> Spring Authorization Server emits no
+            <code>session_state</code> and serves no <code>check_session_iframe</code>; Spring
+            Security's client has no field for the parameter and drops it, as it dropped
+            <a th:href="@{/mixup}"><code>iss</code></a>. Both halves are written out here — the
+            iframe's script is section 3.2's pseudo-code, and the page's is section 3.1's.
+        </p>
+        <p class="hint">
+            <strong>The cookie has to be readable by script.</strong> The provider's iframe recomputes
+            the hash in the browser, so the browser state cannot be
+            <code>HttpOnly</code>. It is only a random value — it identifies no one and grants
+            nothing — but it is a cookie that script can read, and that has to be a deliberate
+            decision rather than an oversight.
+        </p>
+        <p class="hint">
+            <strong>Section 5.1 is unusually frank.</strong> The specification notes that browsers
+            blocking third-party content can leave the iframe unable to read that cookie, in which
+            case it answers <code>changed</code> every time — and a client that obeys the
+            specification then re-authenticates every time, "resulting in infinite loops of
+            re-authentications". It recommends defensive code and admits the details are out of
+            scope. The same paragraph points out that
+            <a th:href="@{/backchannel-logout}">back-channel logout</a> is not affected.
+        </p>
+        <p class="hint">
+            <strong>It works here for the reason it usually does not.</strong> Client and provider
+            share an origin in this demo, so the iframe is first-party and the cookie is there. Split
+            them across two hosts — which is the only arrangement where any of this is useful — and
+            you are relying on the browser to keep sending a third-party cookie.
+        </p>
+    </div>
+</main>
+<script th:src="@{/js/session-management.js}" defer></script>
+</body>
+</html>

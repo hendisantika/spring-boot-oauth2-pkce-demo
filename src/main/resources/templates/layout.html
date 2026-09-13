@@ -34,6 +34,7 @@
         <a th:href="@{/logout-revocation}">Revoke on logout</a>
         <a th:href="@{/backchannel-logout}">Back-channel</a>
         <a th:href="@{/frontchannel-logout}">Front-channel</a>
+        <a th:href="@{/session-management}">Session</a>
         <form th:action="@{/logout}" method="post" style="display:inline" sec:authorize="isAuthenticated()">
             <button class="btn secondary" type="submit">Sign out</button>
         </form>
