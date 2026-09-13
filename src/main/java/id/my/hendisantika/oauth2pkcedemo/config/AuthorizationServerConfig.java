@@ -9,6 +9,9 @@ import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.AuthenticationContextLevel;
 import org.springframework.security.core.Authentication;
+import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
+import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.StepUpRequiredFilter;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
@@ -97,7 +100,9 @@ public class AuthorizationServerConfig {
             UserDetailsService userDetailsService,
             OAuth2AuthorizationService authorizationService,
             JWKSource<SecurityContext> jwkSource,
-            OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer) throws Exception {
+            OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer,
+            JarRequestSigner jarRequestSigner,
+            DemoProperties properties) throws Exception {
         // A generator of its own rather than a shared bean. Supplying an OAuth2TokenGenerator bean
         // replaces the one Spring Authorization Server assembles internally, and that one carries
         // DPoP handling this reimplementation would silently drop - tokens came back as Bearer with
@@ -156,7 +161,15 @@ public class AuthorizationServerConfig {
                 // Spring Security's registered filter order.
                 .addFilterAfter(
                         new StepUpRequiredFilter(authorizationServerSettings.getAuthorizationEndpoint()),
-                        SecurityContextHolderFilter.class);
+                        SecurityContextHolderFilter.class)
+                // Expands a signed request object before anything reads the request parameters, so
+                // acr_values and everything else are taken from the JWT rather than the query string.
+                .addFilterBefore(
+                        new JwtSecuredAuthorizationRequestFilter(
+                                authorizationServerSettings.getAuthorizationEndpoint(),
+                                () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
+                                properties.issuerUri()),
+                        StepUpRequiredFilter.class);
         return http.build();
     }
 
@@ -174,6 +187,20 @@ public class AuthorizationServerConfig {
             response.sendRedirect(request.getContextPath() + ACTIVATION_PAGE_URI
                     + "?error=" + URLEncoder.encode(errorCode, StandardCharsets.UTF_8));
         };
+    }
+
+    private static com.nimbusds.jose.jwk.JWKSet parseJwkSet(String json) {
+        try {
+            return com.nimbusds.jose.jwk.JWKSet.parse(json);
+        } catch (java.text.ParseException ex) {
+            throw new IllegalStateException("Unable to read the request object signing keys", ex);
+        }
+    }
+
+    /** Generated per boot, like the server's own signing key. */
+    @Bean
+    public JarRequestSigner jarRequestSigner() {
+        return JarRequestSigner.generate();
     }
 
     @Bean
