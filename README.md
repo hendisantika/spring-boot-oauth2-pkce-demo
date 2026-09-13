@@ -62,6 +62,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-mixup-client` | none (public) | required | n/a | code | no |
 | `pkce-registrar-client` | `client_secret_basic` | n/a | n/a | client credentials | no |
 | `pkce-relay-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
+| `pkce-mtls-refresh-client` | **`self_signed_tls_client_auth`** | n/a | n/a | **device**, refresh | yes, rotated, certificate-bound |
 
 ## What the flow looks like
 
@@ -422,6 +423,16 @@ no credentials.
 key is refused too.
 
 ![Three refresh attempts](docs/images/76-refresh-binding-attempts.png)
+
+**76. mTLS refresh** — a certificate-bound access token and a refresh token, issued over the TLS
+listener.
+
+![What the device was issued](docs/images/77-mtls-refresh-issued.png)
+
+**77. mTLS refresh** — the same refresh token spent three ways: a stranger's certificate, none at
+all, and the registered one.
+
+![Three refresh attempts over three connections](docs/images/78-mtls-refresh-attempts.png)
 
 ## Refresh tokens and public clients
 
@@ -1161,6 +1172,52 @@ the device grant and then had no way to spend it, since nothing in Spring Author
 authenticates a public client on a refresh request. `DeviceClientAuthenticationConverter` now covers
 that request as well as the two device endpoints.
 
+## Certificate-bound refresh tokens
+
+`/mtls-refresh` asks the same question of mTLS that the page above asks of DPoP, and gets a different
+kind of answer. [The mTLS page](#certificate-bound-tokens-mtls) shows an access token carrying
+`cnf.x5t#S256`; the refresh token outlives every access token it mints, so whether *it* can be spent
+from anywhere is the question that decides what a leak costs.
+
+`pkce-mtls-refresh-client` is registered for `self_signed_tls_client_auth` with the device grant —
+client credentials issues no refresh token, so the existing mTLS client cannot be asked. The device
+code is redeemed over the TLS listener, and the refresh token that comes back is then spent three
+ways:
+
+| Refresh request | Result |
+|---|---|
+| Over mTLS, with a certificate the server does not know | `401 invalid_client` |
+| Over plain HTTP, with no certificate at all | `401 invalid_client` |
+| Over mTLS, with the registered certificate | `200`, a new access token with the same `cnf.x5t#S256` |
+
+The stranger's certificate is in the server's trust store on purpose. A TLS handshake that fails
+demonstrates nothing about what the authorization server checks; this one succeeds, the request
+arrives, and the refusal is the server's.
+
+Notes:
+
+* **Nothing checks a binding on refresh.** `OAuth2RefreshTokenAuthenticationProvider` compares a DPoP
+  proof when one is sent and has no certificate handling at all — the string `x5t` does not appear in
+  it. The two refusals above are client authentication failing, not a `cnf` comparison. For this
+  client the certificate *is* the credential, so the outcome is the one RFC 8705 wants; the mechanism
+  is not.
+* **RFC 8705 §4's actual case cannot be reached here.** That section is about binding a refresh token
+  to a certificate for a client that presents one *without* authenticating with it — a public client.
+  Such a client would need a real comparison on refresh. Spring Authorization Server offers no way to
+  bind without authenticating, so the case never arises in this demo, and the page says so rather
+  than implying the server implements the harder half.
+* **The device converter had to learn to stand aside.** `DeviceClientAuthenticationConverter` claims
+  device and refresh requests carrying only a `client_id`, which is exactly what this client sends —
+  it was authenticated as public and then refused for not being registered that way. It now returns
+  `null` when the handshake carried a client certificate, leaving the request to Spring's own X.509
+  converter.
+* **The certificate is shared with `pkce-mtls-client`.** Both registrations point at the same
+  published JWK set; the `client_id` in the request distinguishes them. That is a demo shortcut, not
+  a recommendation.
+* **Where `cnf.x5t#S256` is emitted was not found.** The claim is genuinely in the issued token — the
+  page reads it back out — but the literal `x5t` appears nowhere in the Spring Authorization Server
+  sources or in any jar on the classpath that was searched.
+
 ## Authorization code binding (`dpop_jkt`)
 
 `/code-binding` demonstrates RFC 9449 section 10. An authorization code is a bearer credential for
@@ -1260,6 +1317,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── FapiController.java              /fapi
 │   ├── AuthorizationCodeBindingController.java  /code-binding and its own callback
 │   ├── RefreshTokenBindingController.java  /refresh-binding
+│   ├── MtlsRefreshController.java       /mtls-refresh
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 │   ├── AuthorizationServerMetadataController.java  /metadata
@@ -1287,6 +1345,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── FapiComplianceService.java       checks the configuration against the profile
 │   ├── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
 │   ├── RefreshTokenBindingService.java  device grant with a key, then three refreshes
+│   ├── MtlsRefreshService.java          device grant over mTLS, then three connections
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1344,6 +1403,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── OpBrowserState.java              the cookie, and the session_state computed from it
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── PendingRefreshBinding.java       the device codes, and the key they were asked for with
+    ├── PendingMtlsRefresh.java          the device codes asked for over the TLS listener
+    ├── MtlsRefreshAttempt.java          one refresh request, and which connection made it
+    ├── MtlsRefreshRun.java              what was issued, and how the three attempts went
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
