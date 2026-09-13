@@ -63,6 +63,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-registrar-client` | `client_secret_basic` | n/a | n/a | client credentials | no |
 | `pkce-relay-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
 | `pkce-mtls-refresh-client` | **`self_signed_tls_client_auth`** | n/a | n/a | **device**, refresh | yes, rotated, certificate-bound |
+| `pkce-freshness-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -452,6 +453,16 @@ and names the level it wants.
 **81. Step-up challenge** — the same call after the step-up. Same client, same endpoint, same user.
 
 ![The loop closes](docs/images/82-stepup-loop-closed.png)
+
+**82. Freshness** — `auth_time`, and what each `max_age` would mean for the session you are sitting
+on.
+
+![auth_time and the max_age decisions](docs/images/83-freshness-session.png)
+
+**83. Freshness** — the same question asked three ways. One is honoured, one is not needed, one is
+ignored.
+
+![Three ways of asking](docs/images/84-freshness-three-ways.png)
 
 ## Refresh tokens and public clients
 
@@ -978,7 +989,9 @@ Three things worth knowing:
   part that is not faithful: a real second factor lives on a device the user already holds.
 
 The client here decides in advance that it wants a stronger authentication. For the case where it
-does not know until it is refused, see [the step-up challenge](#step-up-challenge-rfc-9470).
+does not know until it is refused, see [the step-up challenge](#step-up-challenge-rfc-9470); for the
+other axis — how *recently* rather than how strongly — see
+[authentication freshness](#authentication-freshness-max_age--auth_time).
 
 ## Step-up challenge (RFC 9470)
 
@@ -1019,6 +1032,56 @@ Notes:
   authentication to be, and the challenge carries it. Spring Authorization Server has no `max_age`
   handling at all — the parameter appears nowhere in its sources — so passing it on would change
   nothing, and the page does not pretend the round trip refreshes anything but the `acr`.
+
+## Authentication freshness (`max_age` / `auth_time`)
+
+`/freshness` is the other question OpenID Connect Core §3.1.2.1 lets a client ask.
+[`acr_values`](#step-up-authentication-acr--amr) asks *how strongly* the user authenticated;
+`max_age` asks *how recently*, and the answer comes back as `auth_time`. A session an hour old is
+still a valid session — it is just not evidence that the person at the keyboard is the one who signed
+in.
+
+The page shows your own session's `auth_time` and what each `max_age` would mean for it, then runs a
+probe that asks the authorization endpoint the same question three ways:
+
+| Asked | Re-authenticated | `auth_time` |
+|---|---|---|
+| `max_age=3600` | no | unchanged — a session seconds old is inside an hour's grace |
+| `max_age=0` | **yes** | moved forward, and the new token says so |
+| `prompt=login` | no | unchanged — nothing acted on it |
+
+The probe signs in a **separate** session on purpose. Client and authorization server share one
+session in this demo, so a second authorization request from the page's own session restarts the
+login whatever it carries (`RestartOAuth2LoginFilter`), and all three rows would look identical.
+
+Notes:
+
+* **Spring Authorization Server does not know the word `max_age`.** The string appears nowhere in
+  it, so `MaxAgeRequiredFilter` enforces the parameter, sitting beside the filter that enforces
+  `acr_values` — two halves of one specification paragraph, neither implemented by the server.
+  Spring's OAuth2 **client** has no `max_age` either, so a browser client here passes it the way it
+  already passes `acr_values`, through the demo's own request resolver.
+* **`prompt=login` is validated and then ignored.** `OidcPrompt` lists `none`, `login`, `consent` and
+  `select_account`, and a request combining `none` with any of the others is refused — but `none` is
+  the only value ever acted on, answered with `login_required` or `consent_required`. The value that
+  means *do not interrupt the user* is implemented; both values that ask the server to *start* an
+  interaction are not.
+* **`max_age=0` needs a guard against itself.** The login it forces is moments old, so the resumed
+  request is judged stale again and the browser bounces for ever. The filter marks the one request it
+  has already sent back — by its `state`, in the session it deliberately kept — and lets that request
+  through when it returns. Read strictly, zero has the opposite problem: an authentication that just
+  happened has an elapsed time of zero at any resolution, and zero is not *greater than* zero, so the
+  parameter would ask for nothing at all. Everyone reads it as "prove it again now", and so does
+  this; a test pins both halves.
+* **The filter takes the authentication away without touching the session.** The client's own
+  authorization request — its state and PKCE verifier — lives in that session, and invalidating it
+  would strand the callback with `authorization_request_not_found`.
+* **`auth_time` is the *latest* factor, not the first.** `JwtGenerator.getAuthenticationTime` takes
+  the most recent `FactorGrantedAuthority`, so a step-up moves it forward — and a forced login leaves
+  one factor behind, dropping `acr` back to `urn:demo:loa:1` while `auth_time` moves up. Recent and
+  strong are genuinely different axes.
+* **A pushed request would slip past it**, for the same reason `acr_values` does: enforcement reads
+  the query string, and [PAR](#pushed-authorization-requests) leaves only a `request_uri` there.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1426,6 +1489,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MtlsRefreshController.java       /mtls-refresh
 │   ├── IdTokenBindingController.java    /idtoken-binding
 │   ├── StepUpChallengeController.java   /stepup-challenge
+│   ├── FreshnessController.java         /freshness
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
@@ -1457,6 +1521,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MtlsRefreshService.java          device grant over mTLS, then three connections
 │   ├── IdTokenBindingService.java       the session's ID token, presented five ways
 │   ├── StepUpChallengeService.java      calls the operation, keeps the challenge it was given
+│   ├── FreshnessService.java            a probe session that asks max_age three ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1523,6 +1588,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── InsufficientUserAuthenticationHandler.java  the 401 Spring Security does not write
     ├── ResourceCallAttempt.java         one call to the protected operation
     ├── StepUpChallengeRun.java          the calls so far, and the challenge still outstanding
+    ├── AuthenticationFreshness.java     auth_time, and whether a max_age is met
+    ├── MaxAgeRequiredFilter.java        enforces max_age at the authorization endpoint
+    ├── FreshnessAttempt.java            one ask, and what auth_time did
+    ├── FreshnessRun.java                the three asks of one probe
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
