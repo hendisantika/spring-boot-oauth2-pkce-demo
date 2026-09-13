@@ -59,6 +59,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-ciba-client` | `client_secret_basic` | n/a | n/a | **CIBA** | no |
 | `pkce-fapi-client` | `private_key_jwt` | required | n/a | code, refresh | yes, rotated, certificate-bound |
 | `pkce-code-binding-client` | none (public) | required | n/a | code | no |
+| `pkce-mixup-client` | none (public) | required | n/a | code | no |
 
 ## What the flow looks like
 
@@ -308,6 +309,21 @@ code *and* the PKCE verifier and are still refused.
 **50. Code binding** — the same flow without `dpop_jkt`: the code redeems with no proof at all.
 
 ![An unbound code redeemed with nothing](docs/images/51-code-binding-unbound.png)
+
+**51. Mix-up** — two authorization servers, one of them the attacker's, and a client that has to
+work out which one answered.
+
+![The mix-up cast](docs/images/52-mixup-cast.png)
+
+**52. Mix-up** — a client that does not read `iss` hands the code and the PKCE verifier to the
+attacker, who redeems them at the honest server.
+
+![The attacker holding a token for the user](docs/images/53-mixup-stolen.png)
+
+**53. Mix-up** — the same attack against a client that does read it. One comparison, made before
+the token request.
+
+![The mismatch caught and the flow abandoned](docs/images/54-mixup-detected.png)
 
 ## Refresh tokens and public clients
 
@@ -690,19 +706,60 @@ The client's key is read from this demo's own configuration rather than the clie
 `jwkSetUrl`, since the client here *is* the authorization server; a deployment would read it off the
 registration.
 
+## Mix-up attack defence (`iss`)
+
+`/mixup` demonstrates RFC 9207 by running the attack it prevents, end to end, against this
+application.
+
+A client that supports several authorization servers gets an authorization code at its redirect URI
+with nothing in the response saying who sent it. It falls back on its own note — *I started this at
+server A* — and an authorization server that the user chose, but that happens to be hostile, can
+make that note wrong: it authenticates nobody and forwards the request to the honest server under the
+honest client's identity, keeping the client's state, redirect URI and code challenge. What comes
+back looks exactly like the answer the client is waiting for.
+
+| | Client ignores `iss` | Client checks `iss` |
+|---|---|---|
+| Where the token request went | the attacker's token endpoint | nowhere |
+| What the attacker received | the code **and** the PKCE code verifier | nothing |
+| Outcome | an access token for the user at the honest server | the mismatch caught, the flow abandoned |
+
+**PKCE does not help here.** It protects a code that was intercepted; this code was delivered. The
+client sends the code verifier to the token endpoint it believes in, so the attacker gets both halves
+at once. Neither does `state` — the attacker forwards the client's own value, so it comes back
+matching.
+
+Notes:
+
+* **Neither half of RFC 9207 exists in Spring.** Spring Authorization Server's response handlers send
+  `code` and `state` and stop, so `IssuerIdentifierResponseHandler` replaces both the success and the
+  error handler and adds `iss`. On the client side `OAuth2AuthorizationResponse` has no field for it
+  at all, so the checking client on this page reads the parameter itself.
+* The server publishes `authorization_response_iss_parameter_supported` in its discovery document,
+  which is how a client learns it may insist on the parameter.
+* An error response is an authorization response too, and carries `iss` for the same reason.
+* A single-provider client is not exposed to this. The attack needs a client that supports several
+  authorization servers, one of which the attacker controls or has persuaded the client to register.
+* Binding the code to a key would have stopped the redemption too — the attacker holds no DPoP key,
+  see [authorization code binding](#authorization-code-binding-dpop_jkt) — but it would not tell the
+  client anything was wrong.
+
 ## FAPI 2.0 security profile
 
 `/fapi` checks the running configuration against the FAPI 2.0 security profile. The profile invents
 nothing — it takes the mechanisms on the other pages and says which combination is mandatory: pushed
 requests, PKCE, sender-constrained tokens, and client authentication that involves no shared secret.
 
-**This demo is not FAPI 2.0 compliant, and the page says so.** Three server requirements fail:
+**This demo is not FAPI 2.0 compliant, and the page says so.** Two server requirements fail:
 
 | Requirement | Why it fails |
 |---|---|
-| The authorization response carries `iss` (RFC 9207) | Spring Authorization Server does not emit it, so a client cannot detect a mix-up attack from the response alone |
 | The server requires pushed authorization requests | `ClientSettings` has no `require_pushed_authorization_requests`, so a client can always fall back to an ordinary request |
 | All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
+
+The third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
+[the mix-up page](#mix-up-attack-defence-iss) implements it. The check asks the bean that actually
+sends authorization responses, so it went green by the code changing, not the check.
 
 Per client, only `pkce-fapi-client` — registered specifically to the profile — meets every
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
@@ -809,7 +866,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarController.java               /jar
 │   ├── JarJwkSetController.java         /jar-jwks.json, the request object signing key
 │   ├── FapiController.java              /fapi
-│   └── AuthorizationCodeBindingController.java  /code-binding and its own callback
+│   ├── AuthorizationCodeBindingController.java  /code-binding and its own callback
+│   ├── MixUpController.java             /mixup and its own callback
+│   └── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -825,7 +884,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── CibaClientService.java           the client side: open a request, then poll
 │   ├── StepUpService.java               adds a second factor to the session
 │   ├── FapiComplianceService.java       checks the configuration against the profile
-│   └── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
+│   ├── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
+│   ├── MixUpService.java                the client side of the mix-up: start, then decide
+│   └── MixUpAttackerService.java        the attacker's: forward the request, take the code
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -854,6 +915,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── JwtSecuredAuthorizationRequestFilter.java  verifies one and uses only what it carries
     ├── FapiCheck.java                   one requirement, its outcome, and what was observed
     ├── DpopBoundAuthorizationCodeFilter.java  enforces dpop_jkt at the token endpoint
+    ├── IssuerIdentifierResponseHandler.java  puts iss on every authorization response
+    ├── MixUpStep.java                   one move in a mix-up run, and who made it
+    ├── MixUpRun.java
+    ├── PendingMixUp.java                what the client wrote down before sending the user away
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
