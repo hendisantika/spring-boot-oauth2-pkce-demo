@@ -226,6 +226,24 @@ nothing records the service.
 
 ![Over-scoped exchange refused with invalid_scope](docs/images/32-exchange-refused.png)
 
+**32. RAR** — asking for a specific payment rather than a `payments` scope.
+
+![Rich authorization request page](docs/images/33-rar-request.png)
+
+**33. RAR** — the consent screen names the amount and the creditor, not a category.
+
+![Consent showing the specific payment](docs/images/34-rar-consent.png)
+
+**34. RAR** — and the issued token carries it, so a resource server does not have to take the
+client's word.
+
+![authorization_details in the issued token](docs/images/35-rar-granted.png)
+
+**35. RAR** — a type the server does not implement is refused at the push, before anyone is asked to
+approve it.
+
+![invalid_authorization_details](docs/images/36-rar-refused.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -469,6 +487,41 @@ tell the two apart.
 The grant is given only to the exchange client. The browser-facing clients do not have it: exchanging
 is what a downstream service does with a token it received, not something a front end needs.
 
+## Rich authorization requests
+
+`/rar` demonstrates RFC 9396. A scope is one word standing in for whatever the client wants; RAR
+replaces it with a structured description of the actual request:
+
+```json
+[{"type": "payment_initiation",
+  "actions": ["initiate"],
+  "locations": ["https://api.example.com/payments"],
+  "instructedAmount": {"currency": "EUR", "amount": "123.50"},
+  "creditorName": "Merchant A"}]
+```
+
+The consent screen then says *"Initiate a payment of 123.50 EUR to Merchant A"* rather than offering
+a `payments` scope, and the issued token carries the same structure — so a resource server knows the
+amount and the creditor that were approved instead of taking the client's word for them.
+
+**Spring Authorization Server has no RFC 9396 support at all** — no parameter, no classes — so this
+is built on its extension points:
+
+* An `AuthenticationConverter` on the **pushed request endpoint** rejects types the server does not
+  implement, answering `invalid_authorization_details` as section 5 specifies. It has to be there
+  rather than on the authorization endpoint: with PAR the details travel in the push, and the later
+  redirect carries only a `request_uri`.
+* The **consent controller** looks the pending authorization up by `state` to find what was actually
+  requested, since the consent redirect carries only the state.
+* A **token customizer** copies the approved details into the issued token.
+
+`authorization_details` survives into the stored authorization for free — Spring Authorization Server
+keeps unrecognised authorization request parameters in `additionalParameters`, which is what makes
+this practical at all.
+
+Not implemented: echoing `authorization_details` in the token *response* body, which the RFC also
+calls for. The claim in the token covers the demonstration.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -520,7 +573,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ClientJwkSetController.java      /client-jwks.json, the client's public keys
 │   ├── MtlsController.java              /mtls
 │   ├── MtlsJwkSetController.java        /mtls-jwks.json, the client's certificate
-│   └── TokenExchangeController.java     /exchange
+│   ├── TokenExchangeController.java     /exchange
+│   └── RichAuthorizationController.java /rar
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -550,7 +604,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── ClientAssertionAttempt.java
     ├── MtlsMaterial.java                generates the demo certificates and keystores
     ├── MtlsAttempt.java
-    └── TokenExchangeAttempt.java
+    ├── TokenExchangeAttempt.java
+    ├── RichAuthorizationDetail.java     parses and summarises authorization_details
+    └── RichAuthorizationRequestValidator.java  refuses types the server does not implement
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
