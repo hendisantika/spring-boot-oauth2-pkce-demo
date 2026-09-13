@@ -9,6 +9,7 @@ import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
+import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import id.my.hendisantika.oauth2pkcedemo.security.AuthenticationContextLevel;
 import org.springframework.security.core.Authentication;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
@@ -105,6 +106,7 @@ public class AuthorizationServerConfig {
             OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer,
             JarRequestSigner jarRequestSigner,
             IssuerIdentifierResponseHandler issuerIdentifierResponseHandler,
+            ServerMetadataCustomizer serverMetadataCustomizer,
             DemoProperties properties) throws Exception {
         // A generator of its own rather than a shared bean. Supplying an OAuth2TokenGenerator bean
         // replaces the one Spring Authorization Server assembles internally, and that one carries
@@ -154,13 +156,15 @@ public class AuthorizationServerConfig {
                         .tokenEndpoint(endpoint -> endpoint
                                 .accessTokenRequestConverter(new CibaAuthenticationConverter())
                                 .authenticationProvider(cibaAuthenticationProvider))
+                        // RFC 8414. Served by default, but describing only what Spring
+                        // Authorization Server itself knows about.
+                        .authorizationServerMetadataEndpoint(endpoint -> endpoint
+                                .authorizationServerMetadataCustomizer(serverMetadataCustomizer::customize))
                         .oidc(oidc -> oidc
-                                // RFC 9207 section 3: say so, or a client has no way to know it may
-                                // insist on the parameter.
+                                // The same additions again: one server, two documents, and no
+                                // reason for them to disagree.
                                 .providerConfigurationEndpoint(endpoint -> endpoint
-                                        .providerConfigurationCustomizer(configuration -> configuration
-                                                .claim(IssuerIdentifierResponseHandler.ISS_PARAMETER_SUPPORTED,
-                                                        true)))))
+                                        .providerConfigurationCustomizer(serverMetadataCustomizer::customize))))
                 .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
                 // A browser hitting /oauth2/authorize while signed out is sent to the form login,
@@ -226,6 +230,15 @@ public class AuthorizationServerConfig {
     @Bean
     public IssuerIdentifierResponseHandler issuerIdentifierResponseHandler(DemoProperties properties) {
         return new IssuerIdentifierResponseHandler(properties.issuerUri());
+    }
+
+    /**
+     * Adds what this application supports but Spring Authorization Server has no way to know about,
+     * to both metadata documents.
+     */
+    @Bean
+    public ServerMetadataCustomizer serverMetadataCustomizer(DemoProperties properties) {
+        return new ServerMetadataCustomizer(properties);
     }
 
     /** Generated per boot, like the server's own signing key. */
