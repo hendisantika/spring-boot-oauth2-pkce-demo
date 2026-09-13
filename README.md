@@ -434,6 +434,16 @@ all, and the registered one.
 
 ![Three refresh attempts over three connections](docs/images/78-mtls-refresh-attempts.png)
 
+**78. ID token binding** — the session's own ID token, presented five ways. Two substitutions are
+caught; two are not.
+
+![Five ways to present an ID token](docs/images/79-idtoken-five-ways.png)
+
+**79. ID token binding** — what `at_hash` would have contained, and that the ID token carries
+neither hash.
+
+![The claim that is not there](docs/images/80-idtoken-missing-at-hash.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -1218,6 +1228,49 @@ Notes:
   page reads it back out — but the literal `x5t` appears nowhere in the Spring Authorization Server
   sources or in any jar on the classpath that was searched.
 
+## What binds an ID token
+
+`/idtoken-binding` asks of the ID token what the three pages above ask of the code, the refresh token
+and the access token — and gets a different kind of answer. **No deployed specification binds an ID
+token to a key.** What it has instead are claims saying where it belongs.
+
+The page takes the session's own ID token and puts it through Spring Security's own
+`OidcIdTokenValidator` five ways:
+
+| Presented | Result |
+|---|---|
+| At the client it was issued to | accepted |
+| Replayed at another client | **refused** — `aud`, `azp` |
+| Replayed into another authorization request | **refused** — `invalid_nonce` |
+| Paired with a different access token | accepted — nothing to compare |
+| Presented by whoever is holding it | accepted — no `cnf` |
+
+The last two are the point. Both refusals come from claims naming *where the token belongs*: one
+client, one authorization request. Nothing names who is holding it.
+
+Notes:
+
+* **`at_hash` is absent, and that is legal.** OpenID Connect Core §3.1.3.6 requires it when the ID
+  token comes from the *authorization* endpoint — implicit and hybrid, where the access token travels
+  through the browser — and makes it OPTIONAL from the token endpoint, which is the only place this
+  server issues one. Spring Authorization Server never emits it: the string `at_hash` appears nowhere
+  in its sources. The page computes what the claim *would* have held for the real access token and
+  for the substituted one, so the absence is visible rather than asserted.
+* **Spring Security's client would not check it either.** `OidcIdTokenValidator.validate` takes one
+  argument, the ID token; the access token is not in scope. A test pins that: the class declares
+  exactly one non-bridge `validate`, and its only parameter is `Jwt`. The reasoning holds for the
+  code flow — both tokens arrive in one response over one connection to a server the client
+  authenticated — and stops holding the moment anything else carries that pair onwards.
+* **The `nonce` claim is a hash.** Spring's client generates a nonce, sends `createHash(nonce)` in
+  the authorization request, and keeps the value. The authorization server only ever sees the hash.
+* **There is no `cnf`, and no specification to add one to.** DPoP binds access and refresh tokens;
+  RFC 8705 binds access tokens; neither mentions ID tokens. The one specification that did — OpenID
+  Connect Token Bound Authentication, with `cnf.tbh` naming a TLS Token Binding (RFC 8471) — went
+  nowhere when browsers dropped Token Binding.
+* **What it is bound to is a session.** The `sid` claim names the authorization server session, which
+  is what [back-channel logout](#back-channel-logout) ends and what the session iframe watches. Not a
+  holder — a moment.
+
 ## Authorization code binding (`dpop_jkt`)
 
 `/code-binding` demonstrates RFC 9449 section 10. An authorization code is a bearer credential for
@@ -1318,6 +1371,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── AuthorizationCodeBindingController.java  /code-binding and its own callback
 │   ├── RefreshTokenBindingController.java  /refresh-binding
 │   ├── MtlsRefreshController.java       /mtls-refresh
+│   ├── IdTokenBindingController.java    /idtoken-binding
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 │   ├── AuthorizationServerMetadataController.java  /metadata
@@ -1346,6 +1400,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
 │   ├── RefreshTokenBindingService.java  device grant with a key, then three refreshes
 │   ├── MtlsRefreshService.java          device grant over mTLS, then three connections
+│   ├── IdTokenBindingService.java       the session's ID token, presented five ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1406,6 +1461,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── PendingMtlsRefresh.java          the device codes asked for over the TLS listener
     ├── MtlsRefreshAttempt.java          one refresh request, and which connection made it
     ├── MtlsRefreshRun.java              what was issued, and how the three attempts went
+    ├── IdTokenCheck.java                one way of presenting an ID token, and what decided it
+    ├── IdTokenBindingRun.java           the claims, the hashes that are not there, the checks
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
