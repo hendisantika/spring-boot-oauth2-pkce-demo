@@ -274,6 +274,14 @@ missing factor.
 
 ![acr loa:2, amr pwd and otp](docs/images/43-stepup-loa2.png)
 
+**43. JAR** — the authorization request, and the same request signed.
+
+![The request parameters and the signed object](docs/images/44-jar-request-object.png)
+
+**44. JAR** — four ways to send it, only one of which works.
+
+![Valid, tampered, corrupted and foreign-signed](docs/images/45-jar-outcomes.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -619,6 +627,42 @@ Three things worth knowing:
 * **The one-time code is shown on screen**, because the demo has nowhere to send it. That is the one
   part that is not faithful: a real second factor lives on a device the user already holds.
 
+## JWT-secured authorization requests (JAR)
+
+`/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
+server can tell it arrived exactly as written. The request URL carries only `client_id` and
+`request`; everything else is inside the object.
+
+| Sent as | Result |
+|---|---|
+| A valid request object | Proceeds to sign-in normally |
+| The same object, with `scope=admin.everything` appended to the URL | **Ignored.** Consent offers only the signed scopes, and the token is issued for those |
+| One character of the signature changed | `invalid_request_object` |
+| Signed by a key the server has never seen | `invalid_request_object` |
+
+The second row is the point. RFC 9101 section 6.1 says the server reads the request object and
+ignores what came alongside it, so appending to the URL achieves nothing — verified by following the
+flow through to the token, which came back scoped `openid profile email` rather than anything the URL
+asked for.
+
+JAR and [PAR](#pushed-authorization-requests) solve overlapping problems from different directions:
+PAR keeps the request off the front channel entirely, JAR makes it tamper-evident wherever it goes.
+They compose.
+
+Two things this needed:
+
+* **A request-parameter wrapper, not just a parser.** Spring Authorization Server decides which
+  parameters count by checking them against the raw query string, so overriding the parameter map
+  alone left everything from the JWT filtered straight back out — `getQueryString()` has to be
+  rebuilt from the object too.
+* **Nimbus directly rather than `NimbusJwtDecoder`.** That decoder pins the JWT type to `JWT` and
+  applies the check after any customization, so it cannot accept the `oauth-authz-req+jwt` type RFC
+  9101 section 10.8 asks for. The type is still required — just checked explicitly.
+
+The client's key is read from this demo's own configuration rather than the client registration's
+`jwkSetUrl`, since the client here *is* the authorization server; a deployment would read it off the
+registration.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -674,7 +718,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RichAuthorizationController.java /rar
 │   ├── CibaController.java              /ciba, /ciba/poll, /ciba/approve
 │   ├── BackchannelAuthenticationController.java  /backchannel/authenticate
-│   └── StepUpController.java            /stepup, /stepup/verify
+│   ├── StepUpController.java            /stepup, /stepup/verify
+│   ├── JarController.java               /jar
+│   └── JarJwkSetController.java         /jar-jwks.json, the request object signing key
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -712,7 +758,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RichAuthorizationRequestValidator.java  refuses types the server does not implement
     ├── Ciba*.java                       the CIBA grant, added to the token endpoint
     ├── AuthenticationContextLevel.java  factors in, acr and amr out
-    └── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
+    ├── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
+    ├── JarRequestSigner.java            signs RFC 9101 request objects
+    └── JwtSecuredAuthorizationRequestFilter.java  verifies one and uses only what it carries
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
