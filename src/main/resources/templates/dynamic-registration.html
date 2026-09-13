@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Dynamic client registration')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>A client that registers itself</h1>
+    <p class="lead">
+        RFC 7591. Every other client in this demo was written into configuration by hand. This one
+        arrives at runtime with a JSON document describing itself and is handed back a
+        <code>client_id</code>, a secret, and a token for managing its own registration afterwards.
+        The interesting part is not that it works — it is everything the server refuses along the
+        way.
+    </p>
+
+    <div class="alert" th:if="${registrationError}" th:text="${registrationError}">error</div>
+
+    <div class="card">
+        <h2>What gets sent</h2>
+        <table>
+            <tr>
+                <th style="width:26%">Endpoint</th>
+                <td><code th:text="${registrationEndpoint}">-</code>
+                    <span class="hint" style="display:block">
+                        Now named by <a th:href="@{/metadata}">both metadata documents</a>; before the
+                        endpoint was switched on, neither mentioned it.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Registrar</th>
+                <td><code th:text="${registrarClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        Holds the client credentials grant, and is the only thing here allowed to
+                        create clients.
+                    </span></td>
+            </tr>
+            <tr th:each="field : ${requestedMetadata}">
+                <th th:text="${field.key}">client_name</th>
+                <td><code th:text="${field.value}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/dynamic-registration}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Register a client</button>
+            <a class="btn secondary" th:href="@{/dynamic-registration/reset}"
+               style="margin-left:8px">Clear</a>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Six requests</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Request</th>
+                <th style="width:8%">Status</th>
+                <th>What came back</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}">-</span>
+                    <span class="hint" style="display:block" th:text="${attempt.detail}">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            Three of those refusals are about the token rather than the request: no token, a token
+            carrying more scope than the endpoint asks for, and a token that has already been spent.
+            An initial access token is good for exactly one registration.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null and run.registered()}">
+        <h2>What came back</h2>
+        <table>
+            <tr th:each="field : ${run.issuedMetadata}"
+                th:unless="${field.key == 'registration_access_token'}">
+                <th style="width:26%" th:text="${field.key}">client_id</th>
+                <td><code th:text="${field.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The registration access token is left out of the table above only because it is long. It
+            is an ordinary access token scoped <code th:text="${readScope}">client.read</code>, and it
+            is what the sixth request used to read the registration back from
+            <code>registration_client_uri</code>.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null and run.registered()}">
+        <h2>What the server decided</h2>
+        <table>
+            <tr>
+                <th style="width:34%">PKCE required</th>
+                <td>
+                    <code th:text="${run.requireProofKey}">true</code>
+                    <span class="hint" style="display:block">Not asked for by the registration.</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Consent required</th>
+                <td>
+                    <code th:text="${run.requireAuthorizationConsent}">true</code>
+                    <span class="hint" style="display:block">Also not asked for.</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Scopes granted</th>
+                <td>
+                    <span th:if="${run.hasNoScopes()}" class="hint">none</span>
+                    <code th:unless="${run.hasNoScopes()}"
+                          th:text="${#strings.listJoin(run.grantedScopes, ', ')}">-</code>
+                </td>
+            </tr>
+        </table>
+        <p class="hint">
+            Read back from the stored registration, not from the response. The client asked for
+            neither PKCE nor consent and got both: the security posture is the server's decision, not
+            the registering party's. And it has no scopes, because it was not allowed to ask for any —
+            registration hands out an identity, not authority.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server implements OpenID Connect Registration</strong>, which
+            is RFC 7591 with OpenID's additions, at <code>/connect/register</code>. It is off by
+            default, and switching it on is the entire configuration — the endpoint, the
+            <code th:text="${createScope}">client.create</code> scope check and the registration
+            access token all come with it.
+        </p>
+        <p class="hint">
+            <strong>A token with too much scope is refused.</strong> The endpoint wants exactly
+            <code th:text="${createScope}">client.create</code>, so a token that also carries
+            <code th:text="${readScope}">client.read</code> is rejected as
+            <code>invalid_token</code> rather than accepted and narrowed. Surprising the first time,
+            and the reason the registrar here asks for one scope at a time.
+        </p>
+        <p class="hint">
+            <strong>The <code>scope</code> field is refused outright.</strong> RFC 7591 section 2
+            defines it, and this server rejects any registration that sets it — a client that could
+            name its own scopes would be granting itself authority. That is a deliberate deviation
+            from the specification, on by default, and it means a newly registered client needs
+            something out of band before it can ask for anything.
+        </p>
+        <p class="hint">
+            <strong>Anything registered here is permanent.</strong> Every run adds a row to the same
+            table the hand-written clients live in, and RFC 7592's delete operation is not
+            implemented here, so the only way back is the database. Worth knowing before pointing
+            this at anything that matters.
+        </p>
+    </div>
+</main>
+</body>
+</html>

@@ -70,6 +70,9 @@ public class WebSecurityConfig {
                         .requestMatchers("/mixup", "/mixup/**").permitAll()
                         // Reads the published documents back over HTTP, which anyone may do.
                         .requestMatchers("/metadata").permitAll()
+                        // Registration is machine to machine from end to end; no session is
+                        // involved in any of it.
+                        .requestMatchers("/dynamic-registration", "/dynamic-registration/**").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",
