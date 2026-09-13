@@ -352,6 +352,20 @@ the interesting part.
 
 ![The issued credentials and the imposed settings](docs/images/60-registration-result.png)
 
+**60. Revocation on logout** — the page asks for the confidential client, because RFC 7009 only
+lets a client revoke tokens it was itself issued.
+
+![The revocation page before a run](docs/images/61-revocation-sign-in.png)
+
+**61. Revocation on logout** — logged out, session gone, and the refresh token still minting new
+access tokens.
+
+![Tokens surviving a logout](docs/images/62-revocation-without.png)
+
+**62. Revocation on logout** — the same logout with RFC 7009 alongside it.
+
+![Tokens revoked on logout](docs/images/63-revocation-with.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -365,6 +379,40 @@ there is a second, confidential client; PKCE applies to it just the same.
 
 Refresh tokens are rotated (`reuseRefreshTokens(false)`), so replaying an old one fails — which is
 how a server notices a stolen token.
+
+## Revocation on logout
+
+`/logout-revocation` signs you out and then looks at what became of your tokens. Twice: once with
+revocation, once without. The only difference between the runs is whether anything told the
+authorization server.
+
+Without it, after the session is gone:
+
+| Step | Result |
+|---|---|
+| Introspect the access token | `active = true` |
+| Introspect the refresh token | `active = true` |
+| `grant_type=refresh_token` | a new access token, issued *after* the user signed out |
+
+**Neither logout touches a token.** Spring Security's `/logout` clears the security context,
+invalidates the session and drops the cookie. Spring Authorization Server's RP-initiated logout runs
+a `SecurityContextLogoutHandler` and nothing else — that is the whole of
+`OidcLogoutAuthenticationSuccessHandler`. Ending a session and ending an authorization are separate
+acts, and nothing in OAuth connects them.
+
+`RevokingLogoutHandler` is what connects them here: registered as a logout handler on `/logout` and
+called explicitly before the RP-initiated redirect, so both of this application's sign-outs now
+revoke. It revokes the refresh token first — that invalidates the authorization it came from, taking
+the access token with it — then the access token explicitly, then drops the client's own stored copy.
+
+Two things worth knowing:
+
+* **A public client cannot clean up after itself.** RFC 7009 wants an authenticated client and only
+  lets one revoke tokens it was itself issued, so revocation here runs as the confidential client.
+  A client holding no credentials has no way to withdraw what it holds — the same asymmetry
+  [introspection](#introspection-and-revocation) shows from the other side.
+* **Short access token lifetimes are the other half of the answer.** Revocation closes the window;
+  a short expiry decides how big the window is when revocation is impossible or never called.
 
 ## Logout
 
@@ -380,6 +428,9 @@ After only a local logout the authorization server still considers the user sign
 authorization request completes without a prompt. Because this demo runs both roles in one
 application on one session, either button clears both; split across two deployments the difference
 is visible.
+
+Neither of them revokes anything on its own. Both do here, because
+[`RevokingLogoutHandler`](#revocation-on-logout) was added to them.
 
 ## Device authorization grant
 
@@ -977,7 +1028,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
 │   ├── AuthorizationServerMetadataController.java  /metadata
-│   └── DynamicClientRegistrationController.java   /dynamic-registration
+│   ├── DynamicClientRegistrationController.java   /dynamic-registration
+│   └── LogoutRevocationController.java   /logout-revocation
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -997,7 +1049,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
-│   └── DynamicClientRegistrationService.java  registers a client, and fails to five ways
+│   ├── DynamicClientRegistrationService.java  registers a client, and fails to five ways
+│   └── LogoutRevocationService.java     signs out, then looks at the tokens
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -1036,6 +1089,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── DiscoveryAttempt.java
     ├── RegistrationAttempt.java         one request to the registration endpoint
     ├── RegistrationRun.java
+    ├── RevokingLogoutHandler.java       revokes the session's tokens as part of logging out
+    ├── LogoutStep.java
+    ├── LogoutRevocationRun.java
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
