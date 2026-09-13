@@ -46,6 +46,7 @@ import org.springframework.security.oauth2.server.authorization.JdbcOAuth2Author
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
@@ -58,6 +59,7 @@ import org.springframework.security.oauth2.server.authorization.token.OAuth2Acce
 import org.springframework.security.oauth2.server.authorization.token.OAuth2RefreshTokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenClaimNames;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -70,6 +72,8 @@ import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -92,6 +96,9 @@ public class AuthorizationServerConfig {
      * has to name the same value.
      */
     public static final String SESSION_ID = "sid";
+
+    /** RFC 8693 section 4.4: who may become the actor and act on behalf of this subject. */
+    public static final String MAY_ACT = "may_act";
 
     public static final String CONSENT_PAGE_URI = "/oauth2/consent";
     public static final String ACTIVATION_PAGE_URI = "/activate";
@@ -297,10 +304,17 @@ public class AuthorizationServerConfig {
      * dashboard and the /userinfo endpoint have something to show beyond the subject.
      */
     @Bean
-    public OAuth2TokenCustomizer<JwtEncodingContext> jwtTokenCustomizer(UserRepository userRepository) {
+    public OAuth2TokenCustomizer<JwtEncodingContext> jwtTokenCustomizer(UserRepository userRepository,
+                                                                        DemoProperties properties) {
         return context -> {
             if (!(context.getPrincipal().getPrincipal() instanceof UserDetails user)) {
                 return;
+            }
+
+            // RFC 8693 section 4.4: name who is allowed to act for this user. Only on the access
+            // token, because that is what a downstream service is handed and would exchange.
+            if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
+                context.getClaims().claim(MAY_ACT, mayAct(properties));
             }
             // Must be an ArrayList: the JDBC authorization store serialises claims with Jackson's
             // polymorphic typing, whose allow-list rejects the immutable list Stream.toList() returns.
@@ -332,6 +346,32 @@ public class AuthorizationServerConfig {
                 }
             });
         };
+    }
+
+    /**
+     * The one service this demo lets act for its users. Both {@code iss} and {@code sub} are named,
+     * because that is the pair Spring Authorization Server compares against the actor token - and a
+     * subject token saying only "somebody called X" would be answered by any server's X.
+     */
+    private static Map<String, Object> mayAct(DemoProperties properties) {
+        // A LinkedHashMap, because the JDBC authorization store's Jackson allow-list rejects the
+        // immutable maps the obvious factory methods return.
+        Map<String, Object> mayAct = new LinkedHashMap<>();
+        mayAct.put(OAuth2TokenClaimNames.ISS, issuerUrl(properties.issuerUri()));
+        mayAct.put(OAuth2TokenClaimNames.SUB, properties.exchangeClient().clientId());
+        return mayAct;
+    }
+
+    /**
+     * A URL rather than a string, because that is what an issued token's own {@code iss} claim is
+     * once JwtClaimsSet has converted it, and the comparison is an equals().
+     */
+    private static java.net.URL issuerUrl(String issuerUri) {
+        try {
+            return java.net.URI.create(issuerUri).toURL();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to read the issuer as a URL", ex);
+        }
     }
 
     /**
