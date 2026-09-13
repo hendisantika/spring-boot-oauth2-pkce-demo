@@ -58,6 +58,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-exchange-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
 | `pkce-ciba-client` | `client_secret_basic` | n/a | n/a | **CIBA** | no |
 | `pkce-fapi-client` | `private_key_jwt` | required | n/a | code, refresh | yes, rotated, certificate-bound |
+| `pkce-code-binding-client` | none (public) | required | n/a | code | no |
 
 ## What the flow looks like
 
@@ -294,6 +295,19 @@ missing factor.
 **47. FAPI 2.0** — per client: one built to the profile, the rest deliberately not.
 
 ![A failing client beside a passing one](docs/images/48-fapi-clients.png)
+
+**48. Code binding** — two runs of the same flow, one naming a key and one not.
+
+![The code binding page before a run](docs/images/49-code-binding-start.png)
+
+**49. Code binding** — one authorization code, redeemed four ways. The first two attempts hold the
+code *and* the PKCE verifier and are still refused.
+
+![Four attempts, two refused, one issued, one replayed](docs/images/50-code-binding-bound.png)
+
+**50. Code binding** — the same flow without `dpop_jkt`: the code redeems with no proof at all.
+
+![An unbound code redeemed with nothing](docs/images/51-code-binding-unbound.png)
 
 ## Refresh tokens and public clients
 
@@ -698,6 +712,44 @@ The checks read the live configuration (registered clients, authorization server
 than a hand-maintained list, so they stay honest as the demo changes. A profile check that only ever
 passes is worth nothing.
 
+## Authorization code binding (`dpop_jkt`)
+
+`/code-binding` demonstrates RFC 9449 section 10. An authorization code is a bearer credential for
+the seconds it lives, and PKCE binds it to a one-time secret. `dpop_jkt` binds it to the client's
+DPoP key instead — the same key the issued token ends up bound to, so one private key holds the
+whole flow together.
+
+The page runs the flow twice and keeps both results side by side. Every redemption sends the
+**correct `code_verifier`**: the attacker being modelled holds the code *and* the PKCE secret, which
+is the only situation where a second binding adds anything.
+
+With `dpop_jkt` in the authorization request, one code is then redeemed four times:
+
+| Attempt | Result |
+|---|---|
+| The code and the verifier alone, no proof | `400 invalid_grant` |
+| A well-formed proof signed by another key | `400 invalid_grant` |
+| A proof signed by the bound key | `200`, `token_type: DPoP`, `cnf.jkt` equal to `dpop_jkt` |
+| The same code again | `400 invalid_grant` — it was spent by the third |
+
+Without `dpop_jkt`, the same code redeems on the first attempt with no proof at all, as a plain
+`Bearer` token. That is not a flaw in PKCE; it is the gap `dpop_jkt` closes.
+
+Notes:
+
+* **Spring Authorization Server has no notion of `dpop_jkt`.** It stores the parameter with the rest
+  of the authorization request and never reads it again, so `DpopBoundAuthorizationCodeFilter` sits
+  in front of the token endpoint, looks the code up, and enforces the binding. Running *before* the
+  endpoint is deliberate: a refused request leaves the code outstanding, which is why the third
+  attempt above can still succeed after the first two were turned away.
+* The filter verifies the proof's signature before trusting the key in its header. A thumbprint is
+  public, so anyone can put the victim's public key in a proof — what they cannot do is sign with it.
+* RFC 9449 does not name an error code for the mismatch. This server answers `invalid_grant`, since
+  the code is what cannot be redeemed.
+* The same section warns that the protection is only as good as the key's uniqueness, so each run
+  generates its own key, verifier and state.
+* Section 10.1 covers the parameter inside a pushed request, where it travels in the POST body.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -756,7 +808,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── StepUpController.java            /stepup, /stepup/verify
 │   ├── JarController.java               /jar
 │   ├── JarJwkSetController.java         /jar-jwks.json, the request object signing key
-│   └── FapiController.java              /fapi
+│   ├── FapiController.java              /fapi
+│   └── AuthorizationCodeBindingController.java  /code-binding and its own callback
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -771,7 +824,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── CibaService.java                 pending backchannel requests and their outcome
 │   ├── CibaClientService.java           the client side: open a request, then poll
 │   ├── StepUpService.java               adds a second factor to the session
-│   └── FapiComplianceService.java       checks the configuration against the profile
+│   ├── FapiComplianceService.java       checks the configuration against the profile
+│   └── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -798,7 +852,11 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
     ├── JarRequestSigner.java            signs RFC 9101 request objects
     ├── JwtSecuredAuthorizationRequestFilter.java  verifies one and uses only what it carries
-    └── FapiCheck.java                   one requirement, its outcome, and what was observed
+    ├── FapiCheck.java                   one requirement, its outcome, and what was observed
+    ├── DpopBoundAuthorizationCodeFilter.java  enforces dpop_jkt at the token endpoint
+    ├── PendingCodeBinding.java          what the client remembers between the two legs
+    ├── CodeBindingAttempt.java
+    └── CodeBindingRun.java
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
@@ -834,8 +892,9 @@ src/main/resources/db/migration/
   authorization request starts from that session, the authorization server treats *that* as the end
   user. Spring Security 7 reads `auth_time` off a `FactorGrantedAuthority` that only an interactive
   login attaches, so minting the ID token fails with "authenticationTime cannot be null" and the user
-  gets a 500. Reachable just by pressing a sign-in button twice. `RestartOAuth2LoginFilter` clears the
-  session and starts the flow clean.
+  gets a 500. Reachable just by pressing a sign-in button twice, or by starting a run on
+  `/code-binding` with a login already in the session. `RestartOAuth2LoginFilter` clears the session
+  and starts the flow clean; it is given every URI this app starts an authorization request from.
 * **A session can outlive the tokens it refers to.** Authentication still looks valid after the
   authorized client row is gone, so the token pages would dereference a null.
   `AuthorizedClientRequiredInterceptor` sends those sessions back through the flow.
