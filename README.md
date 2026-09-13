@@ -60,6 +60,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-fapi-client` | `private_key_jwt` | required | n/a | code, refresh | yes, rotated, certificate-bound |
 | `pkce-code-binding-client` | none (public) | required | n/a | code | no |
 | `pkce-mixup-client` | none (public) | required | n/a | code | no |
+| `pkce-registrar-client` | `client_secret_basic` | n/a | n/a | client credentials | no |
 
 ## What the flow looks like
 
@@ -337,6 +338,19 @@ specification that registered each one.
 **56. Metadata** — a client reading it, and the issuer check that decides whether it may.
 
 ![Discovery accepted and rejected](docs/images/57-metadata-discovery.png)
+
+**57. Registration** — the client metadata a caller sends, and where it sends it.
+
+![The registration request](docs/images/58-registration-request.png)
+
+**58. Registration** — six requests: one registers a client, five are refused, and the refusals are
+the interesting part.
+
+![Six registration requests](docs/images/59-registration-attempts.png)
+
+**59. Registration** — what came back, and what the server decided on the new client's behalf.
+
+![The issued credentials and the imposed settings](docs/images/60-registration-result.png)
 
 ## Refresh tokens and public clients
 
@@ -760,6 +774,45 @@ Notes:
 * Metadata is a promise, not proof. Nothing in it is signed; the transport and the issuer check do
   the work the document cannot.
 
+## Dynamic client registration (RFC 7591)
+
+`/dynamic-registration` registers a client at runtime. Every other client in this demo was written
+into configuration by hand; this one arrives as a JSON document and is handed back a `client_id`, a
+secret, and a token for managing its own registration.
+
+The page makes six requests. One works:
+
+| Request | Result |
+|---|---|
+| With no access token | `401`, with a `WWW-Authenticate` challenge naming where to learn how to authenticate |
+| With a token carrying `client.create` **and** `client.read` | `401 invalid_token` |
+| Asking for `scope` in the registration | `400 invalid_scope` |
+| A well-formed registration | `201`, credentials issued |
+| The same initial access token again | `401 invalid_token` |
+| Reading the registration back (RFC 7592) | `200` |
+
+Notes:
+
+* **Spring Authorization Server implements OpenID Connect Registration**, which is RFC 7591 with
+  OpenID's additions, at `/connect/register`. It is off by default; switching it on is the whole
+  configuration, and it brings the `client.create` scope check and the registration access token
+  with it. Both metadata documents gain a `registration_endpoint` as a result — before, neither
+  mentioned one.
+* **A token with too much scope is refused, not narrowed.** The endpoint wants exactly
+  `client.create`, so a token that also carries `client.read` fails as `invalid_token`. That is why
+  the registrar here asks for one scope at a time.
+* **An initial access token is spent by the registration it authorises.** RFC 7591 §3 leaves the
+  endpoint's protection to the server; this one burns the token on first use.
+* **The `scope` field is refused outright.** RFC 7591 §2 defines it, and this server rejects any
+  registration that sets it — a client that could name its own scopes would be granting itself
+  authority. A deliberate deviation from the specification, on by default, and it means a newly
+  registered client has no scopes at all until something out of band gives it some.
+* **The server decides the security posture.** The registration asked for neither PKCE nor consent
+  and got both, read back from the stored registration rather than from the response. Registration
+  hands out an identity, not authority.
+* Anything registered lands in the same table the hand-written clients live in, and RFC 7592's
+  delete operation is not implemented here — the only way back is the database.
+
 ## Mix-up attack defence (`iss`)
 
 `/mixup` demonstrates RFC 9207 by running the attack it prevents, end to end, against this
@@ -923,7 +976,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── AuthorizationCodeBindingController.java  /code-binding and its own callback
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
-│   └── AuthorizationServerMetadataController.java  /metadata
+│   ├── AuthorizationServerMetadataController.java  /metadata
+│   └── DynamicClientRegistrationController.java   /dynamic-registration
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -942,7 +996,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
-│   └── AuthorizationServerMetadataService.java  reads the published documents back
+│   ├── AuthorizationServerMetadataService.java  reads the published documents back
+│   └── DynamicClientRegistrationService.java  registers a client, and fails to five ways
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -979,6 +1034,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── MetadataEntry.java               one published field, its requirement level and its source
     ├── MetadataComparison.java
     ├── DiscoveryAttempt.java
+    ├── RegistrationAttempt.java         one request to the registration endpoint
+    ├── RegistrationRun.java
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
