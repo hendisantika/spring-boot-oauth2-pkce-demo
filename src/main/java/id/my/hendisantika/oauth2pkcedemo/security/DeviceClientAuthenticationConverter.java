@@ -11,6 +11,7 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.StringUtils;
 
+import java.security.cert.X509Certificate;
 import java.util.Map;
 
 /**
@@ -44,9 +45,18 @@ public final class DeviceClientAuthenticationConverter implements Authentication
      * this, a public device client is bounced to the login page instead of being served JSON. The
      * refresh case matters as much as the other two: the device grant is the one place a public
      * client here is issued a refresh token, and without this it could never use it.
+     * <p>
+     * A request whose handshake carried a client certificate is left alone. Such a caller is not a
+     * client with nothing to authenticate with - it has a credential, and Spring Authorization
+     * Server's own X.509 converter knows what to do with it. Claiming the request here would
+     * authenticate a certificate-holding device client as public and then refuse it for not being
+     * registered that way, which is what the mTLS refresh page ran into.
      */
     @Override
     public Authentication convert(HttpServletRequest request) {
+        if (presentedACertificate(request)) {
+            return null;
+        }
         if (!isDeviceAuthorizationRequest(request) && !isPublicClientTokenRequest(request)) {
             return null;
         }
@@ -56,6 +66,12 @@ public final class DeviceClientAuthenticationConverter implements Authentication
             return null;
         }
         return new DeviceClientAuthenticationToken(clientId, ClientAuthenticationMethod.NONE, null, Map.of());
+    }
+
+    /** RFC 8705 section 2: the servlet container puts the verified chain here, or nothing at all. */
+    private static boolean presentedACertificate(HttpServletRequest request) {
+        Object chain = request.getAttribute("jakarta.servlet.request.X509Certificate");
+        return chain instanceof X509Certificate[] certificates && certificates.length > 0;
     }
 
     private boolean isDeviceAuthorizationRequest(HttpServletRequest request) {
