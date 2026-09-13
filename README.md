@@ -10,6 +10,8 @@ with **PKCE** (RFC 7636):
 Users, registered clients, authorizations, consents and the client's own tokens all live in
 **MySQL**. Every screen is rendered with **Thymeleaf**.
 
+![Landing page](docs/images/01-landing.png)
+
 ## Stack
 
 | | |
@@ -63,6 +65,29 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 
 The **/dashboard** page shows the actual `code_verifier` and `code_challenge` used for your session,
 plus the decoded ID token. **/tokens** shows the raw JWTs and the `/userinfo` response.
+
+## Screenshots
+
+**1. Sign in** — the authorization server has parked the authorization request and needs to know who
+you are. The `code_challenge` is already in the query string behind this redirect.
+
+![Login form](docs/images/02-login.png)
+
+**2. Approve access** — `requireAuthorizationConsent(true)` means the user decides which scopes the
+client actually gets. `openid` is implied by an OIDC request and is never offered for approval.
+
+![Consent screen](docs/images/03-consent.png)
+
+**3. Dashboard** — the verifier and challenge that were really exchanged for this session, next to
+the decoded ID token. The challenge travelled in the browser redirect; the verifier never left the
+app until the token request.
+
+![Dashboard showing the PKCE exchange and ID token claims](docs/images/04-dashboard.png)
+
+**4. Tokens** — the authorization request URI as sent, plus the raw ID and access JWTs and the
+`/userinfo` response.
+
+![Raw tokens page](docs/images/05-tokens.png)
 
 ## How PKCE is enforced
 
