@@ -57,6 +57,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-mtls-client` | **`self_signed_tls_client_auth`** | n/a | n/a | client credentials | no |
 | `pkce-exchange-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
 | `pkce-ciba-client` | `client_secret_basic` | n/a | n/a | **CIBA** | no |
+| `pkce-fapi-client` | `private_key_jwt` | required | n/a | code, refresh | yes, rotated, certificate-bound |
 
 ## What the flow looks like
 
@@ -281,6 +282,18 @@ missing factor.
 **44. JAR** — four ways to send it, only one of which works.
 
 ![Valid, tampered, corrupted and foreign-signed](docs/images/45-jar-outcomes.png)
+
+**45. FAPI 2.0** — the profile's server requirements, checked against the running configuration.
+
+![Server requirements, all passing](docs/images/46-fapi-server.png)
+
+**46. FAPI 2.0** — and the three it does not meet, stated rather than omitted.
+
+![Three failing requirements](docs/images/47-fapi-failures.png)
+
+**47. FAPI 2.0** — per client: one built to the profile, the rest deliberately not.
+
+![A failing client beside a passing one](docs/images/48-fapi-clients.png)
 
 ## Refresh tokens and public clients
 
@@ -663,6 +676,28 @@ The client's key is read from this demo's own configuration rather than the clie
 `jwkSetUrl`, since the client here *is* the authorization server; a deployment would read it off the
 registration.
 
+## FAPI 2.0 security profile
+
+`/fapi` checks the running configuration against the FAPI 2.0 security profile. The profile invents
+nothing — it takes the mechanisms on the other pages and says which combination is mandatory: pushed
+requests, PKCE, sender-constrained tokens, and client authentication that involves no shared secret.
+
+**This demo is not FAPI 2.0 compliant, and the page says so.** Three server requirements fail:
+
+| Requirement | Why it fails |
+|---|---|
+| The authorization response carries `iss` (RFC 9207) | Spring Authorization Server does not emit it, so a client cannot detect a mix-up attack from the response alone |
+| The server requires pushed authorization requests | `ClientSettings` has no `require_pushed_authorization_requests`, so a client can always fall back to an ordinary request |
+| All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
+
+Per client, only `pkce-fapi-client` — registered specifically to the profile — meets every
+requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
+as a public client with no authentication, or a shared secret.
+
+The checks read the live configuration (registered clients, authorization server settings) rather
+than a hand-maintained list, so they stay honest as the demo changes. A profile check that only ever
+passes is worth nothing.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -720,7 +755,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── BackchannelAuthenticationController.java  /backchannel/authenticate
 │   ├── StepUpController.java            /stepup, /stepup/verify
 │   ├── JarController.java               /jar
-│   └── JarJwkSetController.java         /jar-jwks.json, the request object signing key
+│   ├── JarJwkSetController.java         /jar-jwks.json, the request object signing key
+│   └── FapiController.java              /fapi
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -734,7 +770,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── TokenExchangeService.java        impersonation, delegation, and one that must fail
 │   ├── CibaService.java                 pending backchannel requests and their outcome
 │   ├── CibaClientService.java           the client side: open a request, then poll
-│   └── StepUpService.java               adds a second factor to the session
+│   ├── StepUpService.java               adds a second factor to the session
+│   └── FapiComplianceService.java       checks the configuration against the profile
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -760,7 +797,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── AuthenticationContextLevel.java  factors in, acr and amr out
     ├── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
     ├── JarRequestSigner.java            signs RFC 9101 request objects
-    └── JwtSecuredAuthorizationRequestFilter.java  verifies one and uses only what it carries
+    ├── JwtSecuredAuthorizationRequestFilter.java  verifies one and uses only what it carries
+    └── FapiCheck.java                   one requirement, its outcome, and what was observed
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
