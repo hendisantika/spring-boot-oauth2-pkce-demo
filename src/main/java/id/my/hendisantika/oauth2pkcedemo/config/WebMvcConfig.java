@@ -20,7 +20,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     /** Pages that read tokens out of the authorized client store. */
     private static final String[] TOKEN_PAGES =
-            {"/dashboard", "/tokens", "/refresh", "/introspect", "/introspect/**"};
+            {"/dashboard", "/tokens", "/refresh", "/introspect", "/introspect/**", "/dpop"};
 
     private final OAuth2LoginRequiredInterceptor oAuth2LoginRequiredInterceptor;
     private final AuthorizedClientRequiredInterceptor authorizedClientRequiredInterceptor;

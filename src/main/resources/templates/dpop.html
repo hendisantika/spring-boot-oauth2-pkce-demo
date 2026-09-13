@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('DPoP')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Sender-constrained tokens (DPoP)</h1>
+    <p class="lead">
+        RFC 9449. A bearer token is a password: whoever holds it, wins. DPoP ties the token to a key
+        the client keeps, so every use of it has to be signed — and a copied token is worth nothing
+        without the private key that never left the client.
+    </p>
+
+    <div class="alert" th:if="${dpopError}" th:text="${dpopError}">error</div>
+
+    <div class="card" th:unless="${canRun}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>This session has no refresh token</h2>
+        <p class="hint">
+            The demo trades a refresh token for a DPoP-bound one, because Spring's OAuth2 client has
+            no DPoP support and the authorization code leg cannot carry a proof without being rebuilt
+            by hand. You signed in as <strong th:text="${clientName}">PKCE Demo Client</strong>, which
+            is issued no refresh token.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${confidentialLoginUri}}">Sign in as the confidential client</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${canRun}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The client generates a P-256 key pair, signs a proof for the token request, and receives
+            an access token bound to that key. Then it calls a resource server three ways.
+        </p>
+        <form th:action="@{/dpop}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Get a DPoP-bound token</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${result != null}">
+        <h2>The key and the token</h2>
+        <table>
+            <tr>
+                <th>token_type</th>
+                <td><code th:text="${result.tokenType}">DPoP</code></td>
+            </tr>
+            <tr>
+                <th>Key thumbprint</th>
+                <td><code th:text="${result.thumbprint}">-</code></td>
+            </tr>
+            <tr>
+                <th>cnf claim</th>
+                <td><code th:text="${result.accessTokenClaims['cnf']}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            <code>token_type</code> is <code>DPoP</code>, not <code>Bearer</code>, and the token
+            carries a confirmation claim holding the thumbprint above. Those two values matching is
+            the whole mechanism.
+        </p>
+    </div>
+
+    <div class="card" th:if="${result != null}">
+        <h2>The proof that fetched it</h2>
+        <span class="token" th:text="${result.proofHeader}">-</span>
+        <table style="margin-top:14px">
+            <tr th:each="claim : ${result.proofClaims}">
+                <th th:text="${claim.key}">htu</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            <code>htm</code> and <code>htu</code> pin the proof to one method and one URL, and
+            <code>jti</code> lets the server reject a replay. A proof captured from one request
+            cannot be reused against another.
+        </p>
+    </div>
+
+    <div class="card" th:if="${result != null}">
+        <h2>Three attempts at the resource server</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Attempt</th>
+                <th style="width:12%">Status</th>
+                <th>Result</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="call : ${result.calls}">
+                <td>
+                    <strong th:text="${call.label}">With a matching proof</strong>
+                    <span class="hint" style="display:block" th:text="${call.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${call.statusCode}"
+                          th:style="${call.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">200</code>
+                </td>
+                <td><code th:text="${call.body}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            The second and third attempts use exactly the same access token as the first. Holding the
+            token is not enough — and holding it plus <em>a</em> key is not enough either. That is
+            what "sender-constrained" buys: stealing the token no longer gets you the account.
+        </p>
+    </div>
+</main>
+</body>
+</html>

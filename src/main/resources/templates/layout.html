@@ -17,6 +17,7 @@
         <a th:href="@{/introspect}" sec:authorize="isAuthenticated()">Introspect</a>
         <a th:href="@{/device}">Device</a>
         <a th:href="@{/par}">PAR</a>
+        <a th:href="@{/dpop}" sec:authorize="isAuthenticated()">DPoP</a>
         <a th:href="@{/logout-demo}" sec:authorize="isAuthenticated()">Logout</a>
         <form th:action="@{/logout}" method="post" style="display:inline" sec:authorize="isAuthenticated()">
             <button class="btn secondary" type="submit">Sign out</button>
