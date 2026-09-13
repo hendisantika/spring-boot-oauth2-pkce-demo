@@ -55,6 +55,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-confidential-client` | `client_secret_basic` | required | **yes** | code, refresh | yes, rotated on every use |
 | `pkce-assertion-client` | **`private_key_jwt`** | n/a | n/a | client credentials | no |
 | `pkce-mtls-client` | **`self_signed_tls_client_auth`** | n/a | n/a | client credentials | no |
+| `pkce-exchange-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
 
 ## What the flow looks like
 
@@ -207,6 +208,23 @@ endpoint.
 certificate's thumbprint.
 
 ![Two attempts: 200 with cnf.x5t#S256, 302 without](docs/images/28-mtls-results.png)
+
+**28. Token exchange** — a broad user token, and a service that wants a narrow one.
+
+![Token exchange starting point](docs/images/29-exchange-start.png)
+
+**29. Token exchange** — impersonation: `sub` is still the user, scope is down to `api.read`, and
+nothing records the service.
+
+![Impersonation result](docs/images/30-exchange-impersonation.png)
+
+**30. Token exchange** — delegation: the same, plus an `act` claim naming who is acting.
+
+![Delegation result with an act claim](docs/images/31-exchange-delegation.png)
+
+**31. Token exchange** — a service cannot exchange its way past its own registration.
+
+![Over-scoped exchange refused with invalid_scope](docs/images/32-exchange-refused.png)
 
 ## Refresh tokens and public clients
 
@@ -428,6 +446,29 @@ It is the same idea as DPoP one layer down: DPoP proves key possession with a si
 nothing from the network, mTLS proves it with the transport and needs TLS to reach the application
 intact.
 
+## Token exchange
+
+`/exchange` demonstrates RFC 8693. A service that receives a user's token trades it for one of its
+own rather than passing the original onwards — which would hand every downstream hop everything the
+user ever granted.
+
+Starting from a token scoped `openid profile email` and issued to the front end, the page runs three
+exchanges:
+
+| | Result |
+|---|---|
+| **Impersonation** — no actor token | `200`. `sub` is still the user, `aud` is now the service, scope is down to `api.read`. No `act` claim, so nothing downstream can tell this from the user calling directly. |
+| **Delegation** — the service's own token attached as `actor_token` | `200`, and the token carries `act: {sub: pkce-exchange-client}`. Still speaks for the user, but records who is speaking. |
+| **Asking for more than it may have** | `400 invalid_scope`. A service cannot exchange its way into privileges its own registration does not allow, however broad the token it was handed. |
+
+`sub` never changes — the exchange does not change who the call is *for*. What changes is the
+audience and the scope, so a leak at the downstream service costs less than a leak of the original
+token. Delegation is usually the better default, because `act` is what lets an audit log downstream
+tell the two apart.
+
+The grant is given only to the exchange client. The browser-facing clients do not have it: exchanging
+is what a downstream service does with a token it received, not something a front end needs.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -478,7 +519,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ClientAssertionController.java   /assertion
 │   ├── ClientJwkSetController.java      /client-jwks.json, the client's public keys
 │   ├── MtlsController.java              /mtls
-│   └── MtlsJwkSetController.java        /mtls-jwks.json, the client's certificate
+│   ├── MtlsJwkSetController.java        /mtls-jwks.json, the client's certificate
+│   └── TokenExchangeController.java     /exchange
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -488,7 +530,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── PushedAuthorizationRequestService.java  pushes to /oauth2/par
 │   ├── DpopService.java                 signs proofs and proves a stolen token is useless
 │   ├── ClientAssertionService.java      authenticates with a signed JWT, three ways
-│   └── MtlsService.java                 calls the TLS endpoint with and without a certificate
+│   ├── MtlsService.java                 calls the TLS endpoint with and without a certificate
+│   └── TokenExchangeService.java        impersonation, delegation, and one that must fail
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -506,7 +549,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── ClientAssertionKey.java          signs RFC 7523 assertions
     ├── ClientAssertionAttempt.java
     ├── MtlsMaterial.java                generates the demo certificates and keystores
-    └── MtlsAttempt.java
+    ├── MtlsAttempt.java
+    └── TokenExchangeAttempt.java
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
