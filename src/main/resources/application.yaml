@@ -83,6 +83,15 @@ app:
     scopes:
       - api.read
       - api.write
+  # Authenticates a user who never touches this app: it names them with a hint and waits for
+  # them to approve on their own device.
+  ciba-client:
+    registration-id: pkce-ciba-client
+    client-id: pkce-ciba-client
+    client-secret: ciba-secret
+    client-name: PKCE CIBA Client
+    scopes:
+      - api.read
   demo-users:
     - username: hendi
       password: password

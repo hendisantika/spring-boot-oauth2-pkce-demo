@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MtlsJwkSetController;
+import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationToken;
 import id.my.hendisantika.oauth2pkcedemo.entity.User;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +56,7 @@ public class DemoDataInitializer {
             seedAssertionClient(registeredClientRepository, properties);
             seedMtlsClient(registeredClientRepository, properties);
             seedExchangeClient(registeredClientRepository, passwordEncoder, properties);
+            seedCibaClient(registeredClientRepository, passwordEncoder, properties);
         };
     }
 
@@ -159,6 +161,32 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered token exchange client [{}]", client.clientId());
+    }
+
+    /**
+     * A client that authenticates a user it can name but cannot reach: it opens a backchannel
+     * request and polls while the user approves somewhere else. The grant type is registered so the
+     * token endpoint accepts it; everything behind it is implemented outside the framework.
+     */
+    void seedCibaClient(RegisteredClientRepository registeredClientRepository,
+                        PasswordEncoder passwordEncoder, DemoProperties properties) {
+        DemoProperties.Client client = properties.cibaClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .clientSecret(passwordEncoder.encode(client.clientSecret()))
+                .authorizationGrantType(CibaAuthenticationToken.CIBA_GRANT_TYPE)
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered CIBA client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

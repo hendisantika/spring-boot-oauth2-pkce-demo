@@ -7,6 +7,10 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationProvider;
+import id.my.hendisantika.oauth2pkcedemo.service.CibaService;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationProvider;
 import id.my.hendisantika.oauth2pkcedemo.security.RichAuthorizationDetail;
 import id.my.hendisantika.oauth2pkcedemo.security.RichAuthorizationRequestValidator;
@@ -34,8 +38,15 @@ import org.springframework.security.oauth2.server.authorization.OAuth2Authorizat
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.core.OAuth2Token;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.authorization.token.DelegatingOAuth2TokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.JwtGenerator;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2AccessTokenGenerator;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2RefreshTokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -77,7 +88,20 @@ public class AuthorizationServerConfig {
     public SecurityFilterChain authorizationServerSecurityFilterChain(
             HttpSecurity http,
             RegisteredClientRepository registeredClientRepository,
-            AuthorizationServerSettings authorizationServerSettings) throws Exception {
+            AuthorizationServerSettings authorizationServerSettings,
+            CibaService cibaService,
+            UserDetailsService userDetailsService,
+            OAuth2AuthorizationService authorizationService,
+            JWKSource<SecurityContext> jwkSource,
+            OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer) throws Exception {
+        // A generator of its own rather than a shared bean. Supplying an OAuth2TokenGenerator bean
+        // replaces the one Spring Authorization Server assembles internally, and that one carries
+        // DPoP handling this reimplementation would silently drop - tokens came back as Bearer with
+        // no cnf claim. CIBA never involves DPoP, so a plain JWT generator is right here.
+        JwtGenerator cibaTokenGenerator = new JwtGenerator(new NimbusJwtEncoder(jwkSource));
+        cibaTokenGenerator.setJwtCustomizer(jwtCustomizer);
+        CibaAuthenticationProvider cibaAuthenticationProvider = new CibaAuthenticationProvider(
+                cibaService, userDetailsService, authorizationService, cibaTokenGenerator);
         OAuth2AuthorizationServerConfigurer authorizationServer = new OAuth2AuthorizationServerConfigurer();
         http
                 .securityMatcher(authorizationServer.getEndpointsMatcher())
@@ -108,6 +132,11 @@ public class AuthorizationServerConfig {
                         .deviceVerificationEndpoint(endpoint -> endpoint
                                 .consentPage(CONSENT_PAGE_URI)
                                 .errorResponseHandler(deviceVerificationErrorHandler()))
+                        // CIBA is not a grant Spring Authorization Server knows, so the token
+                        // endpoint is taught to recognise and handle it.
+                        .tokenEndpoint(endpoint -> endpoint
+                                .accessTokenRequestConverter(new CibaAuthenticationConverter())
+                                .authenticationProvider(cibaAuthenticationProvider))
                         .oidc(Customizer.withDefaults()))
                 .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
