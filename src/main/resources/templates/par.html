@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Pushed authorization requests')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Pushed authorization requests</h1>
+    <p class="lead">
+        RFC 9126. Instead of packing the authorization request into a redirect and hoping the browser
+        delivers it unchanged, the client posts it to the authorization server over a back channel
+        first and gets a handle. The browser then carries a client id and that handle, nothing more.
+    </p>
+
+    <div class="card">
+        <h2>Try it</h2>
+        <p class="hint">
+            Signing in as <strong th:text="${confidentialClientName}">PKCE Confidential Client</strong>
+            pushes the request to <code th:text="${parEndpoint}">/oauth2/par</code> first — that
+            endpoint requires client authentication, which is what makes the request tamper-proof.
+            <strong th:text="${publicClientName}">PKCE Demo Client</strong> has no secret, so it
+            cannot push and sends the request the ordinary way.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+            <a class="btn" th:href="@{${parLoginUri}}">Sign in using PAR</a>
+            <a class="btn secondary" th:href="@{${plainLoginUri}}">Sign in without PAR</a>
+        </div>
+    </div>
+
+    <div class="card" th:if="${pushed != null}">
+        <h2>What the browser carried</h2>
+        <p class="hint">With PAR, for the <code th:text="${pushed.registrationId}">client</code> login:</p>
+        <span class="token" th:text="${pushed.frontChannelUri}">-</span>
+        <p class="hint" style="margin-top:14px">Without PAR the same request would have travelled as:</p>
+        <span class="token" th:text="${pushed.traditionalUri}">-</span>
+        <table style="margin-top:16px">
+            <tr>
+                <th>Front-channel length</th>
+                <td>
+                    <code th:text="${pushed.frontChannelLength()} + ' characters'">0</code>
+                    <span class="hint" th:text="'instead of ' + ${pushed.traditionalLength()}">instead of 0</span>
+                </td>
+            </tr>
+            <tr>
+                <th>request_uri</th>
+                <td><code th:text="${pushed.requestUri}">urn:ietf:params:oauth:request_uri:…</code></td>
+            </tr>
+            <tr>
+                <th>Expires</th>
+                <td>
+                    <code th:text="${pushed.expiresAt}">-</code>
+                    <span class="hint" th:text="'(' + ${pushed.secondsRemaining()} + 's left)'">(0s)</span>
+                </td>
+            </tr>
+            <tr>
+                <th>Pushed at</th>
+                <td><code th:text="${pushed.pushedAt}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The handle is single-use and short-lived. Replaying it after the authorization endpoint
+            has consumed it is refused, so intercepting it from the browser history buys nothing.
+        </p>
+    </div>
+
+    <div class="card" th:if="${pushed != null}">
+        <h2>What was pushed instead</h2>
+        <p class="hint">
+            These parameters went straight from the client to the authorization server, authenticated
+            and out of the browser's reach.
+        </p>
+        <table style="margin-top:12px">
+            <tr th:each="parameter : ${pushed.pushedParameters}">
+                <th th:text="${parameter.key}">scope</th>
+                <td><code th:text="${parameter.value}">openid profile email</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Why it matters</h2>
+        <p class="hint">
+            A front-channel request can be read and rewritten by anything the redirect passes
+            through. PKCE protects the <em>code</em> that comes back; it does nothing for the request
+            going out, so <code>scope</code>, <code>redirect_uri</code> and
+            <code>code_challenge</code> itself are all modifiable in transit. Pushing the request
+            authenticated closes that: by the time the browser is involved, the server already knows
+            exactly what was asked for.
+        </p>
+        <p class="hint">
+            It also sidesteps URL length limits, which is what makes richer request objects
+            practical.
+        </p>
+    </div>
+</main>
+</body>
+</html>
