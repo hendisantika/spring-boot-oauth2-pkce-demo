@@ -59,6 +59,9 @@ public class WebSecurityConfig {
                         .requestMatchers("/", "/error", "/css/**", "/js/**", "/favicon.ico").permitAll()
                         // A device has no browser session; the human signs in later, on their phone.
                         .requestMatchers("/device", "/device/**", "/activate", "/par").permitAll()
+                        // The client publishes its keys here, and the authorization server
+                        // fetches them unauthenticated.
+                        .requestMatchers("/assertion", "/client-jwks.json").permitAll()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage(LOGIN_PAGE_URI)

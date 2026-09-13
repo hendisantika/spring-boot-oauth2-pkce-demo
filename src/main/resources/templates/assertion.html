@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Client assertions')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>JWT client assertions (private_key_jwt)</h1>
+    <p class="lead">
+        RFC 7523. Instead of sending a shared secret on every call, the client signs a short-lived
+        JWT with a private key and sends that. The authorization server holds only the public half,
+        so there is no secret to leak from its database — and none in transit either.
+    </p>
+
+    <div class="card">
+        <h2>How this client is registered</h2>
+        <table>
+            <tr>
+                <th>client_id</th>
+                <td><code th:text="${clientId}">pkce-assertion-client</code></td>
+            </tr>
+            <tr>
+                <th>Authentication</th>
+                <td><code>private_key_jwt</code> <span class="hint">(RS256, no secret stored)</span></td>
+            </tr>
+            <tr>
+                <th>Grant</th>
+                <td><code>client_credentials</code> <span class="hint">— no user is involved</span></td>
+            </tr>
+            <tr>
+                <th>jwkSetUrl</th>
+                <td>
+                    <a th:href="@{/client-jwks.json}" th:text="${jwkSetUrl}">/client-jwks.json</a>
+                    <span class="hint" style="display:block">
+                        The server fetches this when it has an assertion to verify. Rotating the key
+                        means publishing a new one; there is nothing to coordinate.
+                    </span>
+                </td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:14px">The client's published public key:</p>
+        <span class="token" th:text="${publicJwkSet}">-</span>
+
+        <form th:action="@{/assertion}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Request a token three ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${attempts != null}">
+        <h2>Results</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Attempt</th>
+                <th style="width:12%">Status</th>
+                <th>Response</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">A valid assertion</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">200</code>
+                </td>
+                <td><code th:text="${attempt.body}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            Only a signature from the published key counts, and only while the assertion is still
+            valid. Knowing the client id buys nothing.
+        </p>
+    </div>
+
+    <div class="card" th:if="${attempts != null}">
+        <h2>The claims in the valid assertion</h2>
+        <table>
+            <tr th:each="claim : ${attempts[0].assertionClaims}">
+                <th th:text="${claim.key}">aud</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            <code>iss</code> and <code>sub</code> are both the client id — the client is asserting
+            its own identity, not speaking for a user. <code>aud</code> is the token endpoint, so an
+            assertion captured by one endpoint cannot be replayed against another, and
+            <code>exp</code> keeps the window short.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>What it is sent as</h2>
+        <p class="hint">Posted to <code th:text="${tokenEndpoint}">/oauth2/token</code>:</p>
+        <span class="token" th:text="'grant_type=client_credentials&#10;scope=' + ${scopes}
+            + '&#10;client_id=' + ${clientId}
+            + '&#10;client_assertion_type=' + ${assertionType} + '&#10;client_assertion=eyJhbGciOiJSUzI1NiIs…'">-</span>
+        <p class="hint">
+            No <code>client_secret</code> anywhere — that is the point. RFC 7523 makes
+            <code>client_id</code> optional, since the assertion's <code>iss</code> and
+            <code>sub</code> already name the client, but Spring Authorization Server requires it and
+            answers <code>invalid_request</code> without it.
+        </p>
+    </div>
+</main>
+</body>
+</html>
