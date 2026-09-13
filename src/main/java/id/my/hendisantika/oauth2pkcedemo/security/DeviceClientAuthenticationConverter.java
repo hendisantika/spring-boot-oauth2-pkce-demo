@@ -34,17 +34,20 @@ public final class DeviceClientAuthenticationConverter implements Authentication
     }
 
     /**
-     * Recognises a device identifying itself with nothing but its {@code client_id}, on the two
-     * requests the device grant makes: asking for codes, and redeeming the device code.
+     * Recognises a device identifying itself with nothing but its {@code client_id}, on the three
+     * requests it makes: asking for codes, redeeming the device code, and later refreshing the
+     * token that grant issued it.
      * <p>
-     * Spring Authorization Server ships no client authentication for either case. Its
+     * Spring Authorization Server ships no client authentication for any of them. Its
      * {@code PublicClientAuthenticationConverter} returns early unless the request is a PKCE token
-     * request, yet both endpoints insist on an authenticated client - so without this, a public
-     * device client is bounced to the login page instead of being served JSON.
+     * request, yet every one of these endpoints insists on an authenticated client - so without
+     * this, a public device client is bounced to the login page instead of being served JSON. The
+     * refresh case matters as much as the other two: the device grant is the one place a public
+     * client here is issued a refresh token, and without this it could never use it.
      */
     @Override
     public Authentication convert(HttpServletRequest request) {
-        if (!isDeviceAuthorizationRequest(request) && !isDeviceCodeTokenRequest(request)) {
+        if (!isDeviceAuthorizationRequest(request) && !isPublicClientTokenRequest(request)) {
             return null;
         }
         String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
@@ -59,9 +62,16 @@ public final class DeviceClientAuthenticationConverter implements Authentication
         return this.deviceAuthorizationRequestMatcher.matches(request);
     }
 
-    private boolean isDeviceCodeTokenRequest(HttpServletRequest request) {
-        return this.tokenRequestMatcher.matches(request)
-                && AuthorizationGrantType.DEVICE_CODE.getValue()
-                .equals(request.getParameter(OAuth2ParameterNames.GRANT_TYPE));
+    /**
+     * The device code itself, and the refresh token it was issued alongside. Both are redeemed by a
+     * client that has nothing to authenticate with beyond the id it already sent.
+     */
+    private boolean isPublicClientTokenRequest(HttpServletRequest request) {
+        if (!this.tokenRequestMatcher.matches(request)) {
+            return false;
+        }
+        String grantType = request.getParameter(OAuth2ParameterNames.GRANT_TYPE);
+        return AuthorizationGrantType.DEVICE_CODE.getValue().equals(grantType)
+                || AuthorizationGrantType.REFRESH_TOKEN.getValue().equals(grantType);
     }
 }
