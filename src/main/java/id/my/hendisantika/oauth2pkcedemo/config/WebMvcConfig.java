@@ -18,11 +18,21 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
 
+    /** Pages that read tokens out of the authorized client store. */
+    private static final String[] TOKEN_PAGES =
+            {"/dashboard", "/tokens", "/refresh", "/introspect", "/introspect/**"};
+
     private final OAuth2LoginRequiredInterceptor oAuth2LoginRequiredInterceptor;
+    private final AuthorizedClientRequiredInterceptor authorizedClientRequiredInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(oAuth2LoginRequiredInterceptor)
-                .addPathPatterns("/dashboard", "/tokens", "/refresh", "/logout-demo", "/logout/rp-initiated");
+                .addPathPatterns(TOKEN_PAGES)
+                .addPathPatterns("/logout-demo", "/logout/rp-initiated");
+        // The logout pages only need the ID token off the principal, so they are left out here: a
+        // session with no stored tokens can still sign itself out.
+        registry.addInterceptor(authorizedClientRequiredInterceptor)
+                .addPathPatterns(TOKEN_PAGES);
     }
 }
