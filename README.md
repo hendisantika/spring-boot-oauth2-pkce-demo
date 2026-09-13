@@ -325,6 +325,19 @@ the token request.
 
 ![The mismatch caught and the flow abandoned](docs/images/54-mixup-detected.png)
 
+**54. Metadata** — two documents describing one server, and what each says that the other does not.
+
+![The two metadata documents compared](docs/images/55-metadata-two-documents.png)
+
+**55. Metadata** — the RFC 8414 document field by field, with the requirement level and the
+specification that registered each one.
+
+![The published document field by field](docs/images/56-metadata-fields.png)
+
+**56. Metadata** — a client reading it, and the issuer check that decides whether it may.
+
+![Discovery accepted and rejected](docs/images/57-metadata-discovery.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -706,6 +719,47 @@ The client's key is read from this demo's own configuration rather than the clie
 `jwkSetUrl`, since the client here *is* the authorization server; a deployment would read it off the
 registration.
 
+## Authorization server metadata (RFC 8414)
+
+`/metadata` reads back, over HTTP, the two documents this server publishes about itself:
+
+| | |
+|---|---|
+| RFC 8414 | `/.well-known/oauth-authorization-server` |
+| OpenID Connect Discovery | `/.well-known/openid-configuration` |
+
+Different specifications, overlapping content. Here the OpenID document is the superset — it adds
+`userinfo_endpoint`, `end_session_endpoint` and the rest of what OpenID Connect defines — and the two
+agree on every field they share. That agreement is the part worth enforcing: where both name a field,
+a client's behaviour must not depend on which URL it happened to fetch.
+
+Only four fields are actually demanded: `issuer`, `authorization_endpoint`, `token_endpoint` and
+`response_types_supported`. Everything past that is a decade of later specifications each registering
+what it needed — the device flow, pushed requests, DPoP, certificate binding, rich authorization
+details — which is why the document doubles as a summary of what this demo can do.
+
+Notes:
+
+* **Spring Authorization Server advertises only what it knows about.** The CIBA grant, the
+  `authorization_details` types this demo validates, the `iss` parameter it returns and the scopes
+  its clients are registered for are all additions this application makes. `ServerMetadataCustomizer`
+  applies them to *both* documents from one place, so they cannot drift apart. A server that
+  implements something and does not say so is, to a client reading metadata, a server that does not.
+* **RFC 8414 §3.3 is one sentence and it matters:** the `issuer` in the document must be identical to
+  the issuer identifier the URL was built from, or none of the response may be used. The page shows
+  the same document accepted for one client and refused for another on exactly that basis — the
+  [`iss` parameter](#mix-up-attack-defence-iss) reasoning, one step earlier.
+* **The well-known string goes in different places.** RFC 8414 §3 inserts it *between the host and
+  the path*; OpenID Connect Discovery appends it. For `https://example.com/tenant1` that is
+  `https://example.com/.well-known/oauth-authorization-server/tenant1` against
+  `https://example.com/tenant1/.well-known/openid-configuration`. The rules agree only when the
+  issuer has no path, which is why this bites on the day someone deploys a tenant per path.
+* RFC 8414 §2 requires the issuer to be an `https` URL. This demo's is not, so a strict client would
+  refuse the document before reading a field of it — the same gap the [FAPI page](#fapi-20-security-profile)
+  reports.
+* Metadata is a promise, not proof. Nothing in it is signed; the transport and the issuer check do
+  the work the document cannot.
+
 ## Mix-up attack defence (`iss`)
 
 `/mixup` demonstrates RFC 9207 by running the attack it prevents, end to end, against this
@@ -868,7 +922,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── FapiController.java              /fapi
 │   ├── AuthorizationCodeBindingController.java  /code-binding and its own callback
 │   ├── MixUpController.java             /mixup and its own callback
-│   └── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
+│   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
+│   └── AuthorizationServerMetadataController.java  /metadata
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
@@ -886,7 +941,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── FapiComplianceService.java       checks the configuration against the profile
 │   ├── AuthorizationCodeBindingService.java  runs the code binding flow and redeems the code
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
-│   └── MixUpAttackerService.java        the attacker's: forward the request, take the code
+│   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
+│   └── AuthorizationServerMetadataService.java  reads the published documents back
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -919,6 +975,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── MixUpStep.java                   one move in a mix-up run, and who made it
     ├── MixUpRun.java
     ├── PendingMixUp.java                what the client wrote down before sending the user away
+    ├── ServerMetadataCustomizer.java    adds what this application supports to both documents
+    ├── MetadataEntry.java               one published field, its requirement level and its source
+    ├── MetadataComparison.java
+    ├── DiscoveryAttempt.java
     ├── PendingCodeBinding.java          what the client remembers between the two legs
     ├── CodeBindingAttempt.java
     └── CodeBindingRun.java
