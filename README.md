@@ -45,10 +45,10 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 
 ### Registered clients
 
-| Client | Authentication | PKCE | Refresh token |
-|---|---|---|---|
-| `pkce-demo-client` | none (public) | required | **no** — see below |
-| `pkce-confidential-client` | `client_secret_basic` | required | yes, rotated on every use |
+| Client | Authentication | PKCE | Grants | Refresh token |
+|---|---|---|---|---|
+| `pkce-demo-client` | none (public) | required | code, refresh, **device** | **no** on the code grant — see below |
+| `pkce-confidential-client` | `client_secret_basic` | required | code, refresh | yes, rotated on every use |
 
 ## What the flow looks like
 
@@ -112,6 +112,30 @@ two different acts, with two buttons.
 
 ![Logout page contrasting local and RP-initiated logout](docs/images/08-logout.png)
 
+**8. Device flow** — `/device` pretends to be a television. It is not signed in and does not need to
+be.
+
+![Device page before requesting a code](docs/images/09-device-start.png)
+
+**9. Device flow** — the short code to type somewhere else, and the device polling `/oauth2/token`
+on the interval the server asked for.
+
+![Device showing a user code and polling](docs/images/10-device-polling.png)
+
+**10. Device flow** — `/activate`, where the human types the code. This is the page
+`verification_uri` points at.
+
+![Activation page with the code pre-filled](docs/images/11-device-activate.png)
+
+**11. Device flow** — the same consent screen as the browser flow, told which device code it is
+approving.
+
+![Consent screen naming the device code](docs/images/12-device-consent.png)
+
+**12. Device flow** — the next poll returns tokens, and the device page updates itself.
+
+![Device page showing the granted tokens](docs/images/13-device-approved.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -140,6 +164,39 @@ After only a local logout the authorization server still considers the user sign
 authorization request completes without a prompt. Because this demo runs both roles in one
 application on one session, either button clears both; split across two deployments the difference
 is visible.
+
+## Device authorization grant
+
+`/device` runs RFC 8628 end to end against this same application, for the case where the client has
+no keyboard and no browser:
+
+1. The device posts `client_id` and `scope` to `/oauth2/device_authorization` and gets back a
+   `device_code` it keeps, plus a short `user_code` it displays.
+2. The human opens `/activate` on another device, types the code, signs in, and approves the scopes
+   on the same consent screen the browser flow uses.
+3. The device polls `/oauth2/token` with
+   `grant_type=urn:ietf:params:oauth:grant-type:device_code`. Until someone approves, that is HTTP
+   400 `authorization_pending` — a normal step, not a failure. `slow_down` backs the interval off by
+   five seconds.
+
+Two things this demo had to work around, both worth knowing:
+
+* **A public client cannot authenticate at the device endpoints out of the box.** Spring
+  Authorization Server's `PublicClientAuthenticationConverter` returns early unless the request is a
+  PKCE *token* request, yet both `/oauth2/device_authorization` and the device-code token request
+  insist on an authenticated client — so a device is bounced to `/login` instead of being served
+  JSON. `DeviceClientAuthenticationConverter` and `DeviceClientAuthenticationProvider` fill that gap,
+  following the approach the reference documentation describes.
+* **`openid` is rejected on this grant** with `invalid_scope`, because OpenID Connect is not defined
+  over the device flow. The device gets an access token and never an ID token, so `/device` requests
+  only `profile` and `email`.
+
+The device *is* issued a refresh token here — the restriction that withholds one from a public client
+applies to the authorization code grant, not to this one.
+
+Denying (or mistyping a code) has no redirect URI to report back to, so the default response is a raw
+JSON 400. The device verification endpoint is given an error handler that sends the human to
+`/activate` with a readable message instead; the device still learns `access_denied` on its next poll.
 
 ## How PKCE is enforced
 
@@ -180,17 +237,22 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   └── WebMvcConfig.java                registers that interceptor
 ├── controller/
 │   ├── HomeController.java              /, /login, /dashboard, /tokens
-│   ├── ConsentController.java           /oauth2/consent
+│   ├── ConsentController.java           /oauth2/consent (browser and device flows)
 │   ├── RefreshTokenController.java      /refresh
-│   └── LogoutDemoController.java        /logout-demo, /logout/rp-initiated
+│   ├── LogoutDemoController.java        /logout-demo, /logout/rp-initiated
+│   └── DeviceFlowController.java        /device, /device/poll, /activate
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
-│   └── TokenRefreshService.java         runs the refresh_token grant on demand
+│   ├── TokenRefreshService.java         runs the refresh_token grant on demand
+│   └── DeviceFlowService.java           drives RFC 8628 over HTTP
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
-    └── TokenSnapshot.java               before/after view of a token pair
+    ├── TokenSnapshot.java               before/after view of a token pair
+    ├── DeviceAuthorization.java         the device's half of RFC 8628
+    ├── DevicePollResult.java            the states a polling device can be in
+    └── DeviceClientAuthentication*.java lets a public client use the device endpoints
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
