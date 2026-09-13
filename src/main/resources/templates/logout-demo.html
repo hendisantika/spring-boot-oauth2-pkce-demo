@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Logout')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Two kinds of logout</h1>
+    <p class="lead">
+        Clearing the client's session and ending the session at the authorization server are separate
+        acts. Only the second one stops the next authorization request from succeeding silently.
+    </p>
+
+    <div class="card">
+        <h2>1. Local logout</h2>
+        <p class="hint">
+            <code>POST /logout</code> — Spring Security's <code>LogoutFilter</code> clears the
+            <code>SecurityContext</code>, invalidates the session and drops the <code>JSESSIONID</code>.
+            The authorization server is not told anything.
+        </p>
+        <form th:action="@{/logout}" method="post" style="margin-top:14px">
+            <button class="btn secondary" type="submit">Local logout</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>2. RP-initiated logout (OpenID Connect)</h2>
+        <p class="hint">
+            The browser is sent to the authorization server's end session endpoint with the ID token
+            as proof of who is leaving. The server ends its own session, then redirects back to a
+            <code>post_logout_redirect_uri</code> that was registered against the client.
+        </p>
+        <table style="margin-top:12px">
+            <tr>
+                <th>end_session_endpoint</th>
+                <td><code th:text="${endSessionEndpoint}">/connect/logout</code></td>
+            </tr>
+            <tr>
+                <th>post_logout_redirect_uri</th>
+                <td><code th:text="${postLogoutRedirectUri}">/</code></td>
+            </tr>
+            <tr>
+                <th>id_token_hint</th>
+                <td>
+                    <code th:text="${idTokenHint}">-</code>
+                    <span class="hint" style="display:block">Abbreviated; the full JWT is on the
+                        <a th:href="@{/tokens}">Tokens</a> page.</span>
+                </td>
+            </tr>
+        </table>
+        <form th:action="@{/logout/rp-initiated}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">RP-initiated logout</button>
+        </form>
+        <p class="hint">
+            An unregistered <code>post_logout_redirect_uri</code> is rejected, so a logout link cannot
+            be used as an open redirect.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Why both exist</h2>
+        <p class="hint">
+            After a local logout the authorization server still considers you signed in: pressing
+            <em>Sign in with PKCE</em> again returns a code without prompting, because the server's
+            session outlived the client's. RP-initiated logout is what makes the next login ask for
+            credentials again.
+        </p>
+        <p class="hint">
+            In this demo the client and the authorization server are one application sharing one
+            session, so either button ends up clearing both. Split across two deployments they are
+            two independent sessions and the difference is visible.
+        </p>
+    </div>
+</main>
+</body>
+</html>
