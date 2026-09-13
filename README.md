@@ -136,6 +136,23 @@ approving.
 
 ![Device page showing the granted tokens](docs/images/13-device-approved.png)
 
+**13. Introspect and revoke** — signed in as the confidential client, both operations are on offer.
+
+![Introspection page with both operations](docs/images/14-introspect-start.png)
+
+**14. Introspect** — a live token, described by the authorization server.
+
+![Introspection of an active token](docs/images/15-introspect-active.png)
+
+**15. Revoke** — the same token afterwards: `active: false`, and nothing else.
+
+![Introspection of a revoked token](docs/images/16-introspect-revoked.png)
+
+**16. Introspect** — signed in as the public client, introspection still works but revocation is not
+offered, and the page says why.
+
+![Introspection page for a public client session](docs/images/17-introspect-public-client.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -198,6 +215,30 @@ Denying (or mistyping a code) has no redirect URI to report back to, so the defa
 JSON 400. The device verification endpoint is given an error handler that sends the human to
 `/activate` with a readable message instead; the device still learns `access_denied` on its next poll.
 
+## Introspection and revocation
+
+`/introspect` calls both endpoints as the confidential client, since RFC 7662 and RFC 7009 each
+require an authenticated caller — an open introspection endpoint would be a token oracle.
+
+The interesting part is that the two are scoped differently:
+
+| | Introspection (RFC 7662) | Revocation (RFC 7009) |
+|---|---|---|
+| Whose tokens? | **any** client's | only the caller's own |
+| Someone else's token | described normally | `invalid_client`, HTTP 400 |
+| Unknown token | `{"active": false}` | HTTP 200 |
+
+So the page offers revocation only when the session's tokens belong to the client holding the
+secret, and explains the asymmetry otherwise.
+
+Both specs are deliberately uninformative about tokens that do not exist. An inactive token
+introspects to exactly `{"active": false}` and nothing else — revoked, expired and never-issued are
+indistinguishable — and revocation answers `200` either way. Neither endpoint can be used to probe
+which tokens are real. Revoking then introspecting is what actually proves the revocation landed.
+
+Revoking an access token stops that one token; revoking a refresh token invalidates the authorization
+it came from, taking the access token with it.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -240,19 +281,24 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ConsentController.java           /oauth2/consent (browser and device flows)
 │   ├── RefreshTokenController.java      /refresh
 │   ├── LogoutDemoController.java        /logout-demo, /logout/rp-initiated
-│   └── DeviceFlowController.java        /device, /device/poll, /activate
+│   ├── DeviceFlowController.java        /device, /device/poll, /activate
+│   └── TokenAdminController.java        /introspect, /introspect/revoke
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
 │   ├── TokenRefreshService.java         runs the refresh_token grant on demand
-│   └── DeviceFlowService.java           drives RFC 8628 over HTTP
+│   ├── DeviceFlowService.java           drives RFC 8628 over HTTP
+│   └── TokenAdminService.java           introspects and revokes as the confidential client
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
     ├── TokenSnapshot.java               before/after view of a token pair
     ├── DeviceAuthorization.java         the device's half of RFC 8628
     ├── DevicePollResult.java            the states a polling device can be in
-    └── DeviceClientAuthentication*.java lets a public client use the device endpoints
+    ├── DeviceClientAuthentication*.java lets a public client use the device endpoints
+    ├── RestartOAuth2LoginFilter.java    makes a second login in one session work
+    ├── IntrospectionResult.java
+    └── RevocationResult.java
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
@@ -282,6 +328,16 @@ src/main/resources/db/migration/
   `UsernamePasswordAuthenticationToken` in the session — and the demo pages need an
   `OAuth2AuthenticationToken` to read tokens off. `OAuth2LoginRequiredInterceptor` sends those
   sessions through the client flow instead of letting argument resolution fail with a 500.
+* **One session cannot hold two logins.** Client and authorization server share a
+  `SecurityContext`, so after a login it holds an `OAuth2AuthenticationToken` — and if a second
+  authorization request starts from that session, the authorization server treats *that* as the end
+  user. Spring Security 7 reads `auth_time` off a `FactorGrantedAuthority` that only an interactive
+  login attaches, so minting the ID token fails with "authenticationTime cannot be null" and the user
+  gets a 500. Reachable just by pressing a sign-in button twice. `RestartOAuth2LoginFilter` clears the
+  session and starts the flow clean.
+* **A session can outlive the tokens it refers to.** Authentication still looks valid after the
+  authorized client row is gone, so the token pages would dereference a null.
+  `AuthorizedClientRequiredInterceptor` sends those sessions back through the flow.
 * **Signing keys are generated per boot.** Tokens do not survive a restart. A real deployment keeps
   a stable key.
 
