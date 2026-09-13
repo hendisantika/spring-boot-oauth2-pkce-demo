@@ -165,6 +165,19 @@ offered, and the page says why.
 
 ![The pushed request parameters](docs/images/20-par-pushed.png)
 
+**20. DPoP** — the client makes a key, proves possession of it, and gets a token tied to it.
+
+![DPoP page before running](docs/images/21-dpop-start.png)
+
+**21. DPoP** — `token_type` is `DPoP`, and the token's `cnf.jkt` is the key's thumbprint.
+
+![The key thumbprint matching the cnf claim](docs/images/22-dpop-binding.png)
+
+**22. DPoP** — the same token three ways. Only the one accompanied by a proof from the bound key
+works.
+
+![Three attempts: 200, 401, 401](docs/images/23-dpop-attempts.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -286,6 +299,39 @@ Two things to know:
 The `request_uri` is single-use and short-lived; replaying a consumed one is refused with `400`, so
 lifting it out of browser history buys nothing.
 
+## Sender-constrained tokens (DPoP)
+
+`/dpop` demonstrates RFC 9449. A bearer token is a password — whoever holds it wins. DPoP ties the
+token to a key the client keeps, so every use of it must be signed.
+
+The client generates a P-256 key pair, signs a proof (`typ: dpop+jwt`, public JWK in the header,
+`htm`/`htu`/`jti`/`iat` in the claims), and sends it with the token request. What comes back is
+`token_type: DPoP` carrying `cnf.jkt` — the thumbprint of that key.
+
+Then `/api/me` is called three times with **exactly the same token**:
+
+| Attempt | Result |
+|---|---|
+| Proof signed by the bound key | `200` |
+| No proof — a stolen token as it would be presented | `401` |
+| Proof signed by a *different* key | `401` |
+
+Holding the token is not enough, and holding it plus *a* key is not enough either.
+
+Notes:
+
+* **Spring's OAuth2 client has no DPoP support**, so the proofs are built by hand with Nimbus. The
+  demo uses the refresh token grant to obtain the bound token, since that leg needs nothing from the
+  browser — threading a proof through the authorization code leg would mean rebuilding Spring's
+  redirect handling.
+* **`/api/**` accepts only DPoP.** `jwt()` is configured so the access token can be decoded, but
+  that also installs the bearer filter — and a plain JWT filter would happily accept a DPoP-bound
+  token presented as `Authorization: Bearer`, because nothing in it checks `cnf.jkt`. The chain sets
+  a `bearerTokenResolver` that resolves nothing, which is what actually keeps bearer out. Verified:
+  replaying a real `cnf`-bearing token as Bearer gets `401`.
+* `ath` binds a resource-request proof to one specific token, and `htm`/`htu`/`jti` pin it to one
+  method, one URL, and one use.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -330,14 +376,17 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── LogoutDemoController.java        /logout-demo, /logout/rp-initiated
 │   ├── DeviceFlowController.java        /device, /device/poll, /activate
 │   ├── TokenAdminController.java        /introspect, /introspect/revoke
-│   └── PushedAuthorizationController.java  /par
+│   ├── PushedAuthorizationController.java  /par
+│   ├── DpopController.java              /dpop
+│   └── ProtectedApiController.java      /api/me, DPoP-only resource server
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
 │   ├── TokenRefreshService.java         runs the refresh_token grant on demand
 │   ├── DeviceFlowService.java           drives RFC 8628 over HTTP
 │   ├── TokenAdminService.java           introspects and revokes as the confidential client
-│   └── PushedAuthorizationRequestService.java  pushes to /oauth2/par
+│   ├── PushedAuthorizationRequestService.java  pushes to /oauth2/par
+│   └── DpopService.java                 signs proofs and proves a stolen token is useless
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -349,7 +398,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── IntrospectionResult.java
     ├── RevocationResult.java
     ├── PushedAuthorizationRequest.java
-    └── PushedAuthorizationRequestResolver.java  pushes before the browser is redirected
+    ├── PushedAuthorizationRequestResolver.java  pushes before the browser is redirected
+    ├── DpopKeyPair.java                 generates the key and signs proofs
+    └── DpopDemoResult.java
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
