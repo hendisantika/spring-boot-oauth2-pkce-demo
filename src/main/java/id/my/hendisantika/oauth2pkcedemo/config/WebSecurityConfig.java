@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.LogoutDemoController;
 import id.my.hendisantika.oauth2pkcedemo.security.PkceAuditingAuthorizationRequestRepository;
+import id.my.hendisantika.oauth2pkcedemo.security.RestartOAuth2LoginFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -15,6 +16,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.security.oauth2.client.web.AuthenticatedPrincipalOAuth2AuthorizedClientRepository;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
@@ -66,6 +68,9 @@ public class WebSecurityConfig {
                 // that hitting a protected page always starts the PKCE flow rather than the raw form.
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new LoginUrlAuthenticationEntryPoint(authorizationRequestUri)))
+                // Must run before the redirect filter builds a second authorization request on top
+                // of an existing OAuth2 authentication.
+                .addFilterBefore(new RestartOAuth2LoginFilter(), OAuth2AuthorizationRequestRedirectFilter.class)
                 .logout(logout -> logout
                         .logoutSuccessUrl("/")
                         .clearAuthentication(true)
