@@ -26,6 +26,7 @@ public record DemoProperties(String issuerUri,
                              Client codeBindingClient,
                              Client mixUpClient,
                              Client registrarClient,
+                             Client relayClient,
                              List<DemoUser> demoUsers) {
 
     /**

@@ -63,6 +63,7 @@ public class DemoDataInitializer {
             seedCodeBindingClient(registeredClientRepository, properties);
             seedMixUpClient(registeredClientRepository, properties);
             seedRegistrarClient(registeredClientRepository, passwordEncoder, properties);
+            seedRelayClient(registeredClientRepository, passwordEncoder, properties);
         };
     }
 
@@ -320,6 +321,33 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered registrar client [{}]", client.clientId());
+    }
+
+    /**
+     * A second service holding the same grants as the exchange client. Registered so the demo has a
+     * party that is allowed to exchange tokens in general and still refused for this user, which is
+     * the only way to show what may_act decides.
+     */
+    void seedRelayClient(RegisteredClientRepository registeredClientRepository,
+                         PasswordEncoder passwordEncoder, DemoProperties properties) {
+        DemoProperties.Client client = properties.relayClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .clientSecret(passwordEncoder.encode(client.clientSecret()))
+                .authorizationGrantType(AuthorizationGrantType.TOKEN_EXCHANGE)
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered relay client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

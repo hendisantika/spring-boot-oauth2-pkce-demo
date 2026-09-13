@@ -129,6 +129,15 @@ app:
     scopes:
       - client.create
       - client.read
+  # A second service that can exchange tokens. Its registration is as trusted as the other one's;
+  # what it does not have is the user's token naming it in may_act.
+  relay-client:
+    registration-id: pkce-relay-client
+    client-id: pkce-relay-client
+    client-secret: relay-secret
+    client-name: PKCE Relay Client
+    scopes:
+      - api.read
   demo-users:
     - username: hendi
       password: password
