@@ -78,6 +78,9 @@ public class AuthorizationServerConfig {
                 .securityMatcher(authorizationServer.getEndpointsMatcher())
                 .with(authorizationServer, server -> server
                         .authorizationEndpoint(endpoint -> endpoint.consentPage(CONSENT_PAGE_URI))
+                        // RFC 9126. Off by default, and absent from the discovery document until it
+                        // is switched on here.
+                        .pushedAuthorizationRequestEndpoint(Customizer.withDefaults())
                         // Lets a public client identify itself with client_id alone at the device
                         // authorization endpoint, which nothing built in covers.
                         .clientAuthentication(clientAuthentication -> clientAuthentication
