@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Refresh token binding')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Is the refresh token bound too?</h1>
+    <p class="lead">
+        RFC 9449 binds an access token to a key, which the <a th:href="@{/dpop}">DPoP page</a> shows.
+        Section 5 goes further: a refresh token issued to a <strong>public</strong> client must be
+        bound to that key as well — a client with no credentials has nothing else to prove it is the
+        one the token was issued to. This page checks whether it is.
+    </p>
+
+    <div class="alert" th:if="${bindingError}" th:text="${bindingError}">error</div>
+
+    <div class="card" th:if="${run == null and pending == null}">
+        <h2>Getting a refresh token a public client can hold</h2>
+        <p class="hint">
+            The authorization code grant will not give one to a client that authenticates with
+            nothing — <a th:href="@{/refresh}">the refresh page</a> explains why. The device grant
+            will, which makes it the one place here where this question can be asked at all.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Client</th>
+                <td><code th:text="${clientId}">pkce-demo-client</code>
+                    <span class="hint" style="display:block">Public: no secret, nothing to authenticate with.</span></td>
+            </tr>
+            <tr>
+                <th>Token endpoint</th>
+                <td><code th:text="${tokenEndpoint}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/refresh-binding/start}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Start a device authorization</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${pending != null}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Approve it</h2>
+        <table>
+            <tr>
+                <th style="width:26%">User code</th>
+                <td><code th:text="${pending.userCode}">ABCD-EFGH</code></td>
+            </tr>
+            <tr>
+                <th>Key thumbprint</th>
+                <td><code th:text="${pending.thumbprint()}">-</code>
+                    <span class="hint" style="display:block">
+                        Generated before the codes were asked for, so the tokens can be bound to it.
+                    </span></td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            Approve the code the way a person would, then come back and redeem it. The device never
+            sees the browser; that is the point of the grant.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn secondary" th:href="@{/activate(user_code=${pending.userCode})}"
+               target="_blank">Approve it in a new tab</a>
+        </p>
+        <form th:action="@{/refresh-binding/run}" method="post" style="margin-top:10px">
+            <button class="btn" type="submit">Redeem it, then try to refresh</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What the device was issued</h2>
+        <table>
+            <tr>
+                <th style="width:26%">token_type</th>
+                <td><code th:text="${run.tokenType}">DPoP</code></td>
+            </tr>
+            <tr>
+                <th>Key thumbprint</th>
+                <td><code th:text="${run.thumbprint}">-</code></td>
+            </tr>
+            <tr>
+                <th>Access token cnf.jkt</th>
+                <td><code th:text="${run.accessTokenConfirmation}">-</code></td>
+            </tr>
+            <tr>
+                <th>Refresh token</th>
+                <td><code th:text="${run.refreshTokenIssued} ? 'issued' : 'none'">issued</code>
+                    <span class="hint" style="display:block">
+                        To a client holding no credentials at all.
+                    </span></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run != null}"
+         th:style="${run.servedWithoutAProof()} ? 'border-color:#f0b4ae;background:#fff7f6' : ''">
+        <h2>Three ways to use it</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:28%">Refresh request</th>
+                <th style="width:8%">Status</th>
+                <th style="width:12%">token_type</th>
+                <th>What came back</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.unbound()} ? 'color:#b3261e' : (${attempt.isSuccess()} ? 'color:#2f6f4f' : '')">200</code>
+                </td>
+                <td><code th:text="${attempt.tokenType} ?: '-'">DPoP</code></td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.unbound()} ? 'color:#b3261e' : ''">-</span>
+                    <span class="hint" style="display:block" th:if="${attempt.confirmation != null}">
+                        cnf.jkt <code th:text="${attempt.confirmation}">-</code>
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" th:if="${run.servedWithoutAProof()}">
+            Read those in order. The first is the binding working: a proof from a key the tokens were
+            never tied to is refused. The second is the finding — sending <em>no</em> proof is not
+            refused at all. It is served, and what comes back is an ordinary Bearer token with no
+            <code>cnf</code>, which is to say a stolen refresh token is worth what it would be if
+            none of this existed.
+        </p>
+        <p class="hint" th:if="${run.servedWithoutAProof()}">
+            The third is what that costs. The same key that worked a moment ago is now refused, and
+            the reason the server gives is <code>jkt claim is missing</code>: the check compares the
+            proof against <em>the current access token's</em> <code>cnf.jkt</code>, and the
+            unbound token issued in the second row is now the current one. One request without a
+            proof does not merely slip past the binding — it removes it from the authorization, and
+            the client still holding the key is the one locked out.
+        </p>
+        <p class="hint" th:unless="${run.servedWithoutAProof()}">
+            Every request without the bound key was refused, which is what section 5 asks for.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null or pending != null}">
+        <p>
+            <a class="btn secondary" th:href="@{/refresh-binding/reset}">Start again</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The check is conditional, and that is the whole problem.</strong>
+            <code>OAuth2RefreshTokenAuthenticationProvider</code> verifies the proof's key against
+            the current access token's <code>cnf.jkt</code> — but only
+            <em>if a proof was sent</em>, and only for a client authenticating with
+            <code>none</code>. No proof means no comparison, and the request is served as though
+            DPoP had never been involved. RFC 9449 section 5 is not conditional: a public client's
+            refresh token is bound, and a refresh request without a matching proof is to be refused.
+        </p>
+        <p class="hint">
+            <strong>The binding lives on the access token, not on the refresh token.</strong> That is
+            what makes the third row above possible. There is nowhere in the stored authorization
+            that says "this refresh token belongs to key K" — the check reaches for the current
+            access token and reads its <code>cnf</code>, so replacing that token replaces the
+            binding. Anyone who can spend the refresh token once without a proof takes the binding
+            off it for good.
+        </p>
+        <p class="hint">
+            <strong>For a confidential client there is nothing to check</strong>, and that is
+            correct. The client authenticates with a secret, so the server already knows who is
+            asking; the binding adds nothing the credential does not already give. The rule exists
+            for clients that have no credential at all — which is why this page had to reach for the
+            device grant to find one.
+        </p>
+        <p class="hint">
+            <strong>The device grant needed a small fix to ask the question.</strong> A public client
+            could be issued a refresh token here and then had no way to use it: Spring Authorization
+            Server has no client authentication for a public client's refresh request, so it was
+            bounced to the login page. The converter that already covered the device endpoints now
+            covers this one too — see <a th:href="@{/device}">the device page</a> for the rest of
+            that story.
+        </p>
+        <p class="hint">
+            <a th:href="@{/code-binding}">Code binding</a> ties the authorization code to the same
+            key, and <a th:href="@{/dpop}">DPoP</a> ties the access token. A chain that holds at
+            every step but this one is only as strong as this step.
+        </p>
+    </div>
+</main>
+</body>
+</html>
