@@ -5,7 +5,8 @@ with **PKCE** (RFC 7636):
 
 * an **Authorization Server** (Spring Authorization Server) that refuses any authorization request
   arriving without a `code_challenge`, and
-* a **public OAuth2 client** — no client secret — that logs in against that same server.
+* two **OAuth2 clients** that log in against that same server — a **public** one with no secret at
+  all, and a **confidential** one that keeps a secret and is *still* required to use PKCE.
 
 Users, registered clients, authorizations, consents and the client's own tokens all live in
 **MySQL**. Every screen is rendered with **Thymeleaf**.
@@ -41,6 +42,13 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 |---|---|---|
 | `hendi` | `password` | `ROLE_ADMIN`, `ROLE_USER` |
 | `itadmin` | `password` | `ROLE_USER` |
+
+### Registered clients
+
+| Client | Authentication | PKCE | Refresh token |
+|---|---|---|---|
+| `pkce-demo-client` | none (public) | required | **no** — see below |
+| `pkce-confidential-client` | `client_secret_basic` | required | yes, rotated on every use |
 
 ## What the flow looks like
 
@@ -89,6 +97,50 @@ app until the token request.
 
 ![Raw tokens page](docs/images/05-tokens.png)
 
+**5. Refresh** — signed in as the *public* client there is nothing to refresh, and the page says why
+rather than hiding it.
+
+![Refresh page explaining that a public client gets no refresh token](docs/images/06-refresh-public-client.png)
+
+**6. Refresh** — signed in as the confidential client, `grant_type=refresh_token` returns a new
+access token *and* a rotated refresh token.
+
+![Refresh token grant showing before and after](docs/images/07-refresh-token-grant.png)
+
+**7. Logout** — clearing the client's session and ending the session at the authorization server are
+two different acts, with two buttons.
+
+![Logout page contrasting local and RP-initiated logout](docs/images/08-logout.png)
+
+## Refresh tokens and public clients
+
+`/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
+valid, which `RefreshTokenOAuth2AuthorizedClientProvider` would not do on its own.
+
+The catch the demo makes visible: **Spring Authorization Server will not issue a refresh token to a
+public client.** `OAuth2RefreshTokenGenerator` returns `null` when the client authenticates with
+`ClientAuthenticationMethod.NONE` on the authorization code grant — a long-lived token in the hands
+of a client that cannot keep a secret is what the OAuth 2.0 Security BCP warns against. That is why
+there is a second, confidential client; PKCE applies to it just the same.
+
+Refresh tokens are rotated (`reuseRefreshTokens(false)`), so replaying an old one fails — which is
+how a server notices a stolen token.
+
+## Logout
+
+Two separate things, both on `/logout-demo`:
+
+* **Local logout** — `POST /logout`. Spring Security clears the `SecurityContext`, invalidates the
+  session, drops the cookie. The authorization server is never told.
+* **RP-initiated logout** — the browser goes to `/connect/logout` with `id_token_hint` and a
+  `post_logout_redirect_uri`, and the server ends *its* session. An unregistered redirect URI is
+  rejected with `invalid_request`, so this cannot be abused as an open redirect.
+
+After only a local logout the authorization server still considers the user signed in, so the next
+authorization request completes without a prompt. Because this demo runs both roles in one
+application on one session, either button clears both; split across two deployments the difference
+is visible.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -124,13 +176,21 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── WebSecurityConfig.java           filter chain 2 — login form, oauth2Login, client registration
 │   ├── DemoDataInitializer.java         seeds users + the PKCE client (idempotent)
 │   └── DemoProperties.java              typed binding for the `app.*` properties
+│   ├── OAuth2LoginRequiredInterceptor.java  keeps form-login-only sessions off the demo pages
+│   └── WebMvcConfig.java                registers that interceptor
 ├── controller/
 │   ├── HomeController.java              /, /login, /dashboard, /tokens
-│   └── ConsentController.java           /oauth2/consent
-├── entity|repository|service/           users + JpaUserDetailsService
+│   ├── ConsentController.java           /oauth2/consent
+│   ├── RefreshTokenController.java      /refresh
+│   └── LogoutDemoController.java        /logout-demo, /logout/rp-initiated
+├── entity|repository/                   users
+├── service/
+│   ├── JpaUserDetailsService.java       authenticates against MySQL
+│   └── TokenRefreshService.java         runs the refresh_token grant on demand
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
-    └── PkceExchange.java
+    ├── PkceExchange.java
+    └── TokenSnapshot.java               before/after view of a token pair
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
@@ -155,6 +215,11 @@ src/main/resources/db/migration/
 * **MySQL JDBC parameters.** The URL carries
   `preserveInstants=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true`, as the
   authorization server's own schema documentation requires, so token instants round-trip as UTC.
+* **`authenticated()` is not the same as "logged in through the client".** Signing in at the
+  authorization server's own `/login` form satisfies `authenticated()`, but leaves a
+  `UsernamePasswordAuthenticationToken` in the session — and the demo pages need an
+  `OAuth2AuthenticationToken` to read tokens off. `OAuth2LoginRequiredInterceptor` sends those
+  sessions through the client flow instead of letting argument resolution fail with a 500.
 * **Signing keys are generated per boot.** Tokens do not survive a restart. A real deployment keeps
   a stable key.
 
