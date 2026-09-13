@@ -64,6 +64,7 @@ public class DemoDataInitializer {
             seedMixUpClient(registeredClientRepository, properties);
             seedRegistrarClient(registeredClientRepository, passwordEncoder, properties);
             seedRelayClient(registeredClientRepository, passwordEncoder, properties);
+            seedMtlsRefreshClient(registeredClientRepository, properties);
         };
     }
 
@@ -348,6 +349,39 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered relay client [{}]", client.clientId());
+    }
+
+    /**
+     * An mTLS client that is issued a refresh token. The one on the mTLS page holds only the client
+     * credentials grant, which never produces one; this holds the device grant, which is the way a
+     * refresh token can be obtained here without a browser redirect belonging to the client.
+     */
+    void seedMtlsRefreshClient(RegisteredClientRepository registeredClientRepository,
+                               DemoProperties properties) {
+        DemoProperties.Client client = properties.mtlsRefreshClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.SELF_SIGNED_TLS_CLIENT_AUTH)
+                .authorizationGrantType(AuthorizationGrantType.DEVICE_CODE)
+                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+                .clientSettings(ClientSettings.builder()
+                        .jwkSetUrl(properties.issuerUri() + MtlsJwkSetController.MTLS_JWK_SET_URI)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        // RFC 8705 section 3: the access token is bound to the certificate. Whether
+                        // the refresh token is too is what the page asks.
+                        .x509CertificateBoundAccessTokens(true)
+                        .reuseRefreshTokens(false)
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered mTLS refresh client [{}]", client.clientId());
     }
 
     void seedRegisteredClient(RegisteredClientRepository registeredClientRepository,

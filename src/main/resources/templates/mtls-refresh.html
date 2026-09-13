@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('mTLS refresh')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>A refresh token only one connection can spend</h1>
+    <p class="lead">
+        RFC 8705. The <a th:href="@{/mtls}">mTLS page</a> shows an access token bound to a client
+        certificate. This asks the longer-lived question: the refresh token outlives every access
+        token it mints, so if it could be spent from anywhere, binding the short-lived thing buys
+        little. Here it is spent three ways — same certificate, a different one, and none at all.
+    </p>
+
+    <div class="alert" th:if="${mtlsRefreshError}" th:text="${mtlsRefreshError}">error</div>
+
+    <div class="card" th:if="${run == null and pending == null}">
+        <h2>Getting a refresh token onto a certificate</h2>
+        <p class="hint">
+            The client credentials grant issues no refresh token, so the client on
+            <a th:href="@{/mtls}">the mTLS page</a> cannot answer this. This one holds the device
+            grant instead, which does — and authenticates with its certificate rather than a secret.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">Client</th>
+                <td><code th:text="${clientId}">pkce-mtls-refresh-client</code>
+                    <span class="hint" style="display:block">
+                        <code>self_signed_tls_client_auth</code>, certificate-bound access tokens,
+                        rotating refresh tokens.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Its certificate</th>
+                <td><code th:text="${certificateThumbprint}">-</code></td>
+            </tr>
+            <tr>
+                <th>A stranger's certificate</th>
+                <td><code th:text="${strangerThumbprint}">-</code>
+                    <span class="hint" style="display:block">
+                        Trusted by the transport so the request actually arrives, and registered to
+                        nobody. A handshake that fails would prove nothing about the server.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Endpoints</th>
+                <td><code th:text="${mtlsTokenEndpoint}">-</code>
+                    <span class="hint" style="display:block">
+                        and <code th:text="${plainTokenEndpoint}">-</code>, the ordinary one every
+                        other page here uses.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/mtls-refresh/start}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Start a device authorization</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${pending != null}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Approve it</h2>
+        <table>
+            <tr>
+                <th style="width:26%">User code</th>
+                <td><code th:text="${pending.userCode}">ABCD-EFGH</code></td>
+            </tr>
+            <tr>
+                <th>Asked for over</th>
+                <td><code th:text="${mtlsTokenEndpoint}">-</code>
+                    <span class="hint" style="display:block">
+                        The device authorization request already presented the certificate — it is
+                        the only credential this client has.
+                    </span></td>
+            </tr>
+        </table>
+        <p style="margin-top:16px">
+            <a class="btn secondary" th:href="@{/activate(user_code=${pending.userCode})}"
+               target="_blank">Approve it in a new tab</a>
+        </p>
+        <form th:action="@{/mtls-refresh/run}" method="post" style="margin-top:10px">
+            <button class="btn" type="submit">Redeem it, then try to refresh three ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What the device was issued</h2>
+        <table>
+            <tr>
+                <th style="width:30%">Access token cnf.x5t#S256</th>
+                <td><code th:text="${run.accessTokenConfirmation}">-</code></td>
+            </tr>
+            <tr>
+                <th>The certificate</th>
+                <td><code th:text="${run.certificateThumbprint}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${run.accessTokenConfirmation == run.certificateThumbprint}">
+                        The same value: RFC 8705 section 3.1, the access token naming the certificate
+                        it was issued over.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Refresh token</th>
+                <td><code th:text="${run.refreshTokenIssued} ? 'issued' : 'none'">issued</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Spending it three ways</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:34%">Connection</th>
+                <th style="width:9%">Status</th>
+                <th>What came back</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code></td>
+                <td>
+                    <span th:text="${attempt.outcome}">-</span>
+                    <code style="display:block;margin-top:6px" th:if="${attempt.confirmation != null}"
+                          th:text="${attempt.confirmation}">-</code>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" th:if="${run.onlyTheRegisteredCertificateWorked()}">
+            One connection out of three got a token. The refusals are both
+            <code>invalid_client</code>, which is the honest answer: the other two calls were not
+            refused as the wrong holder of a refresh token, they were refused as nobody at all.
+        </p>
+        <p class="hint">
+            The refresh token rotates on every use, so the successful attempt runs last and carries
+            the token the redemption returned. The two refusals never consumed it.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The refresh token is usable only over the right certificate — but not because
+            anything checks a binding.</strong> The certificate <em>is</em> this client's
+            credential. Every request to the token endpoint has to authenticate the client first, and
+            for a <code>self_signed_tls_client_auth</code> client that means matching the presented
+            certificate against the one on the registration. A stranger's certificate and no
+            certificate both fail that step, before the refresh token is so much as looked at.
+        </p>
+        <p class="hint">
+            <strong>No <code>cnf</code> check runs on refresh at all.</strong>
+            <code>OAuth2RefreshTokenAuthenticationProvider</code> compares the presented DPoP proof
+            when there is one — that is what the <a th:href="@{/refresh-binding}">refresh binding
+            page</a> is about — and has no certificate handling whatsoever. Nothing in it reads
+            <code>x5t#S256</code> off the stored access token, because it does not need to: the
+            client was already authenticated by the transport.
+        </p>
+        <p class="hint">
+            <strong>Which makes the practical difference clear.</strong> Stealing this refresh token
+            buys an attacker nothing without the private key behind the certificate — the same
+            conclusion as DPoP, reached by a different route. Stealing a DPoP-bound refresh token
+            buys nothing because the token is bound; stealing this one buys nothing because the
+            client cannot be impersonated to begin with.
+        </p>
+        <p class="hint">
+            <strong>RFC 8705 section 4 has a case this server cannot reach.</strong> The section is
+            about certificate-bound refresh tokens for a <em>public</em> client — one that presents a
+            certificate for binding without using it to authenticate. That client would need a real
+            <code>cnf</code> comparison on refresh, because nothing else would stop a thief. Here
+            every mTLS client authenticates with its certificate, and Spring Authorization Server
+            offers no way to bind without authenticating, so the case never arises. The page shows
+            what this server does; it does not claim the server implements the harder half.
+        </p>
+        <p class="hint">
+            <strong>The certificate is the one the <a th:href="@{/mtls}">mTLS page</a> uses.</strong>
+            Both registrations point at the same published JWK set, so the same certificate
+            authenticates two clients — the <code>client_id</code> in the request says which. That is
+            a demo shortcut, not a recommendation: a certificate shared between clients means either
+            of them can be impersonated by whoever holds the key.
+        </p>
+        <p class="hint">
+            <strong>One thing left unexplained.</strong> The issued access token really does carry
+            <code>cnf.x5t#S256</code> — the table above reads it out of the token — but the literal
+            <code>x5t</code> appears nowhere in the Spring Authorization Server sources or any jar on
+            the classpath that was searched. Where it is emitted was not found, so this page does not
+            say.
+        </p>
+    </div>
+</main>
+</body>
+</html>

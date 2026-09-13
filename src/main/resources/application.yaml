@@ -138,6 +138,16 @@ app:
     client-name: PKCE Relay Client
     scopes:
       - api.read
+  # The same certificate as the mTLS client, on a registration that is issued a refresh token -
+  # which the client credentials grant never is. Registered separately so the mTLS page keeps
+  # demonstrating one thing and this one another.
+  mtls-refresh-client:
+    registration-id: pkce-mtls-refresh-client
+    client-id: pkce-mtls-refresh-client
+    client-name: PKCE mTLS Refresh Client
+    scopes:
+      - profile
+      - email
   demo-users:
     - username: hendi
       password: password

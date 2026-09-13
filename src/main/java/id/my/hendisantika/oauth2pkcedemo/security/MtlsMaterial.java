@@ -49,33 +49,49 @@ public final class MtlsMaterial {
     private final X509Certificate clientCertificate;
     private final PrivateKey clientPrivateKey;
 
+    /**
+     * A second client certificate, trusted by the transport and registered to nobody. It exists so
+     * that a refusal can come from the authorization server rather than from the TLS handshake -
+     * a connection that is never established demonstrates nothing about what the server checks.
+     */
+    private final X509Certificate strangerCertificate;
+
     /** Written to temp files because Tomcat's SSL configuration takes keystore paths. */
     private final Path serverKeyStorePath;
     private final Path clientKeyStorePath;
+    private final Path strangerKeyStorePath;
     private final Path trustStorePath;
 
     private MtlsMaterial(X509Certificate serverCertificate, PrivateKey serverKey,
-                         X509Certificate clientCertificate, PrivateKey clientKey) throws Exception {
+                         X509Certificate clientCertificate, PrivateKey clientKey,
+                         X509Certificate strangerCertificate, PrivateKey strangerKey) throws Exception {
         this.serverCertificate = serverCertificate;
         this.clientCertificate = clientCertificate;
         this.clientPrivateKey = clientKey;
+        this.strangerCertificate = strangerCertificate;
 
         this.serverKeyStorePath = writeKeyStore("mtls-server", "server", serverKey, serverCertificate);
         this.clientKeyStorePath = writeKeyStore("mtls-client", "client", clientKey, clientCertificate);
-        // Tomcat needs to trust the client certificate before it will accept it on the handshake,
-        // and the demo client needs to trust the server's. One store does for both here.
-        this.trustStorePath = writeTrustStore(serverCertificate, clientCertificate);
+        this.strangerKeyStorePath =
+                writeKeyStore("mtls-stranger", "stranger", strangerKey, strangerCertificate);
+        // Tomcat needs to trust a client certificate before it will accept it on the handshake, and
+        // the demo client needs to trust the server's. One store does for all of them here - the
+        // stranger included, so that its requests reach the server and are turned away by it.
+        this.trustStorePath = writeTrustStore(serverCertificate, clientCertificate, strangerCertificate);
     }
 
     public static MtlsMaterial generate() {
         try {
             KeyPair serverKeys = rsaKeyPair();
             KeyPair clientKeys = rsaKeyPair();
+            KeyPair strangerKeys = rsaKeyPair();
             X509Certificate server = selfSigned("CN=localhost", serverKeys, true);
             X509Certificate client = selfSigned("CN=pkce-mtls-client", clientKeys, false);
+            X509Certificate stranger = selfSigned("CN=somebody-else", strangerKeys, false);
             log.info("Generated self-signed mTLS material, client thumbprint {}",
                     thumbprintOf(client));
-            return new MtlsMaterial(server, serverKeys.getPrivate(), client, clientKeys.getPrivate());
+            return new MtlsMaterial(server, serverKeys.getPrivate(), client, clientKeys.getPrivate(),
+                    stranger, strangerKeys.getPrivate());
         } catch (Exception ex) {
             throw new IllegalStateException("Unable to generate the mTLS demo certificates", ex);
         }
@@ -86,6 +102,14 @@ public final class MtlsMaterial {
      * SHA-256 of the DER-encoded certificate. This computes the same value so the page can show the
      * two matching.
      */
+    public String strangerCertificateThumbprint() {
+        return thumbprintOf(strangerCertificate);
+    }
+
+    public Path getStrangerKeyStorePath() {
+        return strangerKeyStorePath;
+    }
+
     public String clientCertificateThumbprint() {
         return thumbprintOf(clientCertificate);
     }
