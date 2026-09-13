@@ -140,7 +140,9 @@ th {
     color: var(--muted);
     font-weight: 500;
     width: 34%;
-    white-space: nowrap;
+    /* Wrapping rather than nowrap: with table-layout:fixed a long label would otherwise spill
+       across the value beside it. */
+    overflow-wrap: break-word;
 }
 
 code, .token {
