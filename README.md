@@ -64,6 +64,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-relay-client` | `client_secret_basic` | n/a | n/a | **token exchange**, client credentials | no |
 | `pkce-mtls-refresh-client` | **`self_signed_tls_client_auth`** | n/a | n/a | **device**, refresh | yes, rotated, certificate-bound |
 | `pkce-freshness-client` | none (public) | required | no | code | no |
+| `pkce-silent-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -463,6 +464,16 @@ on.
 ignored.
 
 ![Three ways of asking](docs/images/84-freshness-three-ways.png)
+
+**84. Silent authentication** — `prompt=none` asked five times, and answered five times without a
+screen.
+
+![Five questions, no screens](docs/images/85-silent-auth-five-questions.png)
+
+**85. Silent authentication** — the `login_required` Spring Authorization Server implements and
+never reaches.
+
+![Reading the silent authentication page](docs/images/86-silent-auth-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1082,6 +1093,53 @@ Notes:
   strong are genuinely different axes.
 * **A pushed request would slip past it**, for the same reason `acr_values` does: enforcement reads
   the query string, and [PAR](#pushed-authorization-requests) leaves only a `request_uri` there.
+* **A silent request cannot be prompted at all**, so the filter stands down for it — see
+  [silent authentication](#silent-authentication-promptnone).
+
+## Silent authentication (`prompt=none`)
+
+`/silent-auth` demonstrates the request behind every silent renewal in a hidden iframe. OpenID
+Connect Core §3.1.2.1: `prompt=none` asks *is there still a session, and may I have a token for it?*
+and forbids the authorization server from showing the user anything at all. If it cannot answer
+alone, it says so in an error the client can read.
+
+The probe takes one client through the whole life of the parameter. Nothing is followed — where the
+first response points **is** the answer:
+
+| Asked | Answer |
+|---|---|
+| `prompt=none`, before there is a session | `login_required` |
+| `prompt=none`, signed in, never agreed | `consent_required` |
+| `prompt=none`, signed in, agreed once already | an authorization code, silently |
+| `prompt=none login` | `invalid_request` |
+| `prompt=none&max_age=0` | `login_required` |
+
+Notes:
+
+* **Spring Authorization Server implements this one.** Unlike [`acr_values`](#step-up-authentication-acr--amr)
+  and [`max_age`](#authentication-freshness-max_age--auth_time), which it does not read at all,
+  `prompt` is parsed, validated and acted on. Of the four values `OidcPrompt` names, though, only
+  `none` does anything — the ones that ask the server to *start* an interaction are accepted and
+  ignored.
+* **The `login_required` it implements could never run here.** Its endpoints sit behind
+  `anyRequest().authenticated()` with a login entry point — the arrangement in its own sample, and in
+  this demo — so an unauthenticated request is redirected to the login page several filters before
+  the authorization server sees it. That is exactly what `prompt=none` forbids: a question asked in a
+  hidden iframe, answered with a login form nobody will ever look at. `PromptNoneFilter` answers
+  those requests itself and leaves every other case to the server.
+* **The last row is two of this demo's own rules colliding.** `max_age=0` says the session must be
+  newly authenticated; `prompt=none` says the user may not be asked. Both cannot hold, so the answer
+  is `login_required` — and `MaxAgeRequiredFilter` has to stand down rather than redirect to the
+  login page it would otherwise use. A parameter that enforces something must know about the
+  parameter that forbids the enforcement.
+* **An error may only be sent where the client registered it.** The filter looks the client up and
+  checks the `redirect_uri` against the registration before writing anything to it — the same rule
+  the authorization server applies. Without that check, an error response is an open redirect; a
+  test pins it.
+* **Two of the specification's four errors never appear.** `interaction_required` and
+  `account_selection_required` are not in Spring Authorization Server at all.
+* **The run forgets the stored consent first.** A consent, once given, is remembered, so a second run
+  would find the user had already agreed and the middle row would answer itself.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1490,6 +1548,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── IdTokenBindingController.java    /idtoken-binding
 │   ├── StepUpChallengeController.java   /stepup-challenge
 │   ├── FreshnessController.java         /freshness
+│   ├── SilentAuthController.java        /silent-auth
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
@@ -1522,6 +1581,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── IdTokenBindingService.java       the session's ID token, presented five ways
 │   ├── StepUpChallengeService.java      calls the operation, keeps the challenge it was given
 │   ├── FreshnessService.java            a probe session that asks max_age three ways
+│   ├── SilentAuthService.java           a probe session that asks prompt=none five ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1592,6 +1652,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── MaxAgeRequiredFilter.java        enforces max_age at the authorization endpoint
     ├── FreshnessAttempt.java            one ask, and what auth_time did
     ├── FreshnessRun.java                the three asks of one probe
+    ├── PromptNoneFilter.java            answers prompt=none instead of showing a login page
+    ├── SilentAuthAttempt.java           one silent question, and what came back
+    ├── SilentAuthRun.java               the five questions of one probe
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
