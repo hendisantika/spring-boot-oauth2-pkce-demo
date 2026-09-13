@@ -9,6 +9,7 @@ import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
+import id.my.hendisantika.oauth2pkcedemo.security.LogoutTokenFactory;
 import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import id.my.hendisantika.oauth2pkcedemo.security.AuthenticationContextLevel;
 import org.springframework.security.core.Authentication;
@@ -84,6 +85,13 @@ import java.util.stream.Collectors;
  */
 @Configuration(proxyBeanMethods = false)
 public class AuthorizationServerConfig {
+
+    /**
+     * OpenID Connect Back-Channel Logout section 2.1. Spring Authorization Server already puts this
+     * on ID tokens, from the session registry, so nothing here has to add it - a logout token just
+     * has to name the same value.
+     */
+    public static final String SESSION_ID = "sid";
 
     public static final String CONSENT_PAGE_URI = "/oauth2/consent";
     public static final String ACTIVATION_PAGE_URI = "/activate";
@@ -243,6 +251,15 @@ public class AuthorizationServerConfig {
     public ServerMetadataCustomizer serverMetadataCustomizer(AuthorizationServerSettings settings,
                                                              DemoProperties properties) {
         return new ServerMetadataCustomizer(settings, properties);
+    }
+
+    /**
+     * Mints the logout tokens the back-channel demo sends, with the same key everything else here
+     * is signed with - a client verifies one by fetching the issuer's JWK Set.
+     */
+    @Bean
+    public LogoutTokenFactory logoutTokenFactory(JWKSource<SecurityContext> jwkSource) {
+        return new LogoutTokenFactory(jwkSource);
     }
 
     /** Generated per boot, like the server's own signing key. */

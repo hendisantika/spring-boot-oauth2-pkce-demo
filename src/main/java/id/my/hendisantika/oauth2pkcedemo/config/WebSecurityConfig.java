@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -92,6 +93,10 @@ public class WebSecurityConfig {
                                 .authorizationRequestRepository(authorizationRequestRepository())
                                 .authorizationRequestResolver(authorizationRequestResolver))
                         .defaultSuccessUrl("/dashboard", true))
+                // OpenID Connect Back-Channel Logout, the receiving half. Spring Security has it;
+                // it listens on /logout/connect/back-channel/{registrationId} and needs nothing
+                // more than switching on. Spring Authorization Server has no sending half at all.
+                .oidcLogout(oidc -> oidc.backChannel(Customizer.withDefaults()))
                 // Both formLogin and oauth2Login register a default entry point; pin it explicitly so
                 // that hitting a protected page always starts the PKCE flow rather than the raw form.
                 .exceptionHandling(exceptions -> exceptions
