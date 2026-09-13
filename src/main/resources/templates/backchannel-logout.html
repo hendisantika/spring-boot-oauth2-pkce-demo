@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Back-channel logout')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Logging someone out without their browser</h1>
+    <p class="lead">
+        OpenID Connect Back-Channel Logout. Every logout so far on these pages needed the user's
+        browser to go somewhere. This one does not: the authorization server posts a signed
+        <strong>logout token</strong> straight to each client that has a session for that user, and
+        the client ends it. No redirect, no cookie, nothing for the user to click — which is the only
+        way a logout can reach a client the user is not currently looking at.
+    </p>
+
+    <div class="card" th:if="${run == null and !canRun}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Sign in first</h2>
+        <p class="hint">
+            The run needs a session to end, and a client registration to address the logout token to.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${loginUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${canRun}">
+        <h2>Run it</h2>
+        <table>
+            <tr>
+                <th style="width:26%">Client</th>
+                <td><code th:text="${clientName}">PKCE Demo Client</code></td>
+            </tr>
+            <tr>
+                <th>Back channel</th>
+                <td><code th:text="${backChannelUri}">-</code>
+                    <span class="hint" style="display:block">
+                        Spring Security's endpoint, one per client registration.
+                    </span></td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            Six logout tokens are posted to it: five that each break one rule, and one that is
+            correct. The correct one is sent last, because it ends the session the others are about —
+            <strong>running this signs you out</strong>, without your browser being asked.
+        </p>
+        <form th:action="@{/backchannel-logout}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send the logout tokens</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Six logout tokens</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Token</th>
+                <th style="width:8%">Status</th>
+                <th>What the client said</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code>
+                </td>
+                <td><span th:text="${attempt.outcome}">-</span></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint">
+            The refusals are Spring Security quoting the specification back: those are the checks in
+            section 2.6, and a client that skipped them would end sessions on anyone's say-so.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}"
+         th:style="${run.sessionInvalidated} ? 'border-color:#bfe0cb;background:#f6fbf8' : ''">
+        <h2>And the session</h2>
+        <table>
+            <tr>
+                <th style="width:34%">Session ended</th>
+                <td>
+                    <code th:text="${run.sessionInvalidated}">true</code>
+                    <span class="hint" style="display:block">
+                        Checked by touching the session object after the last request returned.
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>Asked of the browser</th>
+                <td><span class="hint">nothing</span></td>
+            </tr>
+        </table>
+        <p class="hint">
+            You are signed out, and the only thing that reached your browser was this page telling
+            you so. What Spring Security did on receiving the token was look the session up in its
+            <code>OidcSessionRegistry</code> — by the <code>sid</code> the token named — and end it.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The token that worked</h2>
+        <table>
+            <tr th:each="claim : ${run.logoutTokenClaims}">
+                <th style="width:26%" th:text="${claim.key}">iss</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+        <span class="token" style="margin-top:14px" th:text="${run.logoutToken}">-</span>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server has no sending half.</strong> Nothing in it mentions
+            back-channel logout: no logout token, no <code>backchannel_logout_uri</code> on a
+            registration, nothing sent when a session ends. The tokens on this page are minted and
+            posted by <code>BackChannelLogoutService</code>, with the server's own signing key.
+        </p>
+        <p class="hint">
+            <strong>Spring Security has the receiving half, and it is one line.</strong>
+            <code>oidcLogout(oidc -&gt; oidc.backChannel(...))</code> puts the endpoint above in
+            place, validates the token against the issuer's published keys, and ends the matching
+            sessions. The validation is <code>OidcBackChannelLogoutTokenValidator</code>; the five
+            refusals above are its rules, one each.
+        </p>
+        <p class="hint">
+            <strong>One of those refusals is a 500, and should not be.</strong>
+            <code>OidcBackChannelLogoutTokenValidator</code> means to report a missing
+            <code>events</code> claim as an ordinary validation error — the line right after the
+            check says so. It never gets there: reading the claim goes through
+            <code>LogoutTokenClaimAccessor.getEvents()</code>, which asserts the claim is not null
+            and throws first, and the filter turns that into a 500. The token is refused either way;
+            the client just answers the wrong thing to a request that is merely malformed.
+        </p>
+        <p class="hint">
+            <strong>The <code>sid</code> claim was already there.</strong> Matching by session needs
+            the ID token to carry one, and Spring Authorization Server issues it already, from its
+            session registry — so the logout tokens here name that same value rather than inventing
+            one. Without a <code>sid</code> a logout token can only name a <em>subject</em>, and the
+            client then ends every session that user has: right for "sign out everywhere", wrong for
+            signing out of one browser.
+        </p>
+        <p class="hint">
+            <strong>Neither metadata document advertises back-channel logout</strong>, and that is
+            deliberate. <code>backchannel_logout_supported</code> would mean this server sends a
+            logout token whenever a session ends, and it does not — it sends them when this page asks
+            it to. Advertising the flag would describe a server that does not exist, which is the one
+            thing the <a th:href="@{/metadata}">metadata page</a> is about.
+        </p>
+        <p class="hint">
+            <strong>This is the third kind of logout here, and they do different work.</strong>
+            <a th:href="@{/logout-demo}">Local logout</a> ends the client's session;
+            <a th:href="@{/logout-demo}">RP-initiated logout</a> sends the user to the server to end
+            that one; <a th:href="@{/logout-revocation}">revocation</a> ends the tokens. Back-channel
+            logout is how the <em>other</em> clients find out at all.
+        </p>
+    </div>
+</main>
+</body>
+</html>

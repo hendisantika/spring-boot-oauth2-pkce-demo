@@ -32,6 +32,7 @@
         <a th:href="@{/dynamic-registration}">Registration</a>
         <a th:href="@{/logout-demo}" sec:authorize="isAuthenticated()">Logout</a>
         <a th:href="@{/logout-revocation}">Revoke on logout</a>
+        <a th:href="@{/backchannel-logout}">Back-channel</a>
         <form th:action="@{/logout}" method="post" style="display:inline" sec:authorize="isAuthenticated()">
             <button class="btn secondary" type="submit">Sign out</button>
         </form>

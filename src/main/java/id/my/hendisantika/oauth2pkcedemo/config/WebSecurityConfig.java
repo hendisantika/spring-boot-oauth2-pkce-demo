@@ -79,6 +79,8 @@ public class WebSecurityConfig {
                         .requestMatchers("/dynamic-registration", "/dynamic-registration/**").permitAll()
                         // A run ends signed out, and the result has to be readable afterwards.
                         .requestMatchers("/logout-revocation").permitAll()
+                        // Same reason: a run ends with the session it was about already gone.
+                        .requestMatchers("/backchannel-logout").permitAll()
                         // The client's backend calls the backchannel endpoint; the demo page
                         // stands in for it and the user never visits either.
                         .requestMatchers("/ciba", "/ciba/poll", "/ciba/reset",
