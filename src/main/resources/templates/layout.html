@@ -14,6 +14,7 @@
         <a th:href="@{/dashboard}" sec:authorize="isAuthenticated()">Dashboard</a>
         <a th:href="@{/tokens}" sec:authorize="isAuthenticated()">Tokens</a>
         <a th:href="@{/refresh}" sec:authorize="isAuthenticated()">Refresh</a>
+        <a th:href="@{/introspect}" sec:authorize="isAuthenticated()">Introspect</a>
         <a th:href="@{/device}">Device</a>
         <a th:href="@{/logout-demo}" sec:authorize="isAuthenticated()">Logout</a>
         <form th:action="@{/logout}" method="post" style="display:inline" sec:authorize="isAuthenticated()">

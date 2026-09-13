@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Introspect and revoke')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Introspection and revocation</h1>
+    <p class="lead">
+        Ask the authorization server what a token is (RFC 7662), and tell it to stop honouring one
+        (RFC 7009). Both endpoints require an authenticated client, so this page calls them as
+        <code th:text="${introspectingClientId}">pkce-confidential-client</code> using its secret.
+    </p>
+
+    <div class="alert" th:if="${tokenError}" th:text="${tokenError}">error</div>
+
+    <div class="card">
+        <h2>This session's tokens</h2>
+        <table>
+            <tr>
+                <th>Signed in as</th>
+                <td><code th:text="${clientName}">PKCE Demo Client</code></td>
+            </tr>
+            <tr>
+                <th>access_token</th>
+                <td><code th:text="${current.accessTokenFingerprint()}">-</code></td>
+            </tr>
+            <tr>
+                <th>refresh_token</th>
+                <td><code th:text="${current.refreshTokenFingerprint()}">-</code></td>
+            </tr>
+        </table>
+
+        <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+            <form th:action="@{/introspect}" method="post">
+                <input type="hidden" name="token_type" value="access_token">
+                <button class="btn" type="submit">Introspect access token</button>
+            </form>
+            <form th:action="@{/introspect}" method="post" th:if="${current.refreshTokenValue != null}">
+                <input type="hidden" name="token_type" value="refresh_token">
+                <button class="btn secondary" type="submit">Introspect refresh token</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card" th:if="${introspection != null}">
+        <h2 th:if="${introspection.active}">active</h2>
+        <h2 th:unless="${introspection.active}">not active</h2>
+        <p class="hint">
+            Introspecting the <code th:text="${introspection.tokenType}">access_token</code> at
+            <span th:text="${introspection.checkedAt}">-</span>.
+        </p>
+        <table style="margin-top:12px">
+            <tr th:each="claim : ${introspection.claims}">
+                <th th:text="${claim.key}">active</th>
+                <td><code th:text="${claim.value}">true</code></td>
+            </tr>
+        </table>
+        <p class="hint" th:unless="${introspection.active}">
+            RFC 7662 says an inactive token answers <code>{"active": false}</code> and nothing more —
+            revoked, expired and never-existed all look identical, so the endpoint cannot be used to
+            probe which tokens are real.
+        </p>
+    </div>
+
+    <div class="card" th:if="${revocation != null}">
+        <h2>Revocation</h2>
+        <table>
+            <tr>
+                <th>token_type_hint</th>
+                <td><code th:text="${revocation.tokenType}">access_token</code></td>
+            </tr>
+            <tr>
+                <th>HTTP status</th>
+                <td><code th:text="${revocation.statusCode}">200</code></td>
+            </tr>
+            <tr th:if="${revocation.error != null}">
+                <th>error</th>
+                <td><code th:text="${revocation.error}">invalid_client</code></td>
+            </tr>
+        </table>
+        <p class="hint" th:if="${revocation.isAccepted()}">
+            RFC 7009 answers <code>200</code> whether or not the token existed, so a caller cannot
+            learn anything from the status alone. The introspection above is the evidence that it
+            actually took effect.
+        </p>
+    </div>
+
+    <div class="card" th:if="${ownsTokens}">
+        <h2>Revoke</h2>
+        <p class="hint">
+            Revoking the access token stops that one token. Revoking the refresh token invalidates
+            the authorization it came from, so the access token issued alongside it dies with it.
+            Either way this session's tokens stop working — sign in again afterwards.
+        </p>
+        <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+            <form th:action="@{/introspect/revoke}" method="post">
+                <input type="hidden" name="token_type" value="access_token">
+                <button class="btn secondary" type="submit">Revoke access token</button>
+            </form>
+            <form th:action="@{/introspect/revoke}" method="post" th:if="${current.refreshTokenValue != null}">
+                <input type="hidden" name="token_type" value="refresh_token">
+                <button class="btn secondary" type="submit">Revoke refresh token</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card" th:unless="${ownsTokens}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Revocation is not offered for this session</h2>
+        <p class="hint">
+            Introspection above works on any token, because the authorization server lets any
+            authenticated client ask about one. Revocation does not: it only accepts tokens issued to
+            the client doing the asking, and answers <code>invalid_client</code> otherwise. These
+            tokens belong to <strong th:text="${clientName}">PKCE Demo Client</strong>, not to the
+            client holding the secret.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${confidentialLoginUri}}">Sign in as the confidential client</a>
+        </p>
+    </div>
+</main>
+</body>
+</html>
