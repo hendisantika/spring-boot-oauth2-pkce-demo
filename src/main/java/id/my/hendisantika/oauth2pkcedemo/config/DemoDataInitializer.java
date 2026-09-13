@@ -82,6 +82,12 @@ public class DemoDataInitializer {
                 .clientName(client.clientName())
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+                // Device flow targets input-constrained public clients, so only that one gets it.
+                .authorizationGrantTypes(grantTypes -> {
+                    if (client.isPublic()) {
+                        grantTypes.add(AuthorizationGrantType.DEVICE_CODE);
+                    }
+                })
                 .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
                 .postLogoutRedirectUri(properties.issuerUri() + "/")
                 .scope(OidcScopes.OPENID)

@@ -6,6 +6,8 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
+import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +18,8 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.StandardClaimNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -29,9 +33,12 @@ import org.springframework.security.oauth2.server.authorization.settings.Authori
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
@@ -53,6 +60,7 @@ import java.util.stream.Collectors;
 public class AuthorizationServerConfig {
 
     public static final String CONSENT_PAGE_URI = "/oauth2/consent";
+    public static final String ACTIVATION_PAGE_URI = "/activate";
 
     /**
      * Owns every authorization server endpoint (/oauth2/authorize, /oauth2/token, /oauth2/jwks,
@@ -61,12 +69,29 @@ public class AuthorizationServerConfig {
      */
     @Bean
     @Order(1)
-    public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain authorizationServerSecurityFilterChain(
+            HttpSecurity http,
+            RegisteredClientRepository registeredClientRepository,
+            AuthorizationServerSettings authorizationServerSettings) throws Exception {
         OAuth2AuthorizationServerConfigurer authorizationServer = new OAuth2AuthorizationServerConfigurer();
         http
                 .securityMatcher(authorizationServer.getEndpointsMatcher())
                 .with(authorizationServer, server -> server
                         .authorizationEndpoint(endpoint -> endpoint.consentPage(CONSENT_PAGE_URI))
+                        // Lets a public client identify itself with client_id alone at the device
+                        // authorization endpoint, which nothing built in covers.
+                        .clientAuthentication(clientAuthentication -> clientAuthentication
+                                .authenticationConverter(new DeviceClientAuthenticationConverter(
+                                        authorizationServerSettings.getDeviceAuthorizationEndpoint(),
+                                        authorizationServerSettings.getTokenEndpoint()))
+                                .authenticationProvider(new DeviceClientAuthenticationProvider(
+                                        registeredClientRepository)))
+                        // RFC 8628: the device is told to send its user here, and the code the user
+                        // types lands back on the same consent screen as the browser flow.
+                        .deviceAuthorizationEndpoint(endpoint -> endpoint.verificationUri(ACTIVATION_PAGE_URI))
+                        .deviceVerificationEndpoint(endpoint -> endpoint
+                                .consentPage(CONSENT_PAGE_URI)
+                                .errorResponseHandler(deviceVerificationErrorHandler()))
                         .oidc(Customizer.withDefaults()))
                 .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
@@ -77,6 +102,22 @@ public class AuthorizationServerConfig {
                         new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
                 .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()));
         return http.build();
+    }
+
+    /**
+     * There is no redirect URI to bounce an error back to in the device flow, so the default
+     * response is a raw JSON 400 - which is fine for the device but not for the person holding the
+     * phone. Deny the request, or mistype a code, and this sends them back to the activation page
+     * with something readable.
+     */
+    private static AuthenticationFailureHandler deviceVerificationErrorHandler() {
+        return (request, response, exception) -> {
+            String errorCode = exception instanceof OAuth2AuthenticationException oauth2Exception
+                    ? oauth2Exception.getError().getErrorCode()
+                    : OAuth2ErrorCodes.INVALID_REQUEST;
+            response.sendRedirect(request.getContextPath() + ACTIVATION_PAGE_URI
+                    + "?error=" + URLEncoder.encode(errorCode, StandardCharsets.UTF_8));
+        };
     }
 
     @Bean

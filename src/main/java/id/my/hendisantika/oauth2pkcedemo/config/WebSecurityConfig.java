@@ -51,6 +51,8 @@ public class WebSecurityConfig {
         http
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/", "/error", "/css/**", "/js/**", "/favicon.ico").permitAll()
+                        // A device has no browser session; the human signs in later, on their phone.
+                        .requestMatchers("/device", "/device/**", "/activate").permitAll()
                         .anyRequest().authenticated())
                 .formLogin(form -> form
                         .loginPage(LOGIN_PAGE_URI)
