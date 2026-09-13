@@ -45,10 +45,10 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 
 ### Registered clients
 
-| Client | Authentication | PKCE | Grants | Refresh token |
-|---|---|---|---|---|
-| `pkce-demo-client` | none (public) | required | code, refresh, **device** | **no** on the code grant — see below |
-| `pkce-confidential-client` | `client_secret_basic` | required | code, refresh | yes, rotated on every use |
+| Client | Authentication | PKCE | PAR | Grants | Refresh token |
+|---|---|---|---|---|---|
+| `pkce-demo-client` | none (public) | required | no | code, refresh, **device** | **no** on the code grant — see below |
+| `pkce-confidential-client` | `client_secret_basic` | required | **yes** | code, refresh | yes, rotated on every use |
 
 ## What the flow looks like
 
@@ -153,6 +153,18 @@ offered, and the page says why.
 
 ![Introspection page for a public client session](docs/images/17-introspect-public-client.png)
 
+**17. PAR** — two ways to start the same login, with and without pushing the request first.
+
+![PAR page offering both sign-in routes](docs/images/18-par-start.png)
+
+**18. PAR** — what the browser actually carried, against what it would have carried otherwise.
+
+![Front-channel URL with and without PAR](docs/images/19-par-comparison.png)
+
+**19. PAR** — the parameters that went over the back channel instead.
+
+![The pushed request parameters](docs/images/20-par-pushed.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -239,6 +251,41 @@ which tokens are real. Revoking then introspecting is what actually proves the r
 Revoking an access token stops that one token; revoking a refresh token invalidates the authorization
 it came from, taking the access token with it.
 
+## Pushed authorization requests
+
+`/par` shows RFC 9126: the client posts the authorization request to `/oauth2/par` over a back
+channel and gets a handle, so the browser carries only a client id and that handle.
+
+Measured on a real login in this app:
+
+```
+with PAR     180 characters
+without PAR  390 characters
+```
+
+Everything that disappeared — `scope`, `redirect_uri`, `state`, `nonce`, `code_challenge` — went
+straight from client to server, authenticated. That is the actual point: PKCE protects the *code*
+coming back, but does nothing for the request going out, so a front channel request is readable and
+rewritable by anything the redirect passes through. After a push, the server already knows what was
+asked for by the time the browser is involved. Sidestepping URL length limits is a bonus.
+
+`PushedAuthorizationRequestResolver` wraps Spring's `DefaultOAuth2AuthorizationRequestResolver`:
+it pushes the request, then swaps *only* the browser-visible URI, leaving state, the PKCE verifier
+and the redirect URI untouched so the callback is handled by the usual machinery. Nothing downstream
+knows PAR happened.
+
+Two things to know:
+
+* **PAR is off by default.** Spring Authorization Server only exposes `/oauth2/par` — and only
+  advertises it in the discovery document — once
+  `.pushedAuthorizationRequestEndpoint(...)` is applied to the configurer.
+* **Only the confidential client can push.** The endpoint requires client authentication, and the
+  public client has nothing to authenticate with, so it sends the request the ordinary way. The page
+  offers both routes side by side.
+
+The `request_uri` is single-use and short-lived; replaying a consumed one is refused with `400`, so
+lifting it out of browser history buys nothing.
+
 ## How PKCE is enforced
 
 The client is registered as a **public** client, so there is no secret to fall back on:
@@ -282,13 +329,15 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RefreshTokenController.java      /refresh
 │   ├── LogoutDemoController.java        /logout-demo, /logout/rp-initiated
 │   ├── DeviceFlowController.java        /device, /device/poll, /activate
-│   └── TokenAdminController.java        /introspect, /introspect/revoke
+│   ├── TokenAdminController.java        /introspect, /introspect/revoke
+│   └── PushedAuthorizationController.java  /par
 ├── entity|repository/                   users
 ├── service/
 │   ├── JpaUserDetailsService.java       authenticates against MySQL
 │   ├── TokenRefreshService.java         runs the refresh_token grant on demand
 │   ├── DeviceFlowService.java           drives RFC 8628 over HTTP
-│   └── TokenAdminService.java           introspects and revokes as the confidential client
+│   ├── TokenAdminService.java           introspects and revokes as the confidential client
+│   └── PushedAuthorizationRequestService.java  pushes to /oauth2/par
 └── security/
     ├── PkceAuditingAuthorizationRequestRepository.java   records the verifier/challenge
     ├── PkceExchange.java
@@ -298,7 +347,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── DeviceClientAuthentication*.java lets a public client use the device endpoints
     ├── RestartOAuth2LoginFilter.java    makes a second login in one session work
     ├── IntrospectionResult.java
-    └── RevocationResult.java
+    ├── RevocationResult.java
+    ├── PushedAuthorizationRequest.java
+    └── PushedAuthorizationRequestResolver.java  pushes before the browser is redirected
 
 src/main/resources/db/migration/
 ├── V1_13092026_1256__create_user_tables.sql
