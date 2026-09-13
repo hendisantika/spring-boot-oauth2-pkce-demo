@@ -1,0 +1,166 @@
+package id.my.hendisantika.oauth2pkcedemo.config;
+
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.proc.SecurityContext;
+import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.oauth2.core.oidc.OidcScopes;
+import org.springframework.security.oauth2.core.oidc.StandardClaimNames;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
+import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
+
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.util.ArrayList;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/**
+ * Created by IntelliJ IDEA.
+ * Project : spring-boot-oauth2-pkce-demo
+ * User: hendisantika
+ * Email: hendisantika@gmail.com
+ * Telegram : @hendisantika34
+ * Date: 13/09/26
+ * Time: 12.56
+ */
+@Configuration(proxyBeanMethods = false)
+public class AuthorizationServerConfig {
+
+    public static final String CONSENT_PAGE_URI = "/oauth2/consent";
+
+    /**
+     * Owns every authorization server endpoint (/oauth2/authorize, /oauth2/token, /oauth2/jwks,
+     * /userinfo, /.well-known/**). Anything it does not match falls through to
+     * {@link WebSecurityConfig}, which is where the login form and the demo pages live.
+     */
+    @Bean
+    @Order(1)
+    public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
+        OAuth2AuthorizationServerConfigurer authorizationServer = new OAuth2AuthorizationServerConfigurer();
+        http
+                .securityMatcher(authorizationServer.getEndpointsMatcher())
+                .with(authorizationServer, server -> server
+                        .authorizationEndpoint(endpoint -> endpoint.consentPage(CONSENT_PAGE_URI))
+                        .oidc(Customizer.withDefaults()))
+                .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
+                .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
+                // A browser hitting /oauth2/authorize while signed out is sent to the form login,
+                // which is what turns this into an interactive login flow.
+                .exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
+                        new LoginUrlAuthenticationEntryPoint(WebSecurityConfig.LOGIN_PAGE_URI),
+                        new MediaTypeRequestMatcher(MediaType.TEXT_HTML)))
+                .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()));
+        return http.build();
+    }
+
+    @Bean
+    public AuthorizationServerSettings authorizationServerSettings(DemoProperties properties) {
+        return AuthorizationServerSettings.builder()
+                .issuer(properties.issuerUri())
+                .build();
+    }
+
+    @Bean
+    public RegisteredClientRepository registeredClientRepository(JdbcOperations jdbcOperations) {
+        return new JdbcRegisteredClientRepository(jdbcOperations);
+    }
+
+    @Bean
+    public OAuth2AuthorizationService authorizationService(JdbcOperations jdbcOperations,
+                                                           RegisteredClientRepository registeredClientRepository) {
+        return new JdbcOAuth2AuthorizationService(jdbcOperations, registeredClientRepository);
+    }
+
+    @Bean
+    public OAuth2AuthorizationConsentService authorizationConsentService(
+            JdbcOperations jdbcOperations, RegisteredClientRepository registeredClientRepository) {
+        return new JdbcOAuth2AuthorizationConsentService(jdbcOperations, registeredClientRepository);
+    }
+
+    /**
+     * Copies the authenticated user's authorities and profile onto the issued tokens, so the
+     * dashboard and the /userinfo endpoint have something to show beyond the subject.
+     */
+    @Bean
+    public OAuth2TokenCustomizer<JwtEncodingContext> jwtTokenCustomizer(UserRepository userRepository) {
+        return context -> {
+            if (!(context.getPrincipal().getPrincipal() instanceof UserDetails user)) {
+                return;
+            }
+            // Must be an ArrayList: the JDBC authorization store serialises claims with Jackson's
+            // polymorphic typing, whose allow-list rejects the immutable list Stream.toList() returns.
+            context.getClaims().claim("authorities", user.getAuthorities().stream()
+                    .map(Object::toString)
+                    .collect(Collectors.toCollection(ArrayList::new)));
+
+            userRepository.findByUsername(user.getUsername()).ifPresent(account -> {
+                // Only release what the user actually consented to.
+                if (context.getAuthorizedScopes().contains(OidcScopes.PROFILE)) {
+                    context.getClaims().claim(StandardClaimNames.PREFERRED_USERNAME, account.getUsername());
+                    context.getClaims().claim(StandardClaimNames.NAME, account.getFullName());
+                }
+                if (context.getAuthorizedScopes().contains(OidcScopes.EMAIL)) {
+                    context.getClaims().claim(StandardClaimNames.EMAIL, account.getEmail());
+                    context.getClaims().claim(StandardClaimNames.EMAIL_VERIFIED, true);
+                }
+            });
+        };
+    }
+
+    /**
+     * Generates a fresh RSA key on every boot. Good enough for a demo - a real deployment keeps a
+     * stable key so that tokens survive a restart.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public JWKSource<SecurityContext> jwkSource() {
+        KeyPair keyPair = generateRsaKey();
+        RSAKey rsaKey = new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
+                .privateKey((RSAPrivateKey) keyPair.getPrivate())
+                .keyID(UUID.randomUUID().toString())
+                .build();
+        return new ImmutableJWKSet<>(new JWKSet(rsaKey));
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder(JWKSource<SecurityContext> jwkSource) {
+        return org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration
+                .jwtDecoder(jwkSource);
+    }
+
+    private static KeyPair generateRsaKey() {
+        try {
+            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+            keyPairGenerator.initialize(2048);
+            return keyPairGenerator.generateKeyPair();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to generate the RSA key pair for token signing", ex);
+        }
+    }
+}
