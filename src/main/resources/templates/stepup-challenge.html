@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Step-up challenge')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Being told to authenticate again</h1>
+    <p class="lead">
+        RFC 9470. The <a th:href="@{/stepup}">step-up page</a> shows a client deciding in advance
+        that it wants a stronger authentication. This is the other half, and the one that happens in
+        practice: the client has no idea, calls the operation with the token it has, and the
+        <strong>resource server</strong> answers with a challenge naming the level it needs.
+    </p>
+
+    <div class="card" th:if="${!canCall}" style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>Sign in first</h2>
+        <p class="hint">
+            There has to be an access token to call with, and a level recorded on it. The form login
+            produces neither.
+        </p>
+        <p style="margin-top:16px">
+            <a class="btn" th:href="@{${loginUri}}">Sign in with PKCE</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${canCall}">
+        <h2>The operation, and what it insists on</h2>
+        <table>
+            <tr>
+                <th style="width:30%">Endpoint</th>
+                <td><code th:text="${transferUri}">-</code>
+                    <span class="hint" style="display:block">
+                        Its own resource server chain: an ordinary bearer token, then a look at how
+                        the user behind it authenticated.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>It requires</th>
+                <td><code th:text="${requiredAcr}">urn:demo:loa:2</code>
+                    <span class="hint" style="display:block">
+                        and an authentication no older than <code th:text="${maxAge}">300</code>
+                        seconds.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>This session has</th>
+                <td><code th:text="${tokenAcr}">urn:demo:loa:1</code>
+                    <span class="hint" style="display:block">
+                        <code>amr</code> <code th:text="${tokenAmr}">[pwd]</code> — read off the ID
+                        token, which is the authorization server's word for it.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/stepup-challenge/call}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit"
+                    th:text="${run.attempts.isEmpty()} ? 'Call it' : 'Call it again'">Call it</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${!run.attempts.isEmpty()}">
+        <h2>What came back</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:34%">Called</th>
+                <th style="width:10%">Status</th>
+                <th>Body</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block">
+                        acr <code th:text="${attempt.tokenAcr}">-</code>
+                    </span>
+                </td>
+                <td><code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isSuccess()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code></td>
+                <td><code th:text="${attempt.body}">-</code></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run.pendingChallenge() != null}"
+         style="border-color:#f0d9a8;background:#fffaf0">
+        <h2>The challenge</h2>
+        <span class="token" th:text="${run.pendingChallenge().raw}">-</span>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">error</th>
+                <td><code th:text="${run.pendingChallenge().error}">insufficient_user_authentication</code>
+                    <span class="hint" style="display:block">
+                        Not <code>invalid_token</code> and not <code>insufficient_scope</code>: the
+                        token is fine and the scope is granted. What is missing is a factor.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>acr_values</th>
+                <td><code th:text="${run.pendingChallenge().acrValues}">-</code></td>
+            </tr>
+            <tr>
+                <th>max_age</th>
+                <td><code th:text="${run.pendingChallenge().maxAge}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:14px" th:unless="${readyToRetry}">
+            A client that reads this knows exactly what to do: start a new authorization request
+            carrying the <code>acr_values</code> it was just handed. The value below is taken off the
+            header, not chosen here.
+        </p>
+        <p class="hint" style="margin-top:14px" th:if="${readyToRetry}">
+            The step-up is done — this session now holds
+            <code th:text="${tokenAcr}">urn:demo:loa:2</code>. Call the operation again.
+        </p>
+        <p style="margin-top:16px" th:unless="${readyToRetry}">
+            <a class="btn" th:href="@{/stepup-challenge/reauthorize}">Re-authorize as it asks</a>
+        </p>
+        <p class="hint" th:unless="${readyToRetry}">
+            Starting a second authorization request throws this session away — the demo's
+            <code>RestartOAuth2LoginFilter</code> invalidates it, so you sign in again and are then
+            asked for the second factor. You will land on the dashboard, because that is where this
+            demo's login ends; come back here and call it again. The challenge above survives that,
+            because it is the client's state rather than the session's.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run.succeeded()}" style="border-color:#bfe0cb;background:#f6fbf8">
+        <h2>And the loop closes</h2>
+        <p class="hint">
+            Same client, same endpoint, same user — a different token. Nothing about the operation
+            changed; what changed is how recently and how strongly the person behind the call proved
+            who they were. The first refusal was not a failure, it was an instruction.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/stepup-challenge/reset}">Start over</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Security writes no such challenge.</strong> The string
+            <code>insufficient_user_authentication</code> appears in no Spring Security 7.1.1 module.
+            Its <code>BearerTokenAccessDeniedHandler</code> answers <code>403</code> with
+            <code>insufficient_scope</code> — RFC 6750 section 3.1 — which is the right answer to a
+            missing scope and the wrong one here. A scope is granted once and the user cannot fix it
+            by trying harder; an authentication level can be raised by asking them for one more
+            factor. The status carries that difference: <code>401</code> says authenticate again,
+            <code>403</code> says do not bother. The handler on this page is
+            <code>InsufficientUserAuthenticationHandler</code>, and it exists because nothing shipped
+            does this.
+        </p>
+        <p class="hint">
+            <strong>The challenge is the only way the client could know.</strong> Without it a client
+            sees a refusal and has nothing to act on: retrying is pointless, and re-authorizing
+            blindly means guessing which of the server's levels was wanted. Naming
+            <code>acr_values</code> in the header turns a dead end into a step the user can complete.
+            RFC 9470 section 3 defines exactly these two parameters, <code>acr_values</code> and
+            <code>max_age</code>, for that reason.
+        </p>
+        <p class="hint">
+            <strong>Two servers have to agree, and neither is the client.</strong> The resource
+            server names a level; the authorization server is the one that can raise it, which is why
+            the client is sent back there rather than being asked for a password itself. The value
+            travelling between them is an <code>acr</code> — an identifier both sides already
+            understand — and this demo's are <code>urn:demo:loa:1</code> and
+            <code>urn:demo:loa:2</code>, enforced by the filter the
+            <a th:href="@{/stepup}">step-up page</a> describes.
+        </p>
+        <p class="hint">
+            <strong>The <code>max_age</code> in the challenge is not enforced here.</strong> It is
+            sent, because RFC 9470 says a resource server may state how fresh it wants the
+            authentication to be, and a client is meant to pass it on. Spring Authorization Server
+            has no <code>max_age</code> handling at all — the parameter appears nowhere in its
+            sources — so passing it on would change nothing, and this page does not pretend the
+            round trip would refresh anything but the <code>acr</code>.
+        </p>
+    </div>
+</main>
+</body>
+</html>
