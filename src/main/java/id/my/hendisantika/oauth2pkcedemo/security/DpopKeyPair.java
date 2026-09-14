@@ -71,6 +71,17 @@ public final class DpopKeyPair {
      *                    exact token rather than just to the key
      */
     public String proof(String httpMethod, String httpUri, String accessToken) {
+        return proof(httpMethod, httpUri, accessToken, null);
+    }
+
+    /**
+     * The same proof with a server-supplied nonce in it. RFC 9449 section 8: the value is echoed
+     * from a {@code DPoP-Nonce} header, so the proof can only have been made after the server said
+     * so - which is the whole point of asking for one.
+     *
+     * @param nonce the value to echo, or {@code null} for a proof that carries none
+     */
+    public String proof(String httpMethod, String httpUri, String accessToken, String nonce) {
         try {
             JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
                     .jwtID(UUID.randomUUID().toString())
@@ -79,6 +90,9 @@ public final class DpopKeyPair {
                     .issueTime(Date.from(Instant.now()));
             if (accessToken != null) {
                 claims.claim("ath", accessTokenHash(accessToken));
+            }
+            if (nonce != null) {
+                claims.claim("nonce", nonce);
             }
 
             SignedJWT proof = new SignedJWT(
