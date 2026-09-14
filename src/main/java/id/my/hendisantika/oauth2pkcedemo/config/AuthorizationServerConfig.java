@@ -24,7 +24,9 @@ import org.springframework.security.core.Authentication;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectClientRegistrationConverters;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
+import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcClientRegistrationAuthenticationProvider;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.MaxAgeRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.PromptNoneFilter;
@@ -203,7 +205,21 @@ public class AuthorizationServerConfig {
                                         .providerConfigurationCustomizer(serverMetadataCustomizer::customize))
                                 // RFC 7591 by way of OpenID Connect Registration. Off by default,
                                 // and absent from both metadata documents until it is switched on.
-                                .clientRegistrationEndpoint(Customizer.withDefaults())))
+                                .clientRegistrationEndpoint(endpoint -> endpoint
+                                        // RFC 9101 section 10.5 defines require_signed_request_object
+                                        // as client metadata, which means a client may register for
+                                        // it. Spring Authorization Server's converters have a field
+                                        // for every name they know and drop the rest, so without
+                                        // this the value arrives at the endpoint and goes nowhere.
+                                        .authenticationProviders(providers -> providers.forEach(
+                                                provider -> {
+                                                    if (provider instanceof OidcClientRegistrationAuthenticationProvider registration) {
+                                                        registration.setRegisteredClientConverter(
+                                                                RequestObjectClientRegistrationConverters.registeredClient());
+                                                        registration.setClientRegistrationConverter(
+                                                                RequestObjectClientRegistrationConverters.clientRegistration());
+                                                    }
+                                                })))))
                 .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                 .csrf(csrf -> csrf.ignoringRequestMatchers(authorizationServer.getEndpointsMatcher()))
                 // A browser hitting /oauth2/authorize while signed out is sent to the form login,
