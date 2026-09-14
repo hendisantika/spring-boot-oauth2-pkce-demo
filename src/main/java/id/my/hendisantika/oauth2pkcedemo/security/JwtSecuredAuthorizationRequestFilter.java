@@ -12,6 +12,7 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.JWEObject;
 import com.nimbusds.jose.crypto.RSADecrypter;
 import com.nimbusds.jose.jwk.JWKSet;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -124,11 +125,11 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
     /**
      * RFC 9101 section 10.5, as server metadata: when true, no client may send an unsigned request
-     * object however it is registered. False here, so the demo can show both sides of the switch,
-     * and published as {@code require_signed_request_object} so a client can read it rather than
+     * object however it is registered, and no client may send an authorization request without one
+     * at all. Published as {@code require_signed_request_object} so a client can read it rather than
      * discover it.
      */
-    private final boolean requireSignedRequestObject;
+    private final RequestObjectPolicy policy;
 
     private final String issuerUri;
 
@@ -143,10 +144,10 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
                                                 Supplier<JWKSet> clientKeys, String issuerUri,
                                                 RSAKey decryptionKey,
                                                 RegisteredClientRepository registeredClients,
-                                                boolean requireSignedRequestObject) {
+                                                RequestObjectPolicy policy) {
         this.decryptionKey = decryptionKey;
         this.registeredClients = registeredClients;
-        this.requireSignedRequestObject = requireSignedRequestObject;
+        this.policy = policy;
         this.authorizationEndpointMatcher =
                 PathPatternRequestMatcher.withDefaults().matcher(authorizationEndpointUri);
         // Verified with Nimbus directly rather than NimbusJwtDecoder: that decoder pins the JWT type
@@ -165,12 +166,25 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         String requestObject = request.getParameter(REQUEST);
-        if (!this.authorizationEndpointMatcher.matches(request) || !StringUtils.hasText(requestObject)) {
+        if (!this.authorizationEndpointMatcher.matches(request)) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
+        if (!StringUtils.hasText(requestObject)) {
+            // RFC 9101 section 10.5's first sentence, which is the downgrade the section is named
+            // after: a request that is not a JWT-secured one at all bypasses everything this filter
+            // does, so where JAR is required there is nothing to check but its absence.
+            String refusal = jarRequired(request, clientId);
+            if (refusal != null) {
+                log.debug("Rejecting an authorization request with no request object: {}", refusal);
+                writeError(response, OAuth2ErrorCodes.INVALID_REQUEST, refusal);
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
         JWTClaimsSet claims;
         try {
             claims = verify(decryptIfEncrypted(requestObject, clientId), clientId);
@@ -355,15 +369,35 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      * win against the thing being downgraded to.
      */
     private void refuseIfSignatureIsRequired(String clientId) {
-        if (this.requireSignedRequestObject) {
-            throw new IllegalArgumentException(
-                    "This server requires request objects to be signed");
-        }
-        if (Boolean.parseBoolean(registeredSetting(clientId, REQUIRE_SIGNED_SETTING))) {
-            throw new IllegalArgumentException(
-                    "This client registered require_signed_request_object");
+        String refusal = whySigningIsRequired(clientId);
+        if (refusal != null) {
+            throw new IllegalArgumentException(refusal);
         }
         log.debug("Accepting an unsigned request object from [{}]", clientId);
+    }
+
+    /**
+     * Whether an authorization request carrying no request object at all may proceed.
+     * <p>
+     * Only a GET is judged. The consent screen submits a POST back to the same endpoint to continue
+     * an authorization request that was already made and already checked; treating that as a fresh
+     * request with a missing request object would refuse the user's own approval.
+     *
+     * @return why the request cannot proceed, or null where it can
+     */
+    private String jarRequired(HttpServletRequest request, String clientId) {
+        return "GET".equals(request.getMethod()) ? whySigningIsRequired(clientId) : null;
+    }
+
+    /** @return which of the two switches is on, or null where neither is */
+    private String whySigningIsRequired(String clientId) {
+        if (this.policy.requireSignedRequestObject()) {
+            return "This server requires request objects to be signed";
+        }
+        if (Boolean.parseBoolean(registeredSetting(clientId, REQUIRE_SIGNED_SETTING))) {
+            return "This client registered require_signed_request_object";
+        }
+        return null;
     }
 
     /** RFC 9101 section 6.2: against a key associated with the client, and no other. */

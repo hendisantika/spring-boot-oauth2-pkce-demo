@@ -24,6 +24,7 @@ import org.springframework.security.core.Authentication;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.MaxAgeRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.PromptNoneFilter;
@@ -137,6 +138,7 @@ public class AuthorizationServerConfig {
             JarmClientKeys jarmClientKeys,
             IssuerIdentifierResponseHandler issuerIdentifierResponseHandler,
             ServerMetadataCustomizer serverMetadataCustomizer,
+            RequestObjectPolicy requestObjectPolicy,
             DemoProperties properties) throws Exception {
         // A generator of its own rather than a shared bean. Supplying an OAuth2TokenGenerator bean
         // replaces the one Spring Authorization Server assembles internally, and that one carries
@@ -255,8 +257,7 @@ public class AuthorizationServerConfig {
                                 authorizationServerSettings.getAuthorizationEndpoint(),
                                 () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
                                 properties.issuerUri(), REQUEST_DECRYPTION_KEY,
-                                registeredClientRepository,
-                                ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT),
+                                registeredClientRepository, requestObjectPolicy),
                         StepUpRequiredFilter.class)
                 // RFC 9449 section 10. Runs ahead of the token endpoint so that a request which
                 // cannot prove possession of the key the code was bound to is turned away before
@@ -308,8 +309,18 @@ public class AuthorizationServerConfig {
      */
     @Bean
     public ServerMetadataCustomizer serverMetadataCustomizer(AuthorizationServerSettings settings,
-                                                             DemoProperties properties) {
-        return new ServerMetadataCustomizer(settings, properties);
+                                                             DemoProperties properties,
+                                                             RequestObjectPolicy requestObjectPolicy) {
+        return new ServerMetadataCustomizer(settings, properties, requestObjectPolicy);
+    }
+
+    /**
+     * RFC 9101 section 10.5's server-wide switch, held where both the filter that enforces it and
+     * the documents that publish it can read the same value.
+     */
+    @Bean
+    public RequestObjectPolicy requestObjectPolicy() {
+        return new RequestObjectPolicy(ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT_DEFAULT);
     }
 
     /**

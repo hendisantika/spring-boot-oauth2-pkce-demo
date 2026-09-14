@@ -4,7 +4,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
-import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.UnsignedRequestAttempt;
 import id.my.hendisantika.oauth2pkcedemo.security.UnsignedRequestRun;
 import lombok.extern.slf4j.Slf4j;
@@ -53,12 +53,14 @@ public class UnsignedRequestObjectService {
     private final DemoProperties properties;
     private final JarRequestSigner signer;
     private final RSAKey serverKey;
+    private final RequestObjectPolicy policy;
 
     public UnsignedRequestObjectService(DemoProperties properties, JarRequestSigner signer,
-                                        RSAKey requestDecryptionKey) {
+                                        RSAKey requestDecryptionKey, RequestObjectPolicy policy) {
         this.properties = properties;
         this.signer = signer;
         this.serverKey = requestDecryptionKey;
+        this.policy = policy;
     }
 
     /** The client that registered {@code none}. */
@@ -77,7 +79,7 @@ public class UnsignedRequestObjectService {
     }
 
     public boolean serverRequiresSignedRequestObjects() {
-        return ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT;
+        return this.policy.requireSignedRequestObject();
     }
 
     /**

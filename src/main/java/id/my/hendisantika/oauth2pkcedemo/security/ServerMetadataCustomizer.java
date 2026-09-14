@@ -33,11 +33,11 @@ public final class ServerMetadataCustomizer {
             "authorization_details_types_supported";
 
     /**
-     * RFC 9101 section 10.5, as server metadata: when true, every client must sign its request
-     * objects. False here so that a client which registered {@code none} can be shown doing it, and
-     * published either way - a defence a client cannot read is one it cannot rely on.
+     * RFC 9101 section 10.5, as server metadata: the value a deployment starts with. False here so
+     * that a client which registered {@code none} can be shown doing it, and published either way -
+     * a defence a client cannot read is one it cannot rely on.
      */
-    public static final boolean REQUIRE_SIGNED_REQUEST_OBJECT = false;
+    public static final boolean REQUIRE_SIGNED_REQUEST_OBJECT_DEFAULT = false;
 
     /** RFC 9101 section 10.5. */
     public static final String REQUIRE_SIGNED_REQUEST_OBJECT_METADATA = "require_signed_request_object";
@@ -49,9 +49,14 @@ public final class ServerMetadataCustomizer {
     private final AuthorizationServerSettings settings;
     private final DemoProperties properties;
 
-    public ServerMetadataCustomizer(AuthorizationServerSettings settings, DemoProperties properties) {
+    /** Read on every request rather than captured, so the published value is the live one. */
+    private final RequestObjectPolicy requestObjectPolicy;
+
+    public ServerMetadataCustomizer(AuthorizationServerSettings settings, DemoProperties properties,
+                                    RequestObjectPolicy requestObjectPolicy) {
         this.settings = settings;
         this.properties = properties;
+        this.requestObjectPolicy = requestObjectPolicy;
     }
 
     /** RFC 8414, {@code /.well-known/oauth-authorization-server}. */
@@ -92,7 +97,8 @@ public final class ServerMetadataCustomizer {
         // accepted has to find out by being refused.
         claim.accept(REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED, new ArrayList<>(
                 JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream().sorted().toList()));
-        claim.accept(REQUIRE_SIGNED_REQUEST_OBJECT_METADATA, REQUIRE_SIGNED_REQUEST_OBJECT);
+        claim.accept(REQUIRE_SIGNED_REQUEST_OBJECT_METADATA,
+                this.requestObjectPolicy.requireSignedRequestObject());
         // The lists are edited rather than appended to: the OIDC document already declares openid,
         // and a document that names a value twice is describing itself carelessly.
         grantTypes.accept(values ->

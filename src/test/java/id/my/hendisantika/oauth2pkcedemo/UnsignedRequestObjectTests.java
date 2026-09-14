@@ -159,8 +159,8 @@ class UnsignedRequestObjectTests extends AbstractMySqlIntegrationTest {
                     .contains(ServerMetadataCustomizer.REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED)
                     .contains("\"none\"");
         }
-        assertThat(ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT)
-                .as("false, so the page can show what the switch would otherwise prevent")
+        assertThat(ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT_DEFAULT)
+                .as("the server starts with the switch off, so the page has something to show")
                 .isFalse();
     }
 
