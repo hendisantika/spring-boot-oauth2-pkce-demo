@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Request object signing algorithm')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>The algorithm is part of the registration</h1>
+    <p class="lead">
+        RFC 9101 section 10.1. A <a th:href="@{/jar}">request object</a> names its own algorithm, in
+        its own header, and a server that simply believes it has let the sender choose how the
+        signature will be checked. <code>request_object_signing_alg</code> is the client saying in
+        advance which one it will use, so the header stops being a choice and becomes a claim that
+        can be wrong.
+    </p>
+
+    <div class="alert" th:if="${jarAlgError}" th:text="${jarAlgError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Two clients, one RSA key. RS256 and PS256 differ in the padding, not in the key, so the
+            same key signs either — which is what makes the registered algorithm a thing a client
+            could otherwise change from one request to the next.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:42%">Registered nothing, so RS256</th>
+                <td><code th:text="${defaultClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered PS256</th>
+                <td><code th:text="${ps256ClientId}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-alg}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send five request objects</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five request objects</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:22%">Sent</th>
+                <th style="width:22%">Client</th>
+                <th style="width:14%">Registered</th>
+                <th style="width:12%">Header said</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td><strong th:text="${attempt.label}">-</strong></td>
+                <td><code th:text="${attempt.clientId}">-</code></td>
+                <td><code th:text="${attempt.registeredAlg}">-</code></td>
+                <td>
+                    <code th:text="${attempt.sentAlg}">-</code>
+                    <span class="hint" th:if="${!attempt.matchesRegistration()}"
+                          style="display:block">not what it registered</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.acceptedOnlyWhenRegistered()}">
+                Accepted in exactly the two rows where the header matched the registration, and in
+                no other — including the row where a valid PS256 signature was refused for being
+                PS256.
+            </span>
+            <span th:unless="${run.acceptedOnlyWhenRegistered()}">
+                At least one row was accepted without matching its registration, or refused while
+                matching it. Read the outcomes rather than this sentence.
+            </span>
+        </p>
+        <p class="hint">
+            This server checks <code th:text="${run.supportedAlgs}">-</code>, and a client that
+            registers nothing is taken to have registered
+            <code th:text="${run.defaultAlg}">-</code>.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-alg/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The second row is a perfectly good signature.</strong> PS256 over the same key,
+            verifying correctly, refused anyway. That is the point: the question is not whether the
+            signature is valid but whether this client agreed in advance to sign this way. A server
+            that accepts any algorithm it happens to support has no agreement to check against, and
+            an attacker who can influence the header is choosing the verification path.
+        </p>
+        <p class="hint">
+            <strong>It cuts both ways.</strong> The fourth row is the PS256 client sending RS256 —
+            the algorithm the <em>other</em> client registered, and the one most servers would take
+            without comment. It is refused for the same reason the second row is. A registration that
+            only ever ruled things in would not be a constraint.
+        </p>
+        <p class="hint">
+            <strong><code>alg: none</code> never reaches the algorithm check.</strong> An unsigned
+            JWT parses as a plain one, never as a signed one, so the last row is refused for not
+            being a signed JWT at all — before there is a header to compare. Both refusals are
+            correct; only one of them is about the registration.
+        </p>
+        <p class="hint">
+            <strong>Spring Authorization Server has no setting for this.</strong> It has no notion of
+            the <code>request</code> parameter either, so the algorithm travels as a custom client
+            setting, <code>settings.client.request-object-signing-alg</code>, read by the same filter
+            that verifies the object — the same arrangement the
+            <a th:href="@{/jarm-alg}">JARM signing algorithm</a> uses in the other direction.
+        </p>
+        <p class="hint">
+            <strong>Absent is not "anything".</strong> OpenID Connect Discovery treats a missing
+            <code>request_object_signing_alg</code> as the client not committing; this server treats
+            it as RS256, which is a narrower reading and a deliberate one. The permissive reading
+            gives back exactly what registering the algorithm was meant to take away.
+        </p>
+    </div>
+</main>
+</body>
+</html>
