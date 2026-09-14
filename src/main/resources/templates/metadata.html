@@ -82,8 +82,10 @@
             <tr th:each="entry : ${entries}">
                 <td>
                     <code th:text="${entry.name}">issuer</code>
-                    <span class="hint" style="display:block" th:unless="${entry.inBothDocuments}">
-                        not in the OpenID document
+                    <span class="hint" style="display:block"
+                          th:unless="${entry.inBothDocuments()}"
+                          th:text="'only in ' + ${entry.onlyIn()}">
+                        only in one of them
                     </span>
                     <span class="hint" style="display:block" th:if="${entry.hasDemonstration()}">
                         <a th:href="${entry.demonstratedAt}">see what it does</a>

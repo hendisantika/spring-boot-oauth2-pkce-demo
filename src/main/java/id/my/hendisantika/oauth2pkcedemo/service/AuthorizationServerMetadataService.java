@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 
 /**
@@ -90,9 +91,8 @@ public class AuthorizationServerMetadataService {
      * types, the scopes - and one field, {@code code_challenge_methods_supported}, whose subject is
      * the whole demo. A link to an approximate page would be worse than none.
      * <p>
-     * Nothing here names a field the OpenID document has and the OAuth one does not: the table is
-     * built from the OAuth document, so an entry for {@code end_session_endpoint} or
-     * {@code userinfo_endpoint} would be a link with no row to sit on.
+     * {@code end_session_endpoint} is here because the table now covers both documents; the other
+     * three OpenID-only fields have no page of their own to point at.
      */
     private static final Map<String, String> DEMONSTRATED_BY = Map.ofEntries(
             Map.entry("require_pushed_authorization_requests", "/par-server-required"),
@@ -112,7 +112,8 @@ public class AuthorizationServerMetadataService {
             Map.entry("dpop_signing_alg_values_supported", "/dpop"),
             Map.entry("check_session_iframe", "/session-management"),
             Map.entry("introspection_endpoint", "/introspect"),
-            Map.entry("revocation_endpoint", "/introspect"));
+            Map.entry("revocation_endpoint", "/introspect"),
+            Map.entry("end_session_endpoint", "/logout-demo"));
 
     private final RestClient restClient;
     private final DemoProperties properties;
@@ -164,15 +165,28 @@ public class AuthorizationServerMetadataService {
         }
     }
 
-    /** The published document, each field labelled with where it comes from and what it is worth. */
-    public List<MetadataEntry> describe(Map<String, Object> document, Map<String, Object> otherDocument) {
+    /**
+     * Everything the two documents publish between them, each field labelled with where it comes
+     * from and what it is worth.
+     * <p>
+     * Both, rather than the OAuth document alone: OpenID Connect defines four fields RFC 8414 has no
+     * notion of, and a table that left them out would describe this server less completely than the
+     * server describes itself. Where both documents carry a field they agree on its value - there is
+     * a test for that - so the OAuth document's copy is the one rendered.
+     */
+    public List<MetadataEntry> describe(Map<String, Object> oauthDocument,
+                                        Map<String, Object> oidcDocument) {
         List<MetadataEntry> entries = new ArrayList<>();
-        new TreeSet<>(document.keySet()).forEach(name -> entries.add(new MetadataEntry(
+        Set<String> names = new TreeSet<>(oauthDocument.keySet());
+        names.addAll(oidcDocument.keySet());
+        names.forEach(name -> entries.add(new MetadataEntry(
                 name,
-                render(document.get(name)),
+                render(oauthDocument.containsKey(name)
+                        ? oauthDocument.get(name) : oidcDocument.get(name)),
                 REQUIREMENT.getOrDefault(name, DEFINED_BY.containsKey(name) ? "-" : "OPTIONAL"),
                 DEFINED_BY.getOrDefault(name, "RFC 8414 §2"),
-                otherDocument.containsKey(name),
+                oauthDocument.containsKey(name),
+                oidcDocument.containsKey(name),
                 DEMONSTRATED_BY.get(name))));
         return entries;
     }
