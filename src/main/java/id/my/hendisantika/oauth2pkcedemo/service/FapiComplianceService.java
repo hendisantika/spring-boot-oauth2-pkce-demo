@@ -3,6 +3,8 @@ package id.my.hendisantika.oauth2pkcedemo.service;
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
+import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -42,6 +44,8 @@ public class FapiComplianceService {
     /** The handler that actually sends authorization responses, so the check below is about it. */
     private final ObjectProvider<IssuerIdentifierResponseHandler> issuerIdentifierResponseHandler;
     private final DemoProperties properties;
+    /** RFC 9101 section 10.5's server-wide switch, read live rather than described. */
+    private final RequestObjectPolicy requestObjectPolicy;
 
     /**
      * What the profile asks of the authorization server itself, checked against how this one is
@@ -78,11 +82,28 @@ public class FapiComplianceService {
                         + " is published in the discovery document"
                         : "Spring Authorization Server does not emit the iss parameter on its own"));
 
+        // RFC 9101's lock rather than the profile's, and the profile is the reason it is here: FAPI
+        // 1.0 Advanced required the request object to be signed, and FAPI 2.0 took that out in
+        // favour of PAR - its own comparison table replaces "nbf & exp claims in request object"
+        // with "request_uri has limited lifetime".
+        checks.add(FapiCheck.notApplicable("Request objects are signed",
+                "FAPI 1.0 Advanced §5.2.2; not carried into FAPI 2.0",
+                "FAPI 2.0 requires a pushed request with a short-lived request_uri instead. RFC 9101 "
+                        + "§10.5's require_signed_request_object is implemented here regardless: "
+                        + "server-wide it is " + this.requestObjectPolicy.requireSignedRequestObject()
+                        + " and published in both documents, and "
+                        + clientsRequiringSignedRequestObjects() + " of the "
+                        + configuredClients().size() + " clients below set it for themselves"));
+
         // Honest failures follow. A profile check that only ever passes is worth nothing.
         checks.add(FapiCheck.fail("The server requires pushed authorization requests",
                 "FAPI 2.0 §5.3.1",
-                "ClientSettings has no require_pushed_authorization_requests, so a client may still "
-                        + "send an ordinary authorization request"));
+                "The profile says the server \"shall reject authorization requests sent without "
+                        + "[RFC9126]\", which is the same lock as require_signed_request_object one "
+                        + "specification along. ClientSettings has no "
+                        + "require_pushed_authorization_requests and RFC 9126 defines no server "
+                        + "metadata for it either, so a client may still send an ordinary "
+                        + "authorization request"));
 
         checks.add(FapiCheck.of(properties.issuerUri().startsWith("https://"),
                 "All endpoints are served over TLS", "FAPI 2.0 §5.3",
@@ -90,6 +111,25 @@ public class FapiComplianceService {
                         + "; only the mTLS listener on 8443 uses TLS"));
 
         return checks;
+    }
+
+    /**
+     * How many clients turned RFC 9101 section 10.5's lock for themselves. Counted from the
+     * registrations rather than from the list of clients that were meant to.
+     */
+    private long clientsRequiringSignedRequestObjects() {
+        return configuredClients().stream()
+                .map(configured -> registeredClientRepository.findByClientId(configured.clientId()))
+                .filter(client -> client != null && requiresSignedRequestObjects(client))
+                .count();
+    }
+
+    private static boolean requiresSignedRequestObjects(RegisteredClient client) {
+        // Read as an Object: getSetting infers its own return type, and String.valueOf would then
+        // pick the char[] overload and dereference a null.
+        Object setting = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.REQUIRE_SIGNED_SETTING);
+        return setting != null && Boolean.parseBoolean(String.valueOf(setting));
     }
 
     /** The same exercise per client, since the profile constrains clients as much as the server. */
