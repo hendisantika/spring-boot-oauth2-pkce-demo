@@ -83,6 +83,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jar-none-client` | none (public) | required | no | code | no |
 | `pkce-jar-none-strict-client` | none (public) | required | no | code | no |
 | `pkce-par-required-client` | `client_secret_basic` | required | **required** | code | no |
+| `pkce-fetched-request-client` | `client_secret_basic` | required | no | code | no |
 
 ## What the flow looks like
 
@@ -664,6 +665,16 @@ of pointing at a request object.
 **122. request_uri metadata** — one parameter, two unrelated features, and which check refuses which.
 
 ![Reading the metadata](docs/images/123-request-uri-metadata-reading.png)
+
+**123. require_request_uri_registration** — four URLs under both settings, and the one row the
+setting is the whole difference for.
+
+![Four URLs, both ways](docs/images/124-request-uri-registration-both-ways.png)
+
+**124. require_request_uri_registration** — what the registered list buys, and the checks that do not
+depend on it.
+
+![Reading the registration requirement](docs/images/125-request-uri-registration-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -2081,15 +2092,15 @@ What the documents now say, against what leaving them out would have claimed:
 | Metadata | Published here | Default if omitted |
 |---|---|---|
 | `request_parameter_supported` | `true` | `false` — the opposite |
-| `request_uri_parameter_supported` | `false` | `true` — the opposite |
-| `require_request_uri_registration` | `false` | `false` |
+| `request_uri_parameter_supported` | `true` | `true` |
+| `require_request_uri_registration` | `true` | `false` — the opposite |
 
 And the four ways of pointing at a request object:
 
 | Sent | Parameter | What the server did |
 |---|---|---|
 | by value | `request` | the consent screen |
-| by a URL to fetch | `request_uri` | `This server does not fetch request objects by reference; request_uri_parameter_supported is false` |
+| by a URL to fetch | `request_uri` | the consent screen |
 | by a pushed reference | `request_uri` | the consent screen |
 | by a reference nobody issued | `request_uri` | `invalid_request` |
 
@@ -2104,19 +2115,62 @@ Notes:
   fetch; the other is a reference it issued minutes earlier. A client reading
   `request_uri_parameter_supported: false` should conclude "do not host request objects for this
   server", not "do not push".
-* **The refusal now says which kind it was.** Before this page both came back as
-  `[invalid_request] OAuth 2.0 Parameter: request_uri` — the authorization server's failed lookup of a
-  pushed reference the client never claimed to have. A `request_uri` with an `http` or `https` scheme
-  is refused with the reason; everything else is still left to that lookup, which is the check that
-  owns it. The test is the scheme rather than the shape of a pushed reference, because RFC 9126 §4
-  leaves that format to the server.
-* **`require_request_uri_registration` is published and moot.** It asks whether `request_uri` values
-  must be pre-registered with `request_uris`, which only means something for the feature this server
-  does not implement.
-* **Fetching is a door kept shut on purpose.** RFC 9101 §10.4.1 and §10.4.2 are both about it — a
-  server that fetches a URL on a client's say-so can be aimed at a victim, and the reference is
-  unsigned and rewritable in the browser. PAR does the same job without the server making an outbound
-  request at all.
+* **Which check speaks depends on the scheme.** A `request_uri` with an `http` or `https` scheme is a
+  URL to fetch and is judged by [the registration rules](#require_request_uri_registration);
+  everything else is left to the authorization server's lookup of a pushed reference, which is the
+  check that owns those. The test is the scheme rather than the shape of a pushed reference, because
+  RFC 9126 §4 leaves that format to the server.
+* **`require_request_uri_registration` is the one that constrains fetching,** and is published `true`
+  — the spec's default is `false`, the permissive reading of a feature that sends the server
+  somewhere on a browser parameter's say-so.
+* **Only one of these rows costs the server a connection.** RFC 9101 §10.4.1 and §10.4.2 are both
+  about that one: a server that fetches a URL on a client's say-so can be aimed at a victim, and the
+  reference is unsigned and rewritable in the browser. PAR does the same job with no outbound request
+  at all.
+
+## `require_request_uri_registration`
+
+`/request-uri-registration` needed a feature before it could exist: RFC 9101 §5.2 passing a request
+object **by reference**, where the client hosts the object and §5.2.3 says the server *must* send a
+GET to fetch it. That is an authorization server making an outbound request because an
+unauthenticated browser parameter told it to, which §10.4.1 spends a section on — and its first
+mitigation, "check that the value of the `request_uri` parameter does not point to an unexpected
+location", is exactly what `require_request_uri_registration` turns on. So this round implemented the
+fetch, and the setting now has something to govern.
+
+Four URLs, each sent twice. This application hosts all of them — a demo that aimed a server at
+somebody else's host to make the point would be making it the wrong way round:
+
+| Sent | URL | Registration required | Requirement off |
+|---|---|---|---|
+| what the documents said | — | `require_request_uri_registration: true` | `…: false` |
+| a URL this client registered | `/hosted/request-object.jwt` | an authorization code | an authorization code |
+| a URL **another** client registered | `/hosted/other-client.jwt` | `not registered for this client` | `The request object names client pkce-confidential-client…` |
+| a registered URL serving the wrong media type | `/hosted/wrong-type.jwt` | `served text/plain rather than application/oauth-authz-req+jwt` | same |
+| a registered URL whose object points at another | `/hosted/recursive.jwt` | `A request object may not carry request or request_uri` | same |
+
+Notes:
+
+* **Only the third row moves.** With the requirement on it is refused before any request leaves the
+  server; with it off the server goes and fetches it, and is saved only by a later check noticing the
+  object names somebody else. The value of the setting is not that a different object got through —
+  it is that the outbound request happened at all. That is why the default here is `true` while
+  OpenID Connect Discovery's is `false`.
+* **The list is per client.** That URL *is* registered — to another client. A client that could use
+  another's registered URL would make registration a formality, and the rewrite attack in RFC 9101
+  §10.4.2 works by changing exactly this parameter in the browser.
+* **Registration is necessary, not sufficient.** The last two rows are on the client's own list and
+  refused under both settings: §10.4.1 clause (b) checks the media type of the *response* (so the
+  fetch sends an open `Accept` and judges what arrives), and §4 forbids a request object carrying
+  `request` or `request_uri`, which is clause (d)'s recursive GET. The fetch also requires `https`,
+  caps the body, times out after two seconds and does not follow redirects.
+* **One demo-only exception, stated plainly.** §5.2 says a hosted `request_uri` MUST be `https`.
+  Nothing here is served over TLS — [the FAPI page fails a requirement over it](#fapi-20-security-profile)
+  — so a URL on this server's own origin is allowed through `http` and nothing else is. A deployment
+  deletes half of that condition.
+* **Nothing about verification changes.** What comes back over the GET is checked exactly as an
+  object passed by value is: type, algorithm against the registration, signature, audience, expiry,
+  client id.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2565,6 +2619,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ParRequiredController.java       /par-required
 │   ├── ServerParRequiredController.java  /par-server-required
 │   ├── RequestUriMetadataController.java  /request-uri-metadata
+│   ├── RequestUriRegistrationController.java  /request-uri-registration
+│   ├── HostedRequestObjectController.java  /hosted/**, the client's own hosting
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2619,6 +2675,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ParRequiredService.java          five ways to start one request
 │   ├── ServerParRequiredService.java    four requests, under both settings
 │   ├── RequestUriMetadataService.java   four ways to point at one object
+│   ├── RequestUriRegistrationService.java  four URLs, under both settings
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2743,6 +2800,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── ServerParRequiredRun.java        the four, the documents and the profile row
     ├── RequestUriMetadataAttempt.java   one way of pointing, and what came of it
     ├── RequestUriMetadataRun.java       the four, beside what the documents claim
+    ├── RequestUriFetcher.java           RFC 9101 §5.2.3's GET, with §10.4.1's precautions
+    ├── RequestUriPolicy.java            require_request_uri_registration, in one place
+    ├── RequestUriRegistrationAttempt.java  one URL, and its fate under each setting
+    ├── RequestUriRegistrationRun.java   the four, and what the documents said
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
