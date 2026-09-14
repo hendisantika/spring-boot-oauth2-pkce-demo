@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo;
 
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
+import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.service.FapiComplianceService;
 import org.junit.jupiter.api.Test;
@@ -155,7 +156,67 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(4));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(5));
+    }
+
+    /**
+     * Both profiles name the same JWS algorithms, so the row is judged from the registration - the
+     * only thing that says what a request object from this client may ever be signed with.
+     */
+    @Test
+    void theSigningAlgorithmRowFollowsWhatEachClientRegistered() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(algorithmCheckFor(checks, properties.jarPsClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    assertThat(check.reference()).contains("FAPI 1.0 Advanced").contains("FAPI 2.0");
+                    assertThat(check.observed()).contains("PS256");
+                });
+
+        // "shall not use none", in both profiles, and this server accepts it anyway.
+        assertThat(algorithmCheckFor(checks, properties.jarNoneClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.observed()).contains("none").contains("shall not be used");
+                });
+
+        // Registered nothing, so there is nothing of the client's to judge - and the row says which
+        // algorithm this server would fall back to rather than leaving that unsaid.
+        assertThat(algorithmCheckFor(checks, properties.client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+                    assertThat(check.observed())
+                            .contains("No request_object_signing_alg registered")
+                            .contains(JwtSecuredAuthorizationRequestFilter.DEFAULT_SIGNING_ALG);
+                });
+    }
+
+    /**
+     * The profile's list of algorithms and this server's are not the same list, and the client that
+     * sits in the gap should pass the row while being told its request objects are refused.
+     */
+    @Test
+    void aClientCanSatisfyTheProfileWithAnAlgorithmThisServerWillNotVerify() {
+        FapiCheck check = algorithmCheckFor(fapiComplianceService.clientChecks(),
+                properties.jarEsClient());
+
+        assertThat(JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS)
+                .doesNotContain("ES256");
+        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+        assertThat(check.observed()).contains("ES256").contains("refused");
+    }
+
+    private FapiCheck algorithmCheckFor(Map<String, List<FapiCheck>> checks,
+                                        DemoProperties.Client configured) {
+        RegisteredClient client = registeredClientRepository.findByClientId(configured.clientId());
+        assertThat(client).isNotNull();
+
+        return checks.get(client.getClientName()).stream()
+                .filter(check -> check.requirement().contains("PS256 or ES256"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "no signing algorithm row for " + client.getClientName()));
     }
 
     @Test
