@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('request_uris')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Naming the URLs before using them</h1>
+    <p class="lead">
+        <a th:href="@{/request-uri-registration}"><code>require_request_uri_registration</code></a>
+        says a <code>request_uri</code> must be pre-registered. <code>request_uris</code> is the list
+        it must be pre-registered <em>in</em> — OpenID Connect Registration §2, "array of
+        <code>request_uri</code> values that are pre-registered by the RP for use at the OP". This
+        page registers two clients through
+        <a th:href="@{/dynamic-registration}">the registration endpoint</a> while you watch: one that
+        names a URL and one that names none.
+    </p>
+
+    <div class="alert" th:if="${requestUrisError}" th:text="${requestUrisError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The registered URL carries a fragment, because the spec asks for one: "if the contents of
+            the request file could ever change, these URI values SHOULD include the base64url-encoded
+            SHA-256 hash value of the file contents referenced by the URI as the value of the URI
+            fragment".
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:32%">Registered at</th>
+                <td><code th:text="${registrationEndpoint}">-</code></td>
+            </tr>
+            <tr>
+                <th>The fragment</th>
+                <td><code th:text="${contentHash}">-</code>
+                    <span class="hint" style="display:block">
+                        A content hash, and — for a server that does not cache — simply part of the
+                        string that was registered.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/request-uris}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Register two clients and send four requests</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What the registration did with the list</h2>
+        <table>
+            <tr>
+                <th style="width:26%">Sent as <code>request_uris</code></th>
+                <td style="overflow-wrap:anywhere">
+                    <code th:each="uri : ${run.requested}" th:text="${uri}"
+                          style="display:block">-</code>
+                </td>
+            </tr>
+            <tr>
+                <th>Echoed in the response</th>
+                <td style="overflow-wrap:anywhere">
+                    <code th:text="${run.echoed}">-</code>
+                    <span class="hint" style="display:block" th:if="${run.echoedAsAList()}">
+                        an array of the same length, which is how it was sent
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>Held against the client</th>
+                <td style="overflow-wrap:anywhere">
+                    <code th:each="uri : ${run.stored}" th:text="${uri}" style="display:block">-</code>
+                    <span class="hint" style="display:block">
+                        Rewritten once the server had issued the client id the hosted object names —
+                        a real client registers the URL it will really host.
+                    </span>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Four requests</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:23%">Sent</th>
+                <th style="width:17%">Client</th>
+                <th style="width:26%">request_uri</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <code class="hint" th:text="${attempt.clientId}">-</code>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <code class="hint" th:text="${attempt.shortUri()}">-</code>
+                    <span class="hint" style="display:block"
+                          th:text="${attempt.onTheList} ? 'on its list' : 'not on its list'">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px" th:if="${run.nothingOffTheListWasUsed()}">
+            Nothing off the list was acted on, and the only row that was is the one whose whole
+            string — fragment included — matches what the registration holds.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/request-uris/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The list is matched whole.</strong> Rows two and three are the same URL with a
+            different fragment and with none, and neither is on the list. That is not this server
+            being fussy: the spec puts a content hash in the fragment so that a server which
+            <em>caches</em> the fetched file can tell a stale copy from a fresh one. A server that
+            does not cache, like this one, still compares the whole registered string — so the effect
+            is the same and the reason is smaller.
+        </p>
+        <p class="hint">
+            <strong>An empty list is a list.</strong> The last row is a client that registered no
+            <code>request_uris</code> at all, pointed at a URL this application hosts and would
+            happily serve. Registering nothing is not registering everything, and with
+            <a th:href="@{/request-uri-registration}"><code>require_request_uri_registration</code></a>
+            on it means this client cannot use the feature.
+        </p>
+        <p class="hint">
+            <strong>It goes out as an array and comes back as one.</strong> Spring Authorization
+            Server's registration converters drop every metadata name they do not know, so
+            <code>request_uris</code> is carried by the same pair of converters that carry
+            <a th:href="@{/jar-client-required}">the request object settings</a> — joined into one
+            setting on the way in, split back into a list on the way out. A caller that sent a list
+            and read back a string would be right to wonder what had happened to it.
+        </p>
+        <p class="hint">
+            <strong>The https rule has a carve-out, and it applies here.</strong> RFC 9101 §5.2 says
+            a fetched <code>request_uri</code> must be https. OpenID Connect Registration §2 says
+            these URLs "MUST use the https scheme <em>unless the target Request Object is signed in a
+            way that is verifiable by the OP</em>" — which is exactly what happens to every object
+            fetched here. This demo serves no TLS, and under that clause its http URLs are within the
+            rule rather than an exception to it.
+        </p>
+        <p class="hint">
+            <strong>Registering a URL is not trusting it.</strong> What comes back is still checked
+            for its media type, for the signature against the client's key, for the audience and the
+            expiry, and for <a th:href="@{/jar-none}">naming the client that asked</a>. The list
+            settles where the server is willing to go, and nothing about what it finds there.
+        </p>
+    </div>
+</main>
+</body>
+</html>
