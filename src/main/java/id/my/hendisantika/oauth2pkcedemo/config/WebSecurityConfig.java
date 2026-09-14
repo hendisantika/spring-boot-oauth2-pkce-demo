@@ -92,6 +92,7 @@ public class WebSecurityConfig {
                         .requestMatchers("/request-uri-registration", "/request-uri-registration/**").permitAll()
                         .requestMatchers("/request-uris", "/request-uris/**").permitAll()
                         .requestMatchers("/jar-alg-values", "/jar-alg-values/**").permitAll()
+                        .requestMatchers("/jar-enc-alg-values", "/jar-enc-alg-values/**").permitAll()
                         // RFC 9101 section 5.2.1: the client's own hosting, which the server fetches.
                         .requestMatchers("/hosted/**").permitAll()
                         // The client publishes its keys here, and the authorization server
