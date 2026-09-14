@@ -617,6 +617,15 @@ three reasons the refused ones were refused.
 
 ![Reading the unsigned objects](docs/images/113-jar-none-reading.png)
 
+**113. Requiring request objects** — the same four requests under both settings of the server-wide
+switch, and what the documents said each time.
+
+![The same four requests, both ways](docs/images/114-jar-required-both-ways.png)
+
+**114. Requiring request objects** — why the first row is the attack the section is named after.
+
+![Reading the switch](docs/images/115-jar-required-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -1838,11 +1847,57 @@ Notes:
 * **The defence outranks the algorithm.** The fourth client registered `none` and
   `require_signed_request_object` together, which is a registration that contradicts itself. A
   downgrade defence that could be talked out of it by the thing it defends against would not be one.
-  The server-wide switch works the same way and is `false` here, so the page has something to show.
+  [The server-wide switch](#require_signed_request_object) works the same way and starts `false`,
+  so the page has something to show.
 * **Both switches are now published.** `request_object_signing_alg_values_supported` and
   `require_signed_request_object` appear in both discovery documents, cited on
   [the metadata page](#authorization-server-metadata-rfc-8414) as RFC 9101 §4 and §10.5. Spring
   Authorization Server advertises neither, having no notion of the `request` parameter at all.
+
+## `require_signed_request_object`
+
+`/jar-required` is RFC 9101 §10.5, whose title is "Downgrade Attack" and whose first sentence is the
+whole problem: unless the protocol is locked down to use JAR, *an attacker may simply use an RFC 6749
+request instead and bypass all the protection this specification provides.* Signing request objects
+buys nothing if the server still answers the same question asked in a query string.
+
+The section defines `require_signed_request_object` as **both** client and server metadata. The
+client half is [on the unsigned page](#request_object_signing_alg-none); this one is the server half,
+which applies to every client at once. The same four requests are sent twice, with the switch off and
+then on:
+
+| Sent | Client | Switch off | Switch on |
+|---|---|---|---|
+| what the documents said | every client | `require_signed_request_object: false` | `require_signed_request_object: true` |
+| an ordinary authorization request | `pkce-demo-client` | an authorization code | `This server requires request objects to be signed` |
+| a signed request object | `pkce-demo-client` | an authorization code | an authorization code |
+| an unsigned request object | `pkce-jar-none-client` | an authorization code | `This server requires request objects to be signed` |
+| an ordinary request, from the strict client | `pkce-jar-none-strict-client` | `This client registered require_signed_request_object` | `This server requires request objects to be signed` |
+
+Notes:
+
+* **The first row is the attack.** An ordinary OAuth 2.0 authorization request — exactly what every
+  page here that is not about JAR sends — and while the switch is off it works perfectly. That is
+  §10.5's point: a client can sign its request objects beautifully and gain nothing, because nobody
+  made it use one. This round implemented that half; the previous one had only the `alg: none` half,
+  which is the same hole seen from the other side.
+* **Two refusals from one section, in consecutive sentences.** No request object at all, and a request
+  object with [`alg: none`](#request_object_signing_alg-none). Both are something arriving with no
+  signature and being acted on anyway.
+* **A signed request object is accepted under both settings.** The switch removes ways of asking
+  rather than adding checks to the one that remains.
+* **The last row needs no server switch.** Its client registered `require_signed_request_object` for
+  itself. Client metadata locks one door; server metadata locks all of them, and a deployment that can
+  enumerate its clients usually turns the lock one at a time.
+* **Only a GET is judged.** The consent screen POSTs back to the same endpoint to continue an
+  authorization request that was already made and already checked; treating that as a fresh request
+  with a missing request object would refuse the user's own approval.
+* **The published document tracks the switch.** Both discovery documents are built per request, so
+  flipping the value changes what they say immediately rather than at the next restart — which is what
+  makes it metadata about this server rather than a note in a README.
+* **What the page does is not what a deployment should do.** Moving a server-wide security setting at
+  runtime, from a web page, is a demonstration: it is global for every client while the run lasts and
+  is put back in a `finally` block. A real deployment sets it in configuration, once.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2269,6 +2324,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectEncryptionAlgController.java  /jar-enc-alg
 │   ├── RequestObjectEncryptionMethodController.java  /jar-enc-method
 │   ├── UnsignedRequestObjectController.java  /jar-none
+│   ├── RequiredRequestObjectController.java  /jar-required
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2318,6 +2374,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectEncryptionAlgService.java  the same request wrapped six ways
 │   ├── RequestObjectEncryptionMethodService.java  the same request encrypted six ways
 │   ├── UnsignedRequestObjectService.java  six request objects, five unsigned
+│   ├── RequiredRequestObjectService.java  four requests, under both settings
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2426,6 +2483,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RequestEncryptionMethodRun.java  the six request objects, and what padded
     ├── UnsignedRequestAttempt.java      one object with no signature to check
     ├── UnsignedRequestRun.java          the six, and which were acted on
+    ├── RequestObjectPolicy.java         RFC 9101 §10.5's server-wide switch, held in one place
+    ├── RequiredRequestAttempt.java      one request, and its fate under each setting
+    ├── RequiredRequestRun.java          the four, and what the documents said
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
