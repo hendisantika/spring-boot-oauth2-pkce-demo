@@ -733,6 +733,15 @@ to wrap its key with.
 
 ![An incomplete encryption registration](docs/images/137-fapi-encryption-incomplete.png)
 
+**138. FAPI 2.0** — a registered content encryption method this server will not decrypt, failing the
+row its key-wrapping algorithm passes.
+
+![An enc outside the supported set](docs/images/138-fapi-enc-unsupported.png)
+
+**139. FAPI 2.0** — the conditional default: an `alg` and no `enc` means `A128CBC-HS256`.
+
+![The enc default applied](docs/images/139-fapi-enc-default.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2677,6 +2686,40 @@ profile permits. So unlike the `RS256` fallback on the signing row, these blanks
 `RSA1_5` is the mirror of the `ES256` row above: that client does what FAPI asks and is refused here;
 this one does what FAPI forbids and is refused here too. The two lists agreeing is the exception
 worth noticing, not the rule.
+
+The seventh check reads [`request_object_encryption_enc`](#request_object_encryption_enc), and it is
+the one row here that no FAPI profile asks for. **Nothing in FAPI names a content encryption
+method** — not Part 1 Baseline, not Advanced, not 2.0. §8.6.1's single prohibition is `RSA1_5`, which
+wraps the key rather than encrypting the content. What reaches the `enc` is RFC 8725 §3.1, which FAPI
+2.0 §5.4.1 requires adherence to:
+
+> Libraries MUST enable the caller to specify a supported set of algorithms and MUST NOT use any
+> other algorithms when performing cryptographic operations. The library MUST ensure that the `alg`
+> or `enc` header specifies the same algorithm that is used for the cryptographic operation.
+
+So the row does not ask whether a method is blessed — nothing blesses any of them. It asks whether
+the registration names one this server would actually accept, which is the requirement that exists:
+
+| Registered | Result | Why |
+|---|---|---|
+| `A256GCM` | PASS | In this server's supported set |
+| `A192CBC-HS384` | FAIL | Not in it. RFC 8725 says nothing outside the set may be used, and this server refuses rather than widening the set to match a registration |
+| an `alg` and no `enc` | PASS | The registration spec supplies `A128CBC-HS256`, and this server accepts it |
+| `enc` with no `alg` | NOT_APPLICABLE | The registration the spec does not allow; the method is never used |
+| neither | NOT_APPLICABLE | Twenty-nine of the thirty-four |
+
+**Three settings, three different meanings of "omitted"** — worth reading the rows side by side,
+because they do not behave alike:
+
+| Setting | Omitted means |
+|---|---|
+| `request_object_signing_alg` | `RS256`, unconditionally |
+| `request_object_encryption_alg` | no declaration at all |
+| `request_object_encryption_enc` | `A128CBC-HS256`, **but only if an `alg` was registered** |
+
+That last default is conditional on its sibling being present, which is why a client with an `alg`
+and no `enc` has declared a method while a client with neither has declared nothing, and why the two
+rows are worded differently rather than sharing one branch.
 
 Only `pkce-fapi-client`, `pkce-mtls-client` and `pkce-mtls-refresh-client` meet every client
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
