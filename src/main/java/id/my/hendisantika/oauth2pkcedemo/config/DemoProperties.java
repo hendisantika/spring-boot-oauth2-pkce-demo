@@ -33,6 +33,7 @@ public record DemoProperties(String issuerUri,
                              Client requestUriClient,
                              Client rarClient,
                              Client dpopNonceClient,
+                             Client jarmClient,
                              List<DemoUser> demoUsers) {
 
     /**

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('JARM')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Signing the answer</h1>
+    <p class="lead">
+        JWT Secured Authorization Response Mode. The <a th:href="@{/jar}">JAR page</a> signs the
+        question the client asks; this signs the answer it gets back. An ordinary authorization
+        response is a handful of loose query parameters — nothing says who sent them, nothing says
+        who they are for, and anything that can reach the redirect URI can change them. JARM puts the
+        whole response in one signed JWT instead.
+    </p>
+
+    <div class="alert" th:if="${jarmError}" th:text="${jarmError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The same authorization is asked for five ways: in the clear, signed, signed after a
+            failure, with the signed answer tampered with, and asking for a delivery mode nothing
+            here implements.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Client</th>
+                <td><code th:text="${clientId}">pkce-jarm-client</code>
+                    <span class="hint" style="display:block">
+                        Nothing on its registration mentions response modes — there is no setting for
+                        one to go in.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jarm}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Ask five ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five answers</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:28%">Asked</th>
+                <th style="width:14%">response_mode</th>
+                <th style="width:12%">Signature</th>
+                <th>What came back</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:if="${attempt.note != null}"
+                          th:text="${attempt.note}">-</span>
+                </td>
+                <td><code th:text="${attempt.responseMode}">query</code></td>
+                <td>
+                    <code th:if="${attempt.signed}"
+                          th:text="${attempt.signatureVerifies} ? 'verifies' : 'fails'"
+                          th:style="${attempt.signatureVerifies} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code>
+                    <span class="hint" th:unless="${attempt.signed}">none</span>
+                </td>
+                <td>
+                    <span th:each="parameter : ${attempt.parameters}" style="display:block">
+                        <code th:text="${parameter.key}">code</code>
+                        <span class="hint" th:text="${parameter.value}">-</span>
+                    </span>
+                    <span class="hint" style="display:block" th:if="${attempt.parameters.isEmpty()}">
+                        nothing readable came back
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            The first and last rows are the same thing: parameters in the clear. One asked for that;
+            the other asked for a signed response and was not told it would not get one.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jarm/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Inside the signed answers</h2>
+        <div th:each="attempt : ${run.attempts}" th:if="${attempt.signed and !attempt.claims.isEmpty()}"
+             style="margin-bottom:18px">
+            <p class="hint">
+                <strong th:text="${attempt.label}">-</strong> —
+                <span th:text="${attempt.signatureVerifies} ? 'the signature verifies' : 'the signature does not verify'">-</span>
+            </p>
+            <table>
+                <tr th:each="claim : ${attempt.claims}">
+                    <th style="width:26%" th:text="${claim.key}">iss</th>
+                    <td><code th:text="${claim.value}">-</code></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server does not read <code>response_mode</code> at all.</strong>
+            The string appears nowhere in it. It implements the authorization code flow, where the
+            answer always goes on the query string, so it has never needed the parameter — and a
+            client asking for a signed response gets loose parameters with no indication that it
+            asked for anything. That is the worst of the three possible outcomes, and the last row
+            above is it happening.
+        </p>
+        <p class="hint">
+            <strong>What the signature actually protects.</strong> Three claims the loose form has no
+            room for: <code>iss</code>, so a client with several authorization servers knows which one
+            answered — the problem the <a th:href="@{/mixup}">mix-up page</a> solves with a bare
+            parameter that anything could have written; <code>aud</code>, so a response delivered to
+            the wrong client means nothing; and <code>exp</code>, so a captured answer stops being
+            usable. The <code>code</code> is protected as a side effect of all three.
+        </p>
+        <p class="hint">
+            <strong>The failure is signed too, and that matters.</strong> A client that cannot trust
+            an error is no better off than one that cannot trust a code: an attacker who can rewrite
+            <code>error=access_denied</code> into <code>code=…</code> has done the same damage either
+            way. The third row is an ordinary refusal carried exactly like a success.
+        </p>
+        <p class="hint">
+            <strong>Tampering fails on the signature, not on the contents.</strong> The fourth row is
+            the signed answer from the second with one claim rewritten. It parses; it has the right
+            issuer, the right audience and a perfectly plausible code; and it is refused, because the
+            signature was over the bytes that used to be there.
+        </p>
+        <p class="hint">
+            <strong>This is <a th:href="@{/jar}">JAR</a> pointed the other way.</strong> JAR signs the
+            request so the server knows the question arrived as written; JARM signs the response so
+            the client knows the answer did. A deployment that cares about one usually wants both,
+            and FAPI asks for exactly that pair.
+        </p>
+        <p class="hint">
+            <strong>Two delivery modes are missing, and only the delivery.</strong> JARM also defines
+            <code>fragment.jwt</code> and <code>form_post.jwt</code>, which differ in how the JWT
+            reaches the client rather than in what it contains. This implements
+            <code>jwt</code> and <code>query.jwt</code> — the pair that means "on the query string",
+            which is the only one the authorization code flow needs.
+        </p>
+    </div>
+</main>
+</body>
+</html>

@@ -195,6 +195,15 @@ app:
     scopes:
       - openid
       - profile
+  # Public and PKCE, consent off: the page is about how the answer is delivered, not about who is
+  # asking or what they are agreeing to.
+  jarm-client:
+    registration-id: pkce-jarm-client
+    client-id: pkce-jarm-client
+    client-name: PKCE JARM Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password
