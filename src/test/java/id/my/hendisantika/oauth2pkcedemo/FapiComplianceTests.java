@@ -5,6 +5,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import id.my.hendisantika.oauth2pkcedemo.service.FapiComplianceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,8 +17,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -53,6 +56,9 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
     @Autowired
     private RequestUriPolicy requestUriPolicy;
+
+    @Autowired
+    private ServerMetadataCustomizer serverMetadataCustomizer;
 
     private MockMvc mockMvc() {
         return MockMvcBuilders.webAppContextSetup(webApplicationContext).apply(springSecurity()).build();
@@ -276,6 +282,63 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(client.observed()).contains("A192CBC-HS384");
         assertThat(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS)
                 .doesNotContain("A192CBC-HS384");
+    }
+
+    /**
+     * The correspondence the three advertised rows now rest on: what the documents carry is what the
+     * request object filter applies. This is the assertion that fires if a list is ever hardcoded
+     * into the customizer instead of derived from the code that enforces it.
+     */
+    @Test
+    void everyAdvertisedAlgorithmListIsTheSetThatIsActuallyEnforced() {
+        Map<String, Object> published = serverMetadataCustomizer.publishedClaims();
+
+        Map<String, Set<String>> expected = Map.of(
+                ServerMetadataCustomizer.REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED,
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS,
+                ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ALG_VALUES_SUPPORTED,
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS,
+                ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ENC_VALUES_SUPPORTED,
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS);
+
+        expected.forEach((name, enforced) -> assertThat(
+                ServerMetadataCustomizer.disagreement(published, name, enforced))
+                .as("%s should be advertised exactly as it is enforced", name)
+                .isNull());
+    }
+
+    /**
+     * The comparison itself, driven through the cases that cannot happen while the documents are
+     * built from the constants the filter applies - which is exactly why they need testing here
+     * rather than being left to a divergence nobody can currently produce.
+     */
+    @Test
+    void theComparisonCatchesBothWaysADocumentCanLie() {
+        String name = ServerMetadataCustomizer.REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED;
+        Set<String> enforced = Set.of("PS256", "RS256");
+
+        Map<String, Object> missing = new LinkedHashMap<>();
+        assertThat(ServerMetadataCustomizer.disagreement(missing, name, enforced))
+                .contains("not in the discovery documents")
+                .contains("[PS256, RS256]");
+
+        // Advertising less than is accepted: a client never learns RS256 would have worked.
+        Map<String, Object> narrower = new LinkedHashMap<>(Map.of(name, List.of("PS256")));
+        assertThat(ServerMetadataCustomizer.disagreement(narrower, name, enforced))
+                .contains("advertises [PS256]")
+                .contains("enforces [PS256, RS256]");
+
+        // Advertising more than is accepted: the worse direction, since a client plans to use
+        // something this server will refuse.
+        Map<String, Object> wider =
+                new LinkedHashMap<>(Map.of(name, List.of("PS256", "RS256", "ES256")));
+        assertThat(ServerMetadataCustomizer.disagreement(wider, name, enforced))
+                .contains("advertises [ES256, PS256, RS256]");
+
+        // Order is not disagreement; both sides are sorted before comparing.
+        Map<String, Object> reordered =
+                new LinkedHashMap<>(Map.of(name, List.of("RS256", "PS256")));
+        assertThat(ServerMetadataCustomizer.disagreement(reordered, name, enforced)).isNull();
     }
 
     @Test
