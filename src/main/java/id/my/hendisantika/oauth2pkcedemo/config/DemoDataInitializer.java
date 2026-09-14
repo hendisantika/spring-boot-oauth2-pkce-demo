@@ -86,6 +86,7 @@ public class DemoDataInitializer {
             seedJarmVariant(registeredClientRepository, properties, properties.jarmNoneClient(), "none");
             seedJarmEncryptedClient(registeredClientRepository, properties);
             seedJarPsClient(registeredClientRepository, properties);
+            seedJarEsClient(registeredClientRepository, properties);
             seedRequestEncryptionClients(registeredClientRepository, properties);
             seedUnsignedRequestObjectClients(registeredClientRepository, properties);
             seedParRequiredClient(registeredClientRepository, properties);
@@ -514,6 +515,36 @@ public class DemoDataInitializer {
         log.info("Registered [{}] for {} / {} request objects", client.clientId(),
                 encryptionAlg == null ? "no alg" : encryptionAlg,
                 encryptionEnc == null ? "the default enc" : encryptionEnc);
+    }
+
+    /**
+     * A client registered for an algorithm this server does not advertise. It publishes a key on the
+     * right curve, so that what refuses its request objects is the list rather than a missing key.
+     */
+    void seedJarEsClient(RegisteredClientRepository registeredClientRepository,
+                         DemoProperties properties) {
+        DemoProperties.Client client = properties.jarEsClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .setting(JwtSecuredAuthorizationRequestFilter.SIGNING_ALG_SETTING, "ES256")
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered ES256 request object client [{}]", client.clientId());
     }
 
     /**

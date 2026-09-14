@@ -46,6 +46,13 @@ public final class ServerMetadataCustomizer {
     public static final String REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED =
             "request_object_signing_alg_values_supported";
 
+    /** RFC 9101 section 4 names all three of these together; here are the other two. */
+    public static final String REQUEST_OBJECT_ENCRYPTION_ALG_VALUES_SUPPORTED =
+            "request_object_encryption_alg_values_supported";
+
+    public static final String REQUEST_OBJECT_ENCRYPTION_ENC_VALUES_SUPPORTED =
+            "request_object_encryption_enc_values_supported";
+
     /** RFC 9126 section 5, the server-wide half of the pair whose client half is implemented. */
     public static final String REQUIRE_PUSHED_AUTHORIZATION_REQUESTS =
             "require_pushed_authorization_requests";
@@ -121,6 +128,12 @@ public final class ServerMetadataCustomizer {
         // accepted has to find out by being refused.
         claim.accept(REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED, new ArrayList<>(
                 JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream().sorted().toList()));
+        // The same three metadata values RFC 9101 section 4 names together. Both of these were
+        // implemented and unadvertised, which leaves a client to discover them by being refused.
+        claim.accept(REQUEST_OBJECT_ENCRYPTION_ALG_VALUES_SUPPORTED, new ArrayList<>(
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS.stream().sorted().toList()));
+        claim.accept(REQUEST_OBJECT_ENCRYPTION_ENC_VALUES_SUPPORTED, new ArrayList<>(
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS.stream().sorted().toList()));
         claim.accept(REQUIRE_SIGNED_REQUEST_OBJECT_METADATA,
                 this.requestObjectPolicy.requireSignedRequestObject());
         // RFC 9126 section 5: "whether the authorization server accepts authorization request data

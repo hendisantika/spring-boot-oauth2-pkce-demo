@@ -49,6 +49,7 @@ public record DemoProperties(String issuerUri,
                              Client jarNoneStrictClient,
                              Client parRequiredClient,
                              Client fetchedRequestClient,
+                             Client jarEsClient,
                              List<DemoUser> demoUsers) {
 
     /**

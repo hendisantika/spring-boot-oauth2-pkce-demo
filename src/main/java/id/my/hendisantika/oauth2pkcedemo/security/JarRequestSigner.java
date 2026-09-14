@@ -10,7 +10,11 @@ import com.nimbusds.jose.crypto.RSAEncrypter;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.ECDSASigner;
 import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jose.jwk.Curve;
+import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
@@ -42,23 +46,50 @@ public final class JarRequestSigner {
 
     private final RSAKey key;
 
-    private JarRequestSigner(RSAKey key) {
+    /**
+     * A second key, on a curve rather than a modulus. Nothing here signs with it by default; it
+     * exists so that a client can sign with an algorithm this server does not advertise, and so that
+     * the refusal is about the algorithm rather than about a key the server never saw.
+     */
+    private final ECKey ellipticKey;
+
+    private JarRequestSigner(RSAKey key, ECKey ellipticKey) {
         this.key = key;
+        this.ellipticKey = ellipticKey;
     }
 
     public static JarRequestSigner generate() {
         try {
-            return new JarRequestSigner(new RSAKeyGenerator(2048)
-                    .keyID(UUID.randomUUID().toString())
-                    .generate());
+            return new JarRequestSigner(
+                    new RSAKeyGenerator(2048).keyID(UUID.randomUUID().toString()).generate(),
+                    new ECKeyGenerator(Curve.P_256).keyID(UUID.randomUUID().toString()).generate());
         } catch (JOSEException ex) {
             throw new IllegalStateException("Unable to generate the request object signing key", ex);
         }
     }
 
-    /** Only the public half; the authorization server fetches this to check signatures. */
+    /** Only the public halves; the authorization server fetches these to check signatures. */
     public String publicJwkSetJson() {
-        return new JWKSet(key.toPublicJWK()).toString();
+        return new JWKSet(List.of(key.toPublicJWK(), ellipticKey.toPublicJWK())).toString();
+    }
+
+    /**
+     * The same object signed on the curve. ES256 is a perfectly ordinary JWS algorithm that this
+     * server does not list as one it checks request objects with, which is the only reason this
+     * exists.
+     */
+    public String signWithEllipticCurve(String clientId, String issuerUri,
+                                        Map<String, String> parameters) {
+        try {
+            SignedJWT requestObject = new SignedJWT(
+                    new JWSHeader.Builder(JWSAlgorithm.ES256).type(OAUTH_AUTHZ_REQ)
+                            .keyID(ellipticKey.getKeyID()).build(),
+                    claims(clientId, issuerUri, parameters));
+            requestObject.sign(new ECDSASigner(ellipticKey));
+            return requestObject.serialize();
+        } catch (JOSEException ex) {
+            throw new IllegalStateException("Unable to sign the request object", ex);
+        }
     }
 
     /**

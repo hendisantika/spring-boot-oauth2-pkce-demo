@@ -326,6 +326,14 @@ app:
     scopes:
       - openid
       - profile
+  # Registered for ES256, which is a real JWS algorithm this server does not advertise checking.
+  jar-es-client:
+    registration-id: pkce-jar-es-client
+    client-id: pkce-jar-es-client
+    client-name: PKCE JAR ES256 Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

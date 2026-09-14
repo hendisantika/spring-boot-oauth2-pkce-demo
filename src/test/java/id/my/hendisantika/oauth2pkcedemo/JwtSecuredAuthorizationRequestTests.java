@@ -86,7 +86,11 @@ class JwtSecuredAuthorizationRequestTests extends AbstractMySqlIntegrationTest {
                 .andReturn();
 
         JWKSet jwkSet = JWKSet.parse(result.getResponse().getContentAsString());
-        assertThat(jwkSet.getKeys()).hasSize(1);
+        // The count is not the point and has changed once already, when the client started
+        // publishing a second key for an algorithm this server does not check. What must hold is
+        // that every key here is a public half.
+        assertThat(jwkSet.getKeys()).isNotEmpty()
+                .allSatisfy(jwk -> assertThat(jwk.isPrivate()).isFalse());
         assertThat(result.getResponse().getContentAsString())
                 .doesNotContain("\"d\":").doesNotContain("\"p\":");
     }
