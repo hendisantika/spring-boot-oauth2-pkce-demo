@@ -75,6 +75,38 @@ class AuthorizationServerMetadataTests extends AbstractMySqlIntegrationTest {
 
     /** RFC 8414 section 3.1, using the specification's own example. */
     /**
+     * The row for a value this demo has a page for links to it. A document says what a server
+     * claims; the page says what it does about the claim, and one is worth little without the other.
+     */
+    @Test
+    void theRowLinksToThePageThatShowsWhatTheValueDoes() throws Exception {
+        Map<String, Object> document = document("/.well-known/"
+                + AuthorizationServerMetadataService.OAUTH_SUFFIX);
+
+        assertThat(metadataService.describe(document, Map.of()))
+                .filteredOn(entry -> "require_pushed_authorization_requests".equals(entry.name()))
+                .singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.hasDemonstration()).isTrue();
+                    assertThat(entry.demonstratedAt()).isEqualTo("/par-server-required");
+                });
+    }
+
+    /** And every page linked from a row is one this application actually serves. */
+    @Test
+    void noRowLinksToAPageThatIsNotThere() throws Exception {
+        assertThat(AuthorizationServerMetadataService.demonstrations()).isNotEmpty();
+
+        for (Map.Entry<String, String> linked
+                : AuthorizationServerMetadataService.demonstrations().entrySet()) {
+            assertThat(mockMvc().perform(get(linked.getValue()))
+                    .andReturn().getResponse().getStatus())
+                    .as("GET %s, linked from %s", linked.getValue(), linked.getKey())
+                    .isEqualTo(200);
+        }
+    }
+
+    /**
      * Every field this application adds is cited to the specification that defines it. The fallback
      * in describe() is RFC 8414 section 2, which is right only for the fields RFC 8414 itself
      * defines - so an extension reported that way is miscited rather than uncited, and this catches
