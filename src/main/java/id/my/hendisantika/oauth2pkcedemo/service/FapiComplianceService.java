@@ -188,6 +188,24 @@ public class FapiComplianceService {
                         + FORBIDDEN_ENCRYPTION_ALG + " and fails its own row - what that page "
                         + "demonstrates is the refusal, so this server never needed to support it")));
 
+        // The third of the lists RFC 9101 §4 names together, and the only one no FAPI profile has an
+        // opinion about - none of the three names a content encryption method. What applies is the
+        // same borrowed chain the per-client enc row uses: RFC 8725 §3.1, which FAPI 2.0 §5.4.1
+        // requires adherence to, asks for a supported set that nothing outside it may be used with.
+        Set<String> methods = JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS;
+        checks.add(FapiCheck.of(!methods.isEmpty(),
+                "The request object enc set is closed and advertised",
+                "RFC 8725 \u00a73.1, required by FAPI 2.0 \u00a75.4.1",
+                ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ENC_VALUES_SUPPORTED + " is "
+                        + methods.stream().sorted().toList() + ". No FAPI profile names a content "
+                        + "encryption method, so what applies is RFC 8725's \"supported set of "
+                        + "algorithms\" that nothing outside may be used with. That the set is "
+                        + "really closed is visible below rather than asserted here: a client "
+                        + "registered A192CBC-HS384 and fails its row, because this server refuses "
+                        + "it rather than widening the set to match a registration. RFC 9101 §4 is "
+                        + "why the list is published at all, so a client can read the set instead of "
+                        + "discovering it by being refused"));
+
         checks.add(FapiCheck.of(properties.issuerUri().startsWith("https://"),
                 "All endpoints are served over TLS", "FAPI 2.0 §5.3",
                 "The issuer is " + properties.issuerUri()
