@@ -85,6 +85,14 @@ public class AuthorizationServerMetadataService {
     /**
      * Pages that show a published value doing something, keyed by the field they are about. A
      * document says what a server claims; these say what it does about the claim.
+     * <p>
+     * Fields with no entry are the ones no single page owns - the endpoints themselves, the response
+     * types, the scopes - and one field, {@code code_challenge_methods_supported}, whose subject is
+     * the whole demo. A link to an approximate page would be worse than none.
+     * <p>
+     * Nothing here names a field the OpenID document has and the OAuth one does not: the table is
+     * built from the OAuth document, so an entry for {@code end_session_endpoint} or
+     * {@code userinfo_endpoint} would be a link with no row to sit on.
      */
     private static final Map<String, String> DEMONSTRATED_BY = Map.ofEntries(
             Map.entry("require_pushed_authorization_requests", "/par-server-required"),
@@ -94,7 +102,17 @@ public class AuthorizationServerMetadataService {
             Map.entry("request_object_encryption_enc_values_supported", "/jar-enc-method-values"),
             Map.entry("request_parameter_supported", "/jar"),
             Map.entry("request_uri_parameter_supported", "/request-uri-metadata"),
-            Map.entry("require_request_uri_registration", "/request-uri-registration"));
+            Map.entry("require_request_uri_registration", "/request-uri-registration"),
+            Map.entry("pushed_authorization_request_endpoint", "/par"),
+            Map.entry("device_authorization_endpoint", "/device"),
+            Map.entry("registration_endpoint", "/dynamic-registration"),
+            Map.entry("authorization_details_types_supported", "/rar"),
+            Map.entry("authorization_response_iss_parameter_supported", "/mixup"),
+            Map.entry("tls_client_certificate_bound_access_tokens", "/mtls"),
+            Map.entry("dpop_signing_alg_values_supported", "/dpop"),
+            Map.entry("check_session_iframe", "/session-management"),
+            Map.entry("introspection_endpoint", "/introspect"),
+            Map.entry("revocation_endpoint", "/introspect"));
 
     private final RestClient restClient;
     private final DemoProperties properties;

@@ -92,17 +92,29 @@ class AuthorizationServerMetadataTests extends AbstractMySqlIntegrationTest {
                 });
     }
 
-    /** And every page linked from a row is one this application actually serves. */
+    /**
+     * And every page linked from a row is one this application actually serves. Some of those pages
+     * need a session and answer a signed-out visitor by sending them to sign in, which is what the
+     * rest of the demo does with them too - so the assertion is that the path is served at all
+     * rather than that it is served to nobody in particular.
+     */
     @Test
     void noRowLinksToAPageThatIsNotThere() throws Exception {
         assertThat(AuthorizationServerMetadataService.demonstrations()).isNotEmpty();
 
         for (Map.Entry<String, String> linked
                 : AuthorizationServerMetadataService.demonstrations().entrySet()) {
-            assertThat(mockMvc().perform(get(linked.getValue()))
-                    .andReturn().getResponse().getStatus())
+            var response = mockMvc().perform(get(linked.getValue())).andReturn().getResponse();
+            assertThat(response.getStatus())
                     .as("GET %s, linked from %s", linked.getValue(), linked.getKey())
-                    .isEqualTo(200);
+                    .isIn(200, 302);
+            if (response.getStatus() == 302) {
+                // Two ways this application asks: the form login, or - for a page that needs tokens
+                // rather than only a session - straight into the client's own authorization flow.
+                assertThat(response.getRedirectedUrl())
+                        .as("%s sends a signed-out visitor somewhere sensible", linked.getValue())
+                        .containsAnyOf("/login", "/oauth2/authorization/");
+            }
         }
     }
 
