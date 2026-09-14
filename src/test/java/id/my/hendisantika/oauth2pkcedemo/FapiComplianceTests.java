@@ -96,8 +96,9 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     void theCheckerReportsTheServerGapsRatherThanHidingThem() {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
 
-        // The two that remain: no per-client PAR requirement, and plain HTTP.
-        assertThat(failures(checks)).isEqualTo(2);
+        // Three: PAR not required server-wide, plain HTTP, and a request object algorithm list that
+        // advertises two algorithms the profile does not want.
+        assertThat(failures(checks)).isEqualTo(3);
         assertThat(checks).anySatisfy(check -> {
             assertThat(check.requirement()).contains("pushed authorization requests");
             assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
@@ -165,6 +166,39 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         } finally {
             requestUriPolicy.requireRegistration(previous);
         }
+    }
+
+    /**
+     * §8.6 binds "both clients and authorization servers", so the per-client rows are only half of
+     * it. The server half is the list it advertises, and this server advertises two algorithms the
+     * profile does not want - deliberately, which the row has to say rather than imply an oversight.
+     */
+    @Test
+    void theAdvertisedAlgorithmListIsJudgedByTheSameRuleAsTheClients() {
+        assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("Advertised request object signing algorithms");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+            assertThat(check.reference()).contains("FAPI 1.0 Advanced").contains("FAPI 2.0");
+            assertThat(check.observed())
+                    .contains("request_object_signing_alg_values_supported")
+                    .contains("RS256")
+                    .contains("none")
+                    .contains("both clients and authorization servers")
+                    .contains("deliberate");
+        });
+    }
+
+    /** What the row reports has to be what the discovery document actually publishes. */
+    @Test
+    void theRowNamesTheListThatIsActuallyAdvertised() {
+        FapiCheck check = fapiComplianceService.serverChecks().stream()
+                .filter(c -> c.requirement().contains("Advertised request object signing algorithms"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(check.observed()).contains(
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream().sorted().toList()
+                        .toString());
     }
 
     @Test
