@@ -201,6 +201,45 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                         .toString());
     }
 
+    /**
+     * The encryption half of the advertised-algorithms idea. It passes where the signing one fails,
+     * and the reason is what each page had to demonstrate rather than a difference in the rules.
+     */
+    @Test
+    void theAdvertisedEncryptionListExcludesTheForbiddenAlgorithm() {
+        assertThat(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS)
+                .doesNotContain("RSA1_5");
+
+        assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+            assertThat(check.requirement())
+                    .contains("Advertised request object encryption algorithms exclude RSA1_5");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+            assertThat(check.reference()).contains("FAPI 1.0 Advanced");
+            assertThat(check.observed())
+                    .contains("request_object_encryption_alg_values_supported")
+                    .contains(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS.stream()
+                            .sorted().toList().toString())
+                    .contains("binds both sides");
+        });
+    }
+
+    /**
+     * The pairing that makes both rows worth reading: the same profile section binds the server and
+     * the client, and here the server passes while a client fails.
+     */
+    @Test
+    void theServerPassesTheEncryptionRuleThatOneOfItsClientsFails() {
+        FapiCheck server = fapiComplianceService.serverChecks().stream()
+                .filter(c -> c.requirement().contains("encryption algorithms exclude RSA1_5"))
+                .findFirst()
+                .orElseThrow();
+        FapiCheck client = encryptionCheckFor(fapiComplianceService.clientChecks(),
+                properties.jarRsa15Client());
+
+        assertThat(server.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+        assertThat(client.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+    }
+
     @Test
     void theMechanismsTheProfileMandatesAreAllPresent() {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
