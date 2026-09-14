@@ -133,6 +133,17 @@
             so the two clients that registered one fail the row.
         </p>
         <p class="hint">
+            <strong>That switch now has a row of its own, up in the server table.</strong> No FAPI
+            profile names <code>require_request_uri_registration</code> — the specification that
+            cares is RFC 9101 §10.4.1(a), where the server <em>"should check that the value of the
+            <code>request_uri</code> parameter does not point to an unexpected location"</em>, and a
+            registration is what makes a location expected. OpenID Connect Discovery makes the
+            default <code>false</code>; it is <code>true</code> here, which is this server choosing to
+            be stricter than the specification rather than following it. FAPI 2.0 reaches the same
+            attack surface from the other side — require PAR and nothing is ever fetched — which is
+            why that row fails while this one passes.
+        </p>
+        <p class="hint">
             <strong>Both kinds of reference arrive in the same parameter.</strong> A
             <a th:href="@{/par}">pushed</a> <code>request_uri</code> and a fetched one are told apart
             by scheme, not by which is which in the registration — so this row is about the fetched
