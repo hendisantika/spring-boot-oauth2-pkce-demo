@@ -77,6 +77,9 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jar-ps-client` | none (public) | required | no | code | no |
 | `pkce-jar-oaep512-client` | none (public) | required | no | code | no |
 | `pkce-jar-rsa15-client` | none (public) | required | no | code | no |
+| `pkce-jar-gcm-client` | none (public) | required | no | code | no |
+| `pkce-jar-unsupported-enc-client` | none (public) | required | no | code | no |
+| `pkce-jar-enc-only-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -592,6 +595,16 @@ registration spec would have allowed.
 follows it.
 
 ![Reading the algorithms](docs/images/109-jar-enc-alg-reading.png)
+
+**109. Request object content encryption** — six request objects, and the shapes that tell CBC and
+GCM apart from outside.
+
+![Six request objects](docs/images/110-jar-enc-method-six-objects.png)
+
+**110. Request object content encryption** — the spec's own default, and the registration it says
+cannot exist.
+
+![Reading the methods](docs/images/111-jar-enc-method-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1721,8 +1734,51 @@ Notes:
   becoming a decryption attempt.
 * **Only the wrapping changes.** Every accepted row decrypts to the same three-part signed JWT, then
   checked exactly as an unencrypted one is — type, signature, audience, expiry.
-  `request_object_encryption_enc` would decide the other half, the way
+  [`request_object_encryption_enc`](#request_object_encryption_enc) decides the other half, the way
   [JARM's two settings](#authorization_encrypted_response_enc) divide the same work.
+
+## `request_object_encryption_enc`
+
+`/jar-enc-method` is the other half of the pair.
+[`request_object_encryption_alg`](#request_object_encryption_alg) decides how the content encryption
+key reaches the server; `enc` decides what that key then does to the request object. They are
+registered and chosen separately, and unlike the `alg`, this one has a default the registration spec
+writes down itself: *"If `request_object_encryption_alg` is specified, the default
+`request_object_encryption_enc` value is `A128CBC-HS256`."*
+
+Four clients, one server key, one request object. Everything below is wrapped with `RSA-OAEP-256`, so
+only the content encryption changes:
+
+| Sent | Client | Registered | Header said | Shape | What the server did |
+|---|---|---|---|---|---|
+| what it registered | `pkce-demo-client` | nothing | `A128CBC-HS256` | iv 16, tag 16, padded | an authorization code |
+| a method it never registered | `pkce-demo-client` | nothing | `A256GCM` | iv 12, tag 16, no padding | `encrypted with A256GCM, and this client registered A128CBC-HS256` |
+| what it registered | `pkce-jar-gcm-client` | `A256GCM` | `A256GCM` | iv 12, tag 16, no padding | an authorization code |
+| the other client's method | `pkce-jar-gcm-client` | `A256GCM` | `A128CBC-HS256` | iv 16, tag 16, padded | `encrypted with A128CBC-HS256, and this client registered A256GCM` |
+| exactly what it registered | `pkce-jar-unsupported-enc-client` | `A192CBC-HS384` | `A192CBC-HS384` | iv 16, **tag 24**, padded | `This server does not decrypt A192CBC-HS384 content` |
+| a registration the spec forbids | `pkce-jar-enc-only-client` | `A256GCM`, no `alg` | `A256GCM` | iv 12, tag 16, no padding | `registered A256GCM and no algorithm to wrap the key with` |
+
+Notes:
+
+* **The shape column is the only part of this a wire observer could check.** CBC encrypts in blocks
+  and pads up to a boundary, with a 16-byte IV; GCM is a stream cipher with a 12-byte nonce and no
+  padding, so its ciphertext is exactly as long as the payload. Both carry a 16-byte tag for
+  different reasons — CBC's is a truncated HMAC computed after the fact, GCM's falls out of the
+  encryption itself. The fifth row shows what that means: its tag is **24 bytes**, because a CBC
+  method's tag is half of whichever HMAC it names, and that one names SHA-384.
+* **This default is the spec's, not this server's invention.** Unlike
+  [`request_object_encryption_alg`](#request_object_encryption_alg), where the default here is a
+  deliberate tightening, the registration text states it outright. The first row is a client that
+  registered neither half and still has a method, because of that sentence.
+* **An unsupported method is refused, not downgraded.** Falling back to something this server does
+  offer would hand the client different cryptography from the one it asked for without saying so —
+  the failure mode worth avoiding even when the substitute is stronger.
+* **A method with no algorithm beside it is refused too.** The registration spec: when
+  `request_object_encryption_enc` is included, `request_object_encryption_alg` must be as well. The
+  last client is registered the way the spec says it cannot be, and this server treats that as a
+  registration it cannot honour rather than quietly filling the algorithm in from the default.
+* **Nothing about the plaintext changes.** Every accepted row decrypts to the same three-part signed
+  JWT, then checked exactly as an unencrypted one is. `enc` decides the wrapping and nothing else.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2147,6 +2203,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectEncryptionController.java  /jar-enc
 │   ├── RequestObjectSigningAlgController.java  /jar-alg
 │   ├── RequestObjectEncryptionAlgController.java  /jar-enc-alg
+│   ├── RequestObjectEncryptionMethodController.java  /jar-enc-method
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2194,6 +2251,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectEncryptionService.java  the same request sent three ways
 │   ├── RequestObjectSigningAlgService.java  the same request signed five ways
 │   ├── RequestObjectEncryptionAlgService.java  the same request wrapped six ways
+│   ├── RequestObjectEncryptionMethodService.java  the same request encrypted six ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2298,6 +2356,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── SigningAlgRun.java               the five request objects
     ├── RequestEncryptionAlgAttempt.java  one object, its registration and its JWE header
     ├── RequestEncryptionAlgRun.java     the six request objects
+    ├── RequestEncryptionMethodAttempt.java  one object, its registration and its shape
+    ├── RequestEncryptionMethodRun.java  the six request objects, and what padded
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
