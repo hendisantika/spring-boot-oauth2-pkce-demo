@@ -65,6 +65,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-mtls-refresh-client` | **`self_signed_tls_client_auth`** | n/a | n/a | **device**, refresh | yes, rotated, certificate-bound |
 | `pkce-freshness-client` | none (public) | required | no | code | no |
 | `pkce-silent-client` | none (public) | required | no | code | no |
+| `pkce-request-uri-client` | `client_secret_basic` | required | **yes** | code | no |
 
 ## What the flow looks like
 
@@ -475,6 +476,16 @@ never reaches.
 
 ![Reading the silent authentication page](docs/images/86-silent-auth-reading.png)
 
+**86. request_uri** — what a pushed reference is made of: a prefix, a random part, and its own
+expiry.
+
+![The anatomy of a request_uri](docs/images/87-request-uri-anatomy.png)
+
+**87. request_uri** — the same reference spent five ways. One code, and after four of them the
+server is holding nothing.
+
+![Five ways of spending it](docs/images/88-request-uri-five-ways.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -757,6 +768,9 @@ Two things to know:
 
 The `request_uri` is single-use and short-lived; replaying a consumed one is refused with `400`, so
 lifting it out of browser history buys nothing.
+
+What the reference itself is worth — how long it lasts, how often it works, and what happens when
+it does not — is [its own page](#request_uri-expiry-and-one-time-use).
 
 ## Sender-constrained tokens (DPoP)
 
@@ -1140,6 +1154,46 @@ Notes:
   `account_selection_required` are not in Spring Authorization Server at all.
 * **The run forgets the stored consent first.** A consent, once given, is remembered, so a second run
   would find the user had already agreed and the middle row would answer itself.
+
+## `request_uri` expiry and one-time use
+
+`/request-uri` is about the reference itself. [Pushing an authorization request](#pushed-authorization-requests)
+replaces a long query string with a short one, and as far as the browser is concerned that reference
+*is* the authorization request — so how long one lasts and how often it works decides what a leaked
+URL is worth.
+
+The probe pushes one request and spends it five ways:
+
+| Spent | Answer | Still stored |
+|---|---|---|
+| Once, by the client that pushed it | a code | no |
+| The same reference a second time | `invalid_request` | no |
+| One whose expiry has passed | `invalid_request` | no |
+| The same reference with a later expiry written into it | `invalid_request` | no |
+| Presented by a different client | `invalid_request` | **yes** |
+
+Notes:
+
+* **One-time use is a deletion, not a flag.** Spring Authorization Server removes the stored request
+  the moment it is consumed — at the consent screen as well as at the redirect — so the second
+  attempt is not refused for having been used before. It is refused because there is nothing there.
+* **The expiry is enforced by deleting it too.** An expired reference is removed before the error is
+  returned, so the first retry is what clears the row.
+* **Editing the expiry cannot help.** The value the request is stored under is the random part *and*
+  the expiry, joined by `___`. Move the number a year out and the reference names nothing: the lookup
+  fails before the expiry is ever compared. Plain sight and tamper-evident at once, with no signature
+  anywhere.
+* **Five minutes, and nothing to configure.** `OAuth2PushedAuthorizationRequestUri.create()`
+  hard-codes `Instant.now().plusSeconds(300)`; there is no setting for it on the client or the
+  server. A deployment wanting a different lifetime would have to replace the provider.
+* **A refusal that cannot reach the client lands on the user.** Every failure above is answered with
+  `400` and an error page rather than `error=invalid_request` at the redirect URI — the only record
+  of where to send that was the pushed request the server just deleted or never had.
+* **The reference is not a secret, and does not need to be.** The last row presents a perfectly valid
+  one as a different client and gets nowhere, and the reference survives: a failed lookup consumes
+  nothing.
+* **The expiry was moved, not waited out.** The third row rewrites the stored request so it is keyed
+  by an expiry a minute in the past. What is faked is the clock, not the check.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1549,6 +1603,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── StepUpChallengeController.java   /stepup-challenge
 │   ├── FreshnessController.java         /freshness
 │   ├── SilentAuthController.java        /silent-auth
+│   ├── RequestUriController.java        /request-uri
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
@@ -1582,6 +1637,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── StepUpChallengeService.java      calls the operation, keeps the challenge it was given
 │   ├── FreshnessService.java            a probe session that asks max_age three ways
 │   ├── SilentAuthService.java           a probe session that asks prompt=none five ways
+│   ├── RequestUriService.java           pushes one request and spends it five ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1655,6 +1711,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── PromptNoneFilter.java            answers prompt=none instead of showing a login page
     ├── SilentAuthAttempt.java           one silent question, and what came back
     ├── SilentAuthRun.java               the five questions of one probe
+    ├── RequestUriAttempt.java           one way of spending a pushed reference
+    ├── RequestUriRun.java               the reference, its expiry, and the five attempts
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
