@@ -751,10 +751,15 @@ absent value means in each.
 
 ![The reading notes](docs/images/141-fapi-reading-this.png)
 
-**142. FAPI 2.0** — the whole server table: six passes, the row no profile asks for, the one the
-profile stopped asking for, and the three gaps — one of them kept deliberately.
+**142. FAPI 2.0** — the top of the server table: six passes, the row no profile asks for, and the
+one the profile stopped asking for.
 
 ![The server table](docs/images/142-fapi-server-request-uri-registration.png)
+
+**143. FAPI 2.0** — the bottom of it, and the pairing worth reading: the same profile section binds
+clients and servers, and the advertised signing list fails where the encryption list passes.
+
+![The two algorithm rows](docs/images/143-fapi-advertised-algorithms.png)
 
 ## Refresh tokens and public clients
 
@@ -2634,7 +2639,16 @@ requests, PKCE, sender-constrained tokens, and client authentication that involv
 | Advertised request object signing algorithms are PS256 or ES256 | [`request_object_signing_alg_values_supported`](#request_object_signing_alg_values_supported) is `[PS256, RS256, none]`. §8.6 binds *"both clients and authorization servers"*, and FAPI 2.0 §5.4.1 says not to *"use or accept"* `none` — and a supported list is precisely a statement about what is accepted. **A gap kept on purpose**: the pages demonstrating `none` and `RS256` need a server that accepts them |
 | All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
 
-The second one is the server half of the per-client signing row further down. A client here can
+Beside it sits the encryption equivalent, which **passes**:
+[`request_object_encryption_alg_values_supported`](#request_object_encryption_alg_values_supported)
+is `[RSA-OAEP-256, RSA-OAEP-512]`, and §8.6.1 binds both sides exactly as §8.6 does. The difference
+between the two rows is not in the rules but in what each demonstration needed. Showing
+[`alg: none`](#request_object_signing_alg-none) *accepted* requires a server that accepts it; showing
+[`RSA1_5` *refused*](#request_object_encryption_alg) requires a server that does not. One list had to
+break the profile to teach its lesson and the other had to keep it — so the client that registered
+`RSA1_5` fails its row while the server passes this one.
+
+The signing failure is the server half of the per-client signing row further down. A client here can
 register `PS256`, pass its own row, and still be talking to a server that accepts `none` from
 somebody else — which is why §8.6 binds both sides and why checking only the clients would have
 been half a check. The row reads `SUPPORTED_SIGNING_ALGS`, the same constant the discovery document
