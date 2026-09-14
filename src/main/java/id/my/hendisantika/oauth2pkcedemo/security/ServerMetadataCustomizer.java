@@ -32,6 +32,20 @@ public final class ServerMetadataCustomizer {
     public static final String AUTHORIZATION_DETAILS_TYPES_SUPPORTED =
             "authorization_details_types_supported";
 
+    /**
+     * RFC 9101 section 10.5, as server metadata: when true, every client must sign its request
+     * objects. False here so that a client which registered {@code none} can be shown doing it, and
+     * published either way - a defence a client cannot read is one it cannot rely on.
+     */
+    public static final boolean REQUIRE_SIGNED_REQUEST_OBJECT = false;
+
+    /** RFC 9101 section 10.5. */
+    public static final String REQUIRE_SIGNED_REQUEST_OBJECT_METADATA = "require_signed_request_object";
+
+    /** RFC 9101 section 4: what a client may sign a request object with, {@code none} included. */
+    public static final String REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED =
+            "request_object_signing_alg_values_supported";
+
     private final AuthorizationServerSettings settings;
     private final DemoProperties properties;
 
@@ -73,6 +87,12 @@ public final class ServerMetadataCustomizer {
         // An ArrayList, because these documents are cached and serialised like any other claims.
         claim.accept(AUTHORIZATION_DETAILS_TYPES_SUPPORTED,
                 new ArrayList<>(RichAuthorizationDetail.SUPPORTED_TYPES));
+        // RFC 9101 sections 4 and 10.5. Spring Authorization Server advertises neither, having no
+        // notion of the request parameter at all; a client that cannot discover which algorithms are
+        // accepted has to find out by being refused.
+        claim.accept(REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED, new ArrayList<>(
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream().sorted().toList()));
+        claim.accept(REQUIRE_SIGNED_REQUEST_OBJECT_METADATA, REQUIRE_SIGNED_REQUEST_OBJECT);
         // The lists are edited rather than appended to: the OIDC document already declares openid,
         // and a document that names a value twice is describing itself carelessly.
         grantTypes.accept(values ->

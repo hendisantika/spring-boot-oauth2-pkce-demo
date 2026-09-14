@@ -63,6 +63,8 @@ public class AuthorizationServerMetadataService {
             Map.entry("tls_client_certificate_bound_access_tokens", "RFC 8705 §3.3"),
             Map.entry("authorization_response_iss_parameter_supported", "RFC 9207 §3"),
             Map.entry("authorization_details_types_supported", "RFC 9396 §10"),
+            Map.entry("request_object_signing_alg_values_supported", "RFC 9101 §4"),
+            Map.entry("require_signed_request_object", "RFC 9101 §10.5"),
             Map.entry("userinfo_endpoint", "OpenID Connect Discovery"),
             Map.entry("subject_types_supported", "OpenID Connect Discovery"),
             Map.entry("id_token_signing_alg_values_supported", "OpenID Connect Discovery"),

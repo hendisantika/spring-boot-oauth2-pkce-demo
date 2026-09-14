@@ -292,6 +292,22 @@ app:
     scopes:
       - openid
       - profile
+  # Registered with request_object_signing_alg: none, which the registration spec permits.
+  jar-none-client:
+    registration-id: pkce-jar-none-client
+    client-id: pkce-jar-none-client
+    client-name: PKCE JAR Unsigned Client
+    scopes:
+      - openid
+      - profile
+  # The same registration, with RFC 9101 section 10.5's downgrade defence turned on beside it.
+  jar-none-strict-client:
+    registration-id: pkce-jar-none-strict-client
+    client-id: pkce-jar-none-strict-client
+    client-name: PKCE JAR Unsigned, Required Signed Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

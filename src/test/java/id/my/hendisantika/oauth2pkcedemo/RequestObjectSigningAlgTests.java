@@ -123,19 +123,19 @@ class RequestObjectSigningAlgTests extends AbstractMySqlIntegrationTest {
     }
 
     /**
-     * An unsigned JWT parses as a plain one, never as a signed one, so {@code alg: none} is refused
-     * for not being a signed JWT at all - before there is a header to compare against anything.
+     * {@code none} is compared like any other registered algorithm: this client registered RS256, so
+     * an unsigned object is refused for being unsigned, not for being unparseable.
      */
     @Test
-    void anUnsignedRequestObjectNeverReachesTheAlgorithmCheck() throws Exception {
+    void anUnsignedRequestObjectIsRefusedByTheSameComparison() throws Exception {
         String unsigned = signer.unsigned(properties.client().clientId(), properties.issuerUri(),
                 parameters(properties.client()));
 
         assertThat(JWTParser.parse(unsigned)).isInstanceOf(PlainJWT.class);
         assertThatThrownBy(() -> SignedJWT.parse(unsigned)).isInstanceOf(ParseException.class);
         assertThat(refusal(properties.client(), unsigned))
-                .contains("not a signed JWT")
-                .doesNotContain("registered");
+                .contains("signed with none")
+                .contains("registered RS256");
     }
 
     @Test

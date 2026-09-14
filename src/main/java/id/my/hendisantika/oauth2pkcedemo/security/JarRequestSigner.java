@@ -90,8 +90,10 @@ public final class JarRequestSigner {
     }
 
     /**
-     * A request object with {@code alg: none} and no signature at all. RFC 9101 section 4 requires
-     * one to be signed; this exists so a page can show what happens to one that is not.
+     * A request object with {@code alg: none} and no signature at all. RFC 9101 section 4 reads as
+     * though this cannot exist - the claims are "signed or signed and encrypted" - and then section
+     * 10.5 defines a switch for refusing it, and OpenID Connect Dynamic Client Registration says
+     * outright that "the value none MAY be used". So it exists, and a client may register for it.
      */
     public String unsigned(String clientId, String issuerUri, Map<String, String> parameters) {
         return new PlainJWT(new PlainHeader.Builder().type(OAUTH_AUTHZ_REQ).build(),

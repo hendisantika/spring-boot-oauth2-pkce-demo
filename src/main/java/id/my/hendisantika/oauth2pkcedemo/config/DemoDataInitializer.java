@@ -85,6 +85,7 @@ public class DemoDataInitializer {
             seedJarmEncryptedClient(registeredClientRepository, properties);
             seedJarPsClient(registeredClientRepository, properties);
             seedRequestEncryptionClients(registeredClientRepository, properties);
+            seedUnsignedRequestObjectClients(registeredClientRepository, properties);
             seedJarmEncryptionMethod(registeredClientRepository, properties,
                     properties.jarmGcmClient(), "A256GCM");
             seedJarmEncryptionMethod(registeredClientRepository, properties,
@@ -508,6 +509,52 @@ public class DemoDataInitializer {
         log.info("Registered [{}] for {} / {} request objects", client.clientId(),
                 encryptionAlg == null ? "no alg" : encryptionAlg,
                 encryptionEnc == null ? "the default enc" : encryptionEnc);
+    }
+
+    /**
+     * Two clients that registered {@code none} as their request object signing algorithm. The second
+     * also registered RFC 9101 section 10.5's {@code require_signed_request_object}, which is a
+     * registration that contradicts itself - and the page exists to show which half wins.
+     */
+    void seedUnsignedRequestObjectClients(RegisteredClientRepository registeredClientRepository,
+                                          DemoProperties properties) {
+        seedUnsignedRequestObjectClient(registeredClientRepository, properties,
+                properties.jarNoneClient(), false);
+        seedUnsignedRequestObjectClient(registeredClientRepository, properties,
+                properties.jarNoneStrictClient(), true);
+    }
+
+    private void seedUnsignedRequestObjectClient(RegisteredClientRepository registeredClientRepository,
+                                                 DemoProperties properties,
+                                                 DemoProperties.Client client,
+                                                 boolean requireSignedRequestObject) {
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        ClientSettings.Builder settings = ClientSettings.builder()
+                .requireProofKey(true)
+                .requireAuthorizationConsent(false)
+                .setting(JwtSecuredAuthorizationRequestFilter.SIGNING_ALG_SETTING,
+                        JwtSecuredAuthorizationRequestFilter.NO_SIGNATURE);
+        if (requireSignedRequestObject) {
+            settings.setting(JwtSecuredAuthorizationRequestFilter.REQUIRE_SIGNED_SETTING, true);
+        }
+
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(settings.build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered [{}] for unsigned request objects, require_signed_request_object={}",
+                client.clientId(), requireSignedRequestObject);
     }
 
     /**

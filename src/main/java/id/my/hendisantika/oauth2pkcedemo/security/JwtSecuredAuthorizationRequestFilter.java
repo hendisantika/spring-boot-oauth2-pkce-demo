@@ -16,7 +16,9 @@ import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jwt.JWT;
 import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.JWTParser;
 import com.nimbusds.jwt.SignedJWT;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -60,8 +62,23 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     /** What a client is taken to have registered when it registered nothing. */
     public static final String DEFAULT_SIGNING_ALG = "RS256";
 
-    /** The algorithms this server will check a request object against. */
-    public static final Set<String> SUPPORTED_SIGNING_ALGS = Set.of("RS256", "PS256");
+    /**
+     * The algorithms this server will check a request object against. {@code none} is one of them:
+     * OpenID Connect Dynamic Client Registration says of request_object_signing_alg that "the value
+     * none MAY be used", and RFC 9101 section 10.5 spends a security consideration on how to switch
+     * it off - which is only worth writing if it is otherwise on.
+     */
+    public static final Set<String> SUPPORTED_SIGNING_ALGS = Set.of("RS256", "PS256", "none");
+
+    /** What an unsigned request object's header carries where an algorithm would be. */
+    public static final String NO_SIGNATURE = "none";
+
+    /**
+     * RFC 9101 section 10.5, as client metadata: a client that will not send unsigned request
+     * objects, whatever else its registration says. The section defines it as a defence against a
+     * downgrade, which is the shape of the risk {@code none} carries.
+     */
+    public static final String REQUIRE_SIGNED_SETTING = "settings.client.require-signed-request-object";
 
     /**
      * OpenID Connect Dynamic Client Registration: the JWE {@code alg} a client declares it may
@@ -105,6 +122,14 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     /** Where the registered signing algorithm is read from. */
     private final RegisteredClientRepository registeredClients;
 
+    /**
+     * RFC 9101 section 10.5, as server metadata: when true, no client may send an unsigned request
+     * object however it is registered. False here, so the demo can show both sides of the switch,
+     * and published as {@code require_signed_request_object} so a client can read it rather than
+     * discover it.
+     */
+    private final boolean requireSignedRequestObject;
+
     private final String issuerUri;
 
     /**
@@ -117,9 +142,11 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     public JwtSecuredAuthorizationRequestFilter(String authorizationEndpointUri,
                                                 Supplier<JWKSet> clientKeys, String issuerUri,
                                                 RSAKey decryptionKey,
-                                                RegisteredClientRepository registeredClients) {
+                                                RegisteredClientRepository registeredClients,
+                                                boolean requireSignedRequestObject) {
         this.decryptionKey = decryptionKey;
         this.registeredClients = registeredClients;
+        this.requireSignedRequestObject = requireSignedRequestObject;
         this.authorizationEndpointMatcher =
                 PathPatternRequestMatcher.withDefaults().matcher(authorizationEndpointUri);
         // Verified with Nimbus directly rather than NimbusJwtDecoder: that decoder pins the JWT type
@@ -146,8 +173,7 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
         JWTClaimsSet claims;
         try {
-            claims = verify(decryptIfEncrypted(requestObject, clientId),
-                    registered(clientId, SIGNING_ALG_SETTING, DEFAULT_SIGNING_ALG));
+            claims = verify(decryptIfEncrypted(requestObject, clientId), clientId);
         } catch (IllegalArgumentException ex) {
             log.debug("Rejecting request object: {}", ex.getMessage());
             writeError(response, "invalid_request_object", ex.getMessage());
@@ -254,19 +280,22 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     }
 
     /**
-     * Checks the algorithm against the registration, the type, the signature against the client's
-     * published key, the audience and the expiry. Any of them failing means the request object is
-     * not one this server should act on.
+     * Checks the algorithm against the registration, the type, the signature where there is one, the
+     * audience, the expiry and the client id. Any of them failing means the request object is not
+     * one this server should act on.
      */
-    private JWTClaimsSet verify(String requestObject, String expectedAlgorithm) {
-        SignedJWT jwt;
+    private JWTClaimsSet verify(String requestObject, String clientId) {
+        String expectedAlgorithm = registered(clientId, SIGNING_ALG_SETTING, DEFAULT_SIGNING_ALG);
+
+        JWT jwt;
         try {
-            jwt = SignedJWT.parse(requestObject);
+            jwt = JWTParser.parse(requestObject);
         } catch (ParseException ex) {
-            // An unsigned JWT parses as a plain one, never as a signed one, so alg: none lands here
-            // rather than anywhere a signature could have been checked.
-            throw new IllegalArgumentException("The request object is not a signed JWT");
+            throw new IllegalArgumentException("The request object is not a JWT");
         }
+
+        // A PlainJWT carries the algorithm "none" in its header, which is exactly the value a client
+        // registers to say it will send one.
         String algorithm = String.valueOf(jwt.getHeader().getAlgorithm());
         if (!algorithm.equals(expectedAlgorithm)) {
             // RFC 9101 section 10.1 and the reason the setting exists: a client that registered one
@@ -286,10 +315,12 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         }
 
         try {
-            JWK jwk = this.clientKeys.get().getKeyByKeyId(jwt.getHeader().getKeyID());
-            if (!(jwk instanceof RSAKey rsaKey) || !jwt.verify(new RSASSAVerifier(rsaKey))) {
-                throw new IllegalArgumentException("The request object signature does not verify");
+            if (NO_SIGNATURE.equals(algorithm)) {
+                refuseIfSignatureIsRequired(clientId);
+            } else {
+                verifySignature((SignedJWT) jwt);
             }
+
             JWTClaimsSet claims = jwt.getJWTClaimsSet();
             if (!claims.getAudience().contains(this.issuerUri)) {
                 // A request object signed for another authorization server must not be accepted.
@@ -299,12 +330,47 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
                     || claims.getExpirationTime().toInstant().isBefore(Instant.now())) {
                 throw new IllegalArgumentException("The request object has expired");
             }
+            // RFC 9101 section 6.3: the client id in the request and the one in the object MUST be
+            // identical. A signature makes that check a formality, since the object could only have
+            // come from the client whose key verified it. Without one it is the only thing left
+            // that ties the object to the client the request names.
+            if (!String.valueOf(claims.getClaim(OAuth2ParameterNames.CLIENT_ID)).equals(clientId)) {
+                throw new IllegalArgumentException("The request object names client "
+                        + claims.getClaim(OAuth2ParameterNames.CLIENT_ID) + ", and the request names "
+                        + clientId);
+            }
             return claims;
         } catch (IllegalArgumentException ex) {
             throw ex;
         } catch (Exception ex) {
             throw new IllegalArgumentException("The request object could not be verified: "
                     + ex.getMessage());
+        }
+    }
+
+    /**
+     * RFC 9101 section 10.5. The server metadata value refuses unsigned request objects from
+     * everybody; the client metadata value refuses them from one client. Either being true outranks
+     * the algorithm the client registered, which is the point of a downgrade defence - it has to
+     * win against the thing being downgraded to.
+     */
+    private void refuseIfSignatureIsRequired(String clientId) {
+        if (this.requireSignedRequestObject) {
+            throw new IllegalArgumentException(
+                    "This server requires request objects to be signed");
+        }
+        if (Boolean.parseBoolean(registeredSetting(clientId, REQUIRE_SIGNED_SETTING))) {
+            throw new IllegalArgumentException(
+                    "This client registered require_signed_request_object");
+        }
+        log.debug("Accepting an unsigned request object from [{}]", clientId);
+    }
+
+    /** RFC 9101 section 6.2: against a key associated with the client, and no other. */
+    private void verifySignature(SignedJWT jwt) throws Exception {
+        JWK jwk = this.clientKeys.get().getKeyByKeyId(jwt.getHeader().getKeyID());
+        if (!(jwk instanceof RSAKey rsaKey) || !jwt.verify(new RSASSAVerifier(rsaKey))) {
+            throw new IllegalArgumentException("The request object signature does not verify");
         }
     }
 

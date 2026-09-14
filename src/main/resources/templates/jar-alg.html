@@ -103,10 +103,11 @@
             only ever ruled things in would not be a constraint.
         </p>
         <p class="hint">
-            <strong><code>alg: none</code> never reaches the algorithm check.</strong> An unsigned
-            JWT parses as a plain one, never as a signed one, so the last row is refused for not
-            being a signed JWT at all — before there is a header to compare. Both refusals are
-            correct; only one of them is about the registration.
+            <strong><code>none</code> is a value in the agreement, not the absence of one.</strong>
+            The last row is an unsigned object from a client that registered RS256, and it is refused
+            by the same comparison as the rows above it rather than by anything special about being
+            unsigned. A client that registers <code>none</code> is a different matter and has
+            <a th:href="@{/jar-none}">a page of its own</a>.
         </p>
         <p class="hint">
             <strong>Spring Authorization Server has no setting for this.</strong> It has no notion of

@@ -255,7 +255,8 @@ public class AuthorizationServerConfig {
                                 authorizationServerSettings.getAuthorizationEndpoint(),
                                 () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
                                 properties.issuerUri(), REQUEST_DECRYPTION_KEY,
-                                registeredClientRepository),
+                                registeredClientRepository,
+                                ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT),
                         StepUpRequiredFilter.class)
                 // RFC 9449 section 10. Runs ahead of the token endpoint so that a request which
                 // cannot prove possession of the key the code was bound to is turned away before
