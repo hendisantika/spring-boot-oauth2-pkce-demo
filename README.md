@@ -751,6 +751,11 @@ absent value means in each.
 
 ![The reading notes](docs/images/141-fapi-reading-this.png)
 
+**142. FAPI 2.0** — the whole server table: six passes, the row no profile asks for, the one the
+profile stopped asking for, and the two gaps.
+
+![The server table](docs/images/142-fapi-server-request-uri-registration.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2631,6 +2636,19 @@ requests, PKCE, sender-constrained tokens, and client authentication that involv
 A third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
 [the mix-up page](#mix-up-attack-defence-iss) implements it. The check asks the bean that actually
 sends authorization responses, so it went green by the code changing, not the check.
+
+One row passes that no FAPI profile asks for.
+[`require_request_uri_registration`](#require_request_uri_registration) is named by none of the three
+profiles; the specification that cares is RFC 9101 §10.4.1(a), where the server *"should check that
+the value of the `request_uri` parameter does not point to an unexpected location"*, and a
+registration is what makes a location expected. OpenID Connect Discovery makes the default `false`;
+it is `true` here, which is this server being stricter than the specification rather than following
+it, and the row reads the switch live so it turns red if that is changed.
+
+It is in the table for two reasons. FAPI 2.0 reaches the same attack surface from the other side — 
+require PAR and nothing is ever fetched — so reading it beside the failing PAR row shows two answers
+to one problem. And 32 of the per-client [`request_uris`](#request_uris) rows are green only while it
+is true, which is worth being able to see in one place.
 
 One row is neither a pass nor a gap:
 
