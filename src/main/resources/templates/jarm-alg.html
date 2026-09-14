@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('JARM algorithms')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Which key signs the answer</h1>
+    <p class="lead">
+        <a th:href="@{/jarm}">JARM</a> signs the authorization response; which algorithm it signs
+        with is not the server's choice but the client's, recorded on its registration as
+        <code>authorization_signed_response_alg</code>. Three clients here differ in that one
+        setting and in nothing else.
+    </p>
+
+    <div class="alert" th:if="${algError}" th:text="${algError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The same authorization request is made by each of them, and the header of whatever comes
+            back is read.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">Setting</th>
+                <td><code th:text="${setting}">-</code>
+                    <span class="hint" style="display:block">
+                        Spring Authorization Server has no setting of its own for this, so it travels
+                        as a custom one on the registration.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>This server can sign</th>
+                <td><code th:text="${supported}">[RS256, ES256]</code>
+                    <span class="hint" style="display:block">
+                        Because it has a key for each. Omitting the setting means
+                        <code th:text="${defaultAlgorithm}">RS256</code>.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jarm-alg}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Ask as each client</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Three registrations</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:28%">Client</th>
+                <th style="width:16%">Registered as</th>
+                <th style="width:14%">alg in the header</th>
+                <th>Signed with</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td><code th:text="${attempt.clientId}">-</code></td>
+                <td>
+                    <code th:if="${attempt.registeredAs != null}" th:text="${attempt.registeredAs}">-</code>
+                    <span class="hint" th:unless="${attempt.registeredAs != null}">nothing</span>
+                </td>
+                <td>
+                    <code th:if="${attempt.headerAlgorithm != null}" th:text="${attempt.headerAlgorithm}"
+                          th:style="${attempt.isHonoured()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code>
+                    <span class="hint" th:unless="${attempt.headerAlgorithm != null}">no JWT at all</span>
+                </td>
+                <td>
+                    <span class="hint" style="display:block" th:if="${attempt.keyId != null}"
+                          th:text="'kid ' + ${attempt.keyId}">-</span>
+                    <span class="hint" style="display:block" th:if="${attempt.error != null}"
+                          th:text="${attempt.error}">-</span>
+                    <span class="hint" style="display:block" th:if="${!attempt.signed}">
+                        The response came back in the clear, carrying an error rather than a code.
+                    </span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            Two registrations were honoured and one was refused. Nothing about the refusal is a
+            failure of the client's request — it is the registration itself that cannot be satisfied.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jarm-alg/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The keys it published</h2>
+        <table>
+            <tr th:each="key : ${run.publishedKeys}">
+                <th style="width:46%" th:text="${key.key}">-</th>
+                <td><code th:text="${key.value}">RSA</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            Two keys, and the <code>kid</code> on each answer above says which one carried it. A
+            client that verifies against the published set needs nothing else to tell them apart.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The algorithm belongs to the registration, not the request.</strong> A client
+            cannot ask for one per authorization request, and that is deliberate: the point of the
+            setting is that the client knows in advance what it will have to verify, so an answer
+            signed with anything else is refused before it is read rather than trusted because it
+            arrived.
+        </p>
+        <p class="hint">
+            <strong>Omitting it means <code>RS256</code>.</strong> JARM gives the setting that
+            default, so the first client — which says nothing — still gets a signature. A default of
+            "no signature" would make the whole mode opt-out by accident.
+        </p>
+        <p class="hint">
+            <strong><code>none</code> is not a value this can take.</strong> JARM forbids it outright:
+            a response mode whose entire purpose is a signature cannot be satisfied by an unsigned
+            JWT. A server that accepted the value would be promising something it was not doing —
+            so the third client is answered with an error in the clear instead, and the page says
+            plainly that this is a registration that cannot be honoured rather than a request that
+            failed.
+        </p>
+        <p class="hint">
+            <strong>The server has to have the key.</strong> Supporting <code>ES256</code> meant
+            adding a P-256 key beside the RSA one, because the encoder picks by algorithm and cannot
+            invent a curve. A registration naming an algorithm the server has no key for is in
+            exactly the same position as <code>none</code>: refused, for the same reason.
+        </p>
+        <p class="hint">
+            <strong>Spring Authorization Server has no setting for this</strong>, because it has no
+            JARM. <code>ClientSettings</code> carries arbitrary named settings, though, so the value
+            lives there and the filter reads it — which is also how a real deployment would extend a
+            registration ahead of the library catching up.
+        </p>
+    </div>
+</main>
+</body>
+</html>

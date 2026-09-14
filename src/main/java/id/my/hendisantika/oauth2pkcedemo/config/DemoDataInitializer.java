@@ -4,6 +4,7 @@ import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingCont
 import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
 import id.my.hendisantika.oauth2pkcedemo.controller.DpopNonceController;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarmController;
+import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
 import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
 import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
@@ -77,6 +78,8 @@ public class DemoDataInitializer {
             seedRarClient(registeredClientRepository, properties);
             seedDpopNonceClient(registeredClientRepository, properties);
             seedJarmClient(registeredClientRepository, properties);
+            seedJarmVariant(registeredClientRepository, properties, properties.jarmEcClient(), "ES256");
+            seedJarmVariant(registeredClientRepository, properties, properties.jarmNoneClient(), "none");
         };
     }
 
@@ -305,6 +308,36 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered JARM client [{}]", client.clientId());
+    }
+
+    /**
+     * A JARM client that differs from the last only in the algorithm on its registration. JARM puts
+     * that choice in {@code authorization_signed_response_alg}; Spring Authorization Server has no
+     * setting of its own for it, so it travels as a custom one.
+     */
+    void seedJarmVariant(RegisteredClientRepository registeredClientRepository,
+                         DemoProperties properties, DemoProperties.Client client, String algorithm) {
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + JarmController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .setting(JarmResponseFilter.SIGNED_RESPONSE_ALG, algorithm)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered JARM client [{}] for {}", client.clientId(), algorithm);
     }
 
     /**

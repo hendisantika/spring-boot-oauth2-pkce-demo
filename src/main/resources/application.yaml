@@ -204,6 +204,22 @@ app:
     scopes:
       - openid
       - profile
+  # Registered for ES256 authorization responses, so the same page can show two algorithms.
+  jarm-ec-client:
+    registration-id: pkce-jarm-ec-client
+    client-id: pkce-jarm-ec-client
+    client-name: PKCE JARM ES256 Client
+    scopes:
+      - openid
+      - profile
+  # Registered for none, which JARM forbids - the page exists to show what happens.
+  jarm-none-client:
+    registration-id: pkce-jarm-none-client
+    client-id: pkce-jarm-none-client
+    client-name: PKCE JARM Unsigned Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

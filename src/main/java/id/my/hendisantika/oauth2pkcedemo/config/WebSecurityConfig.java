@@ -76,6 +76,7 @@ public class WebSecurityConfig {
                         .requestMatchers("/dpop-nonce", "/dpop-nonce/**").permitAll()
                         .requestMatchers("/introspection-jwt", "/introspection-jwt/**").permitAll()
                         .requestMatchers("/jarm", "/jarm/**").permitAll()
+                        .requestMatchers("/jarm-alg", "/jarm-alg/**").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
                         .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/fapi").permitAll()
