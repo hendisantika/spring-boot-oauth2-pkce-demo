@@ -67,6 +67,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-silent-client` | none (public) | required | no | code | no |
 | `pkce-request-uri-client` | `client_secret_basic` | required | **yes** | code | no |
 | `pkce-rar-client` | `client_secret_basic` | required | **yes** | code | no |
+| `pkce-dpop-nonce-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -496,6 +497,14 @@ are the same payment.
 
 ![Five instructions](docs/images/90-rar-five-instructions.png)
 
+**90. DPoP nonce** — the key, and the token bound to it.
+
+![The key and the token](docs/images/91-dpop-nonce-binding.png)
+
+**91. DPoP nonce** — five calls to a resource that demands a nonce. Refused, handed one, accepted.
+
+![Five calls](docs/images/92-dpop-nonce-five-calls.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -814,6 +823,9 @@ Notes:
   replaying a real `cnf`-bearing token as Bearer gets `401`.
 * `ath` binds a resource-request proof to one specific token, and `htm`/`htu`/`jti` pin it to one
   method, one URL, and one use.
+
+A proof says the caller holds the key, but not when they held it. Closing that window with a
+server-supplied nonce is [its own page](#dpop-nonces).
 
 ## JWT client assertions (private_key_jwt)
 
@@ -1255,6 +1267,49 @@ Notes:
   customizer copies the approved array onto the token, and the resource server reads that claim back.
   Nothing in the server knows an amount from an account number.
 
+## DPoP nonces
+
+`/dpop-nonce` closes a gap the [DPoP page](#sender-constrained-tokens-dpop) leaves open. A proof says
+the caller holds a key; it does not say *when* they held it. Every value in one is chosen by the
+client — the identifier, the timestamp, the method, the URI — so a proof can be made in advance and
+kept, and one that leaks into a log is usable until it ages out. RFC 9449 §9 closes that window: the
+resource server hands out a **nonce** and insists the next proof echo it back.
+
+`/nonce/me` is a DPoP-only resource that demands one. The probe gets a bound token and calls it five
+times:
+
+| Proof carried | Answer | Came back with |
+|---|---|---|
+| no nonce claim | `use_dpop_nonce` | `DPoP-Nonce: A` |
+| nonce A | `200` | `DPoP-Nonce: B` |
+| nonce A again | `use_dpop_nonce` | `DPoP-Nonce: C` |
+| a nonce nobody issued | `use_dpop_nonce` | `DPoP-Nonce: D` |
+| nonce B | `200` | `DPoP-Nonce: E` |
+
+The second row is the loop closing — refused, handed a nonce, new proof, accepted — and the fifth is
+why it only has to close once: every answer carries a nonce for next time, the accepted ones
+included.
+
+Notes:
+
+* **Neither half exists in Spring Security.** `use_dpop_nonce` and `DPoP-Nonce` appear nowhere in its
+  resource server, and Spring Authorization Server's proof verifier never looks at a `nonce` claim —
+  it checks the signature, the method, the URI, the token hash, the identifier and the age, and stops
+  there. The challenge, the store and the check are this demo's.
+* **What a nonce buys** is the one value the client cannot predict, which turns "this caller has the
+  key" into "this caller had the key just now".
+* **Single use is this server's choice, not the specification's.** RFC 9449 leaves lifetime and reuse
+  policy to whoever issues the nonce; one good until it expires is equally conformant. Spending each
+  one makes the third row say something.
+* **The nonce is read before the proof is verified, deliberately.** The filter parses the claim
+  without checking the signature, because all it decides is whether to ask for a nonce — anything
+  that gets past it still has to satisfy Spring's own verification. Verifying first would tell a
+  client that has never been given a nonce that its proof is bad, which is true of nothing.
+* **The authorization server can ask for one too** (RFC 9449 §8, `400` from the token endpoint). This
+  page does the resource server half, because that is where a proof is presented over and over.
+* **The [DPoP page](#sender-constrained-tokens-dpop) is left alone** — its resource server accepts a
+  proof on its own, which is the ordinary arrangement and the one worth seeing first.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -1665,6 +1720,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── SilentAuthController.java        /silent-auth
 │   ├── RequestUriController.java        /request-uri
 │   ├── RarEnforcementController.java    /rar-enforcement
+│   ├── DpopNonceController.java         /dpop-nonce
+│   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
 │   ├── MixUpController.java             /mixup and its own callback
@@ -1701,6 +1758,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── SilentAuthService.java           a probe session that asks prompt=none five ways
 │   ├── RequestUriService.java           pushes one request and spends it five ways
 │   ├── RarEnforcementService.java       two tokens, five payment instructions
+│   ├── DpopNonceService.java            a bound token, then five calls with five proofs
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1781,6 +1839,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── AuthorizationDetailsDecision.java  allowed or refused, and why
     ├── RarEnforcementAttempt.java       one instruction and the answer it got
     ├── RarEnforcementRun.java           the granted detail and the five instructions
+    ├── DpopNonceStore.java              issues nonces, and spends them once
+    ├── DpopNonceRequiredFilter.java     the use_dpop_nonce challenge Spring does not write
+    ├── DpopNonceAttempt.java            one call, its nonce, and the answer
+    ├── DpopNonceRun.java                the key, the token, and the five calls
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
