@@ -95,6 +95,20 @@
             own comparison table says no encryption is required there.
         </p>
         <p class="hint">
+            <strong>The last row is not a FAPI requirement at all, and says whose it is.</strong> No
+            FAPI profile names a content encryption method — not the Baseline, not Advanced, not 2.0.
+            §8.6.1's one prohibition is <code>RSA1_5</code>, which wraps the key rather than
+            encrypting the content. What does reach the <code>enc</code> is
+            <strong>RFC 8725 §3.1</strong>, which FAPI 2.0 §5.4.1 requires adherence to:
+            <em>"Libraries MUST enable the caller to specify a supported set of algorithms and MUST
+            NOT use any other algorithms … The library MUST ensure that the <code>alg</code> or
+            <code>enc</code> header specifies the same algorithm that is used"</em>. So the row does
+            not ask whether a method is blessed — nothing blesses any of them — it asks whether the
+            registration names one this server would actually accept. The client that registered
+            <a th:href="@{/jar-enc-method}"><code>A192CBC-HS384</code></a> fails it, and that is a
+            registration naming something outside the supported set rather than a taste in ciphers.
+        </p>
+        <p class="hint">
             <strong>Registering nothing here means nothing, not a default.</strong> The registration
             spec is explicit — an omitted <code>request_object_encryption_alg</code> means
             <em>"the RP is not declaring whether it might encrypt any Request Objects"</em>, where an
@@ -104,6 +118,17 @@
             that registered a <a th:href="@{/jar-enc-method}">content encryption method</a> and no
             algorithm to wrap its key with gets its own wording: that registration is one the spec
             does not allow, and this server refuses its encrypted request objects outright.
+        </p>
+        <p class="hint">
+            <strong>Three settings, three different meanings of "omitted".</strong> Worth reading the
+            rows together, because they do not behave alike. An absent
+            <code>request_object_signing_alg</code> means <code>RS256</code>, unconditionally. An
+            absent <code>request_object_encryption_alg</code> means no declaration at all. An absent
+            <code>request_object_encryption_enc</code> means <code>A128CBC-HS256</code> —
+            <em>but only if an alg was registered</em>, since the registration spec makes that
+            default conditional on its sibling being present. A client with an alg and no enc has
+            therefore declared a method; a client with neither has declared nothing, and the two rows
+            say so differently.
         </p>
         <p class="hint">
             <strong>One client passes that row and still cannot use it.</strong> The profile's list
