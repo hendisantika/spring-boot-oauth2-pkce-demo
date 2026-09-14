@@ -676,6 +676,15 @@ depend on it.
 
 ![Reading the registration requirement](docs/images/125-request-uri-registration-reading.png)
 
+**125. request_uris** — a list registered through the registration endpoint, echoed back, and the
+four URLs measured against it.
+
+![The registered list](docs/images/126-request-uris-registration.png)
+
+**126. request_uris** — why the fragment counts, and why an empty list is a list.
+
+![Reading the list](docs/images/127-request-uris-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2164,13 +2173,64 @@ Notes:
   fetch sends an open `Accept` and judges what arrives), and §4 forbids a request object carrying
   `request` or `request_uri`, which is clause (d)'s recursive GET. The fetch also requires `https`,
   caps the body, times out after two seconds and does not follow redirects.
-* **One demo-only exception, stated plainly.** §5.2 says a hosted `request_uri` MUST be `https`.
-  Nothing here is served over TLS — [the FAPI page fails a requirement over it](#fapi-20-security-profile)
-  — so a URL on this server's own origin is allowed through `http` and nothing else is. A deployment
-  deletes half of that condition.
+* **The https rule, and the carve-out that covers this demo.** RFC 9101 §5.2 says a hosted
+  `request_uri` MUST be `https`. OpenID Connect Registration §2 states the same rule with a
+  qualification — these URLs "MUST use the https scheme *unless the target Request Object is signed in
+  a way that is verifiable by the OP*" — and every object fetched here is signed and verified against
+  the client's key. Nothing in this demo is served over TLS, so a URL on its own origin is allowed
+  through `http` under that clause, and nothing else is, signed or not: the two specs do not agree and
+  the narrower one is free.
 * **Nothing about verification changes.** What comes back over the GET is checked exactly as an
   object passed by value is: type, algorithm against the registration, signature, audience, expiry,
   client id.
+
+## `request_uris`
+
+`/request-uris` is the list that [the registration requirement](#require_request_uri_registration)
+requires membership of — OpenID Connect Registration §2, "array of `request_uri` values that are
+pre-registered by the RP for use at the OP". The page registers two clients through
+[the registration endpoint](#dynamic-client-registration-rfc-7591) while it runs: one naming a URL,
+one naming none.
+
+What the registration did with the list:
+
+| | |
+|---|---|
+| Sent as `request_uris` | `…/hosted/for-client.jwt?client_id=listed#Xy3pQ2Zr…` |
+| Echoed in the response | the same value, as an array of the same length |
+| Held against the client | the same URL with the issued client id written in |
+
+And four requests against it:
+
+| Sent | On its list | What the server did |
+|---|---|---|
+| the URL it registered | yes | the consent screen |
+| the same URL, a different fragment | no | `not registered for this client` |
+| the same URL with no fragment at all | no | `not registered for this client` |
+| anything at all, from the client that registered none | no | `not registered for this client` |
+
+Notes:
+
+* **The list is matched whole.** Rows two and three are the same URL with a different fragment and
+  with none. That is not fussiness: the spec puts a content hash in the fragment so a server that
+  *caches* the fetched file can tell a stale copy from a fresh one — "if the fragment value used for a
+  URI changes, that signals the server that its cached value for that URI with the old fragment value
+  is no longer valid". This server does not cache, so the fragment is simply part of the registered
+  string; the effect is the same and the reason is smaller.
+* **An empty list is a list.** The last client registered no `request_uris` and is pointed at a URL
+  this application hosts and would happily serve. Registering nothing is not registering everything.
+* **It goes out as an array and comes back as one.** `request_uris` is the only one of these
+  registration parameters that is a list, so the converters join it into one setting on the way in
+  and split it back on the way out. A caller that sent a list and read back a string would be right
+  to wonder what had happened to it.
+* **The https rule has a carve-out, and it covers this demo.** RFC 9101 §5.2 requires a fetched
+  `request_uri` to be https. OpenID Connect Registration §2 states it as "MUST use the https scheme
+  *unless the target Request Object is signed in a way that is verifiable by the OP*" — which every
+  object fetched here is. (An earlier version of the page next door called the http exception
+  demo-only; under this clause it is within the rule.)
+* **Registering a URL is not trusting it.** What comes back is still checked for media type,
+  signature, audience, expiry, and for naming the client that asked. The list settles where the
+  server is willing to go and nothing about what it finds there.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2620,6 +2680,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ServerParRequiredController.java  /par-server-required
 │   ├── RequestUriMetadataController.java  /request-uri-metadata
 │   ├── RequestUriRegistrationController.java  /request-uri-registration
+│   ├── RegisteredRequestUriController.java  /request-uris
 │   ├── HostedRequestObjectController.java  /hosted/**, the client's own hosting
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
@@ -2676,6 +2737,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ServerParRequiredService.java    four requests, under both settings
 │   ├── RequestUriMetadataService.java   four ways to point at one object
 │   ├── RequestUriRegistrationService.java  four URLs, under both settings
+│   ├── RegisteredRequestUriService.java  registers a list, then tests it
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2804,6 +2866,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RequestUriPolicy.java            require_request_uri_registration, in one place
     ├── RequestUriRegistrationAttempt.java  one URL, and its fate under each setting
     ├── RequestUriRegistrationRun.java   the four, and what the documents said
+    ├── RegisteredRequestUriAttempt.java  one URL, and whether it was on the list
+    ├── RegisteredRequestUriRun.java     the list as sent, echoed and held
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
