@@ -74,6 +74,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jarm-encrypted-client` | none (public) | required | no | code | no |
 | `pkce-jarm-gcm-client` | none (public) | required | no | code | no |
 | `pkce-jarm-unsupported-enc-client` | none (public) | required | no | code | no |
+| `pkce-jar-ps-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -569,6 +570,16 @@ the URL.
 point.
 
 ![Reading the request objects](docs/images/105-jar-enc-reading.png)
+
+**105. Request object signing algorithm** — five request objects, and the two the server agreed in
+advance to accept.
+
+![Five request objects](docs/images/106-jar-alg-five-objects.png)
+
+**106. Request object signing algorithm** — why a valid signature is refused, and why `alg: none`
+never reaches the question.
+
+![Reading the algorithms](docs/images/107-jar-alg-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1615,6 +1626,47 @@ Notes:
   request never travels through the browser, so nothing in it reaches a log on the way; encryption is
   what protects an object that does travel that way. FAPI asks for both.
 
+## `request_object_signing_alg`
+
+`/jar-alg` is RFC 9101 §10.1. A [request object](#jwt-secured-authorization-requests-jar) names its
+own algorithm, in its own header, and a server that simply believes it has let the sender choose how
+the signature will be checked. `request_object_signing_alg` is the client saying in advance which one
+it will use, so the header stops being a choice and becomes a claim that can be wrong.
+
+Two clients share one RSA key. RS256 and PS256 differ in the padding, not in the key, so the same key
+signs either — which is what makes the registered algorithm worth registering:
+
+| Sent | Client | Registered | Header said | What the server did |
+|---|---|---|---|---|
+| Signed with what it registered | `pkce-demo-client` | `RS256` | `RS256` | an authorization code |
+| The same key, the other padding | `pkce-demo-client` | `RS256` | `PS256` | `signed with PS256, and this client registered RS256` |
+| Signed with what it registered | `pkce-jar-ps-client` | `PS256` | `PS256` | an authorization code |
+| The algorithm the other client registered | `pkce-jar-ps-client` | `PS256` | `RS256` | `signed with RS256, and this client registered PS256` |
+| Not signed at all | `pkce-demo-client` | `RS256` | `none` | `The request object is not a signed JWT` |
+
+Notes:
+
+* **The second row is a perfectly good signature.** PS256 over the same key, verifying correctly,
+  refused anyway. The question is not whether the signature is valid but whether this client agreed
+  in advance to sign this way. A server that accepts any algorithm it happens to support has no
+  agreement to check against, and an attacker who can influence the header is choosing the
+  verification path.
+* **It cuts both ways.** The fourth row is the PS256 client sending RS256 — the algorithm the *other*
+  client registered, and the one most servers would take without comment. A registration that only
+  ever ruled things in would not be a constraint.
+* **`alg: none` never reaches the algorithm check.** An unsigned JWT parses as a `PlainJWT`, never as
+  a `SignedJWT`, so the last row is refused for not being a signed JWT at all — before there is a
+  header to compare. Both refusals are correct; only one is about the registration.
+* **Spring Authorization Server has no setting for this,** and no notion of the `request` parameter
+  either. The algorithm travels as a custom client setting,
+  `settings.client.request-object-signing-alg`, read by `JwtSecuredAuthorizationRequestFilter` — the
+  same arrangement [`authorization_signed_response_alg`](#authorization_signed_response_alg) uses in
+  the other direction.
+* **Absent is not "anything".** OpenID Connect Discovery treats a missing
+  `request_object_signing_alg` as the client not committing; this server treats it as `RS256`, which
+  is a narrower reading and a deliberate one. The permissive reading gives back exactly what
+  registering the algorithm was meant to take away.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -2036,6 +2088,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmEncryptionController.java    /jarm-enc
 │   ├── JarmEncryptionMethodController.java  /jarm-enc-method
 │   ├── RequestObjectEncryptionController.java  /jar-enc
+│   ├── RequestObjectSigningAlgController.java  /jar-alg
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2081,6 +2134,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmEncryptionService.java       one answer signed, one signed and encrypted
 │   ├── JarmEncryptionMethodService.java  the same answer wrapped three ways
 │   ├── RequestObjectEncryptionService.java  the same request sent three ways
+│   ├── RequestObjectSigningAlgService.java  the same request signed five ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2112,8 +2166,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── Ciba*.java                       the CIBA grant, added to the token endpoint
     ├── AuthenticationContextLevel.java  factors in, acr and amr out
     ├── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
-    ├── JarRequestSigner.java            signs RFC 9101 request objects
-    ├── JwtSecuredAuthorizationRequestFilter.java  verifies one and uses only what it carries
+    ├── JarRequestSigner.java            signs RFC 9101 request objects, by name or not at all
+    ├── JwtSecuredAuthorizationRequestFilter.java  verifies one against the registered algorithm,
+    │                                        and uses only what it carries
     ├── FapiCheck.java                   one requirement, its outcome, and what was observed
     ├── DpopBoundAuthorizationCodeFilter.java  enforces dpop_jkt at the token endpoint
     ├── IssuerIdentifierResponseHandler.java  puts iss on every authorization response
@@ -2179,6 +2234,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── JarmEncryptionMethodRun.java     the three shapes side by side
     ├── RequestObjectAttempt.java        one request object, and what it gave away
     ├── RequestObjectRun.java            the three request objects
+    ├── SigningAlgAttempt.java           one object, its registration and its header
+    ├── SigningAlgRun.java               the five request objects
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
