@@ -184,6 +184,18 @@
             talking to still accepts <code>none</code> from somebody else.
         </p>
         <p class="hint">
+            <strong>The encryption list beside it passes, for a reason worth noticing.</strong>
+            §8.6.1 binds both sides exactly as §8.6 does, and
+            <a th:href="@{/jar-enc-alg-values}"><code>request_object_encryption_alg_values_supported</code></a>
+            is <code>[RSA-OAEP-256, RSA-OAEP-512]</code> — no <code>RSA1_5</code>. The difference is
+            not in the rules but in what each demonstration needed. Showing
+            <a th:href="@{/jar-none}"><code>alg: none</code></a> being accepted requires a server
+            that accepts it; showing <a th:href="@{/jar-enc-alg}"><code>RSA1_5</code> being
+            refused</a> requires a server that does not. So one list had to break the profile to
+            teach its lesson and the other had to keep it, and the client that registered
+            <code>RSA1_5</code> fails its row while the server passes this one.
+        </p>
+        <p class="hint">
             <strong>That one is a gap kept on purpose.</strong> The
             <a th:href="@{/jar-none}"><code>none</code></a> and <code>RS256</code> entries exist
             because the pages demonstrating them need a server that accepts them; removing them to
