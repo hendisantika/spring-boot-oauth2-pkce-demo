@@ -756,8 +756,8 @@ one the profile stopped asking for.
 
 ![The server table](docs/images/142-fapi-server-request-uri-registration.png)
 
-**143. FAPI 2.0** — the bottom of it, and the pairing worth reading: the same profile section binds
-clients and servers, and the advertised signing list fails where the encryption list passes.
+**143. FAPI 2.0** — the bottom of it: all three of the lists RFC 9101 §4 names together, each with
+its own citation, one failing and two passing.
 
 ![The two algorithm rows](docs/images/143-fapi-advertised-algorithms.png)
 
@@ -2647,6 +2647,19 @@ between the two rows is not in the rules but in what each demonstration needed. 
 [`RSA1_5` *refused*](#request_object_encryption_alg) requires a server that does not. One list had to
 break the profile to teach its lesson and the other had to keep it — so the client that registered
 `RSA1_5` fails its row while the server passes this one.
+
+The third of the trio completes the set. RFC 9101 §4 names all three metadata values together, and
+[`request_object_encryption_enc_values_supported`](#request_object_encryption_enc_values_supported)
+is `[A128CBC-HS256, A256GCM]`. It is the one **no FAPI profile has an opinion about** — none of the
+three names a content encryption method — so its row borrows the same chain the per-client `enc`
+rows use, RFC 8725 §3.1's *"supported set of algorithms"* that nothing outside may be used with, and
+its citation says so rather than implying a FAPI requirement that does not exist.
+
+It passes, and the proof that the set is genuinely closed is a row further down rather than a claim
+in the row itself: the client that registered `A192CBC-HS384` fails, because this server refuses it
+instead of widening the set to match a registration. Three advertised lists, three different
+citations, and between them one failure, one pass on the merits, and one pass that points at its own
+evidence.
 
 The signing failure is the server half of the per-client signing row further down. A client here can
 register `PS256`, pass its own row, and still be talking to a server that accepts `none` from
