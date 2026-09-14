@@ -244,6 +244,14 @@ app:
     scopes:
       - openid
       - profile
+  # Registered to sign its request objects with PS256, which is what FAPI asks for.
+  jar-ps-client:
+    registration-id: pkce-jar-ps-client
+    client-id: pkce-jar-ps-client
+    client-name: PKCE JAR PS256 Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

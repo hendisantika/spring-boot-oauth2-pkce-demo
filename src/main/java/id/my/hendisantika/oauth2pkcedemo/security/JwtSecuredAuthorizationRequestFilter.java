@@ -12,6 +12,9 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.JWEObject;
 import com.nimbusds.jose.crypto.RSADecrypter;
 import com.nimbusds.jose.jwk.JWKSet;
+import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
@@ -29,6 +32,7 @@ import java.util.function.Supplier;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Created by IntelliJ IDEA.
@@ -47,6 +51,18 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     /** RFC 9101 section 10.8. */
     public static final String REQUEST_OBJECT_TYPE = "oauth-authz-req+jwt";
 
+    /**
+     * RFC 9101 section 10.1: the algorithm a client says it will sign request objects with. Spring
+     * Authorization Server has no setting for it, so it travels as a custom one on the registration.
+     */
+    public static final String SIGNING_ALG_SETTING = "settings.client.request-object-signing-alg";
+
+    /** What a client is taken to have registered when it registered nothing. */
+    public static final String DEFAULT_SIGNING_ALG = "RS256";
+
+    /** The algorithms this server will check a request object against. */
+    public static final Set<String> SUPPORTED_SIGNING_ALGS = Set.of("RS256", "PS256");
+
     /** Claims that carry the JWT's own identity rather than authorization request parameters. */
     private static final List<String> JWT_CLAIMS = List.of("iss", "aud", "exp", "iat", "nbf", "jti");
 
@@ -55,6 +71,10 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
     /** The private half of the key this server publishes for clients to encrypt requests to. */
     private final RSAKey decryptionKey;
+
+    /** Where the registered signing algorithm is read from. */
+    private final RegisteredClientRepository registeredClients;
+
     private final String issuerUri;
 
     /**
@@ -66,8 +86,10 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      */
     public JwtSecuredAuthorizationRequestFilter(String authorizationEndpointUri,
                                                 Supplier<JWKSet> clientKeys, String issuerUri,
-                                                RSAKey decryptionKey) {
+                                                RSAKey decryptionKey,
+                                                RegisteredClientRepository registeredClients) {
         this.decryptionKey = decryptionKey;
+        this.registeredClients = registeredClients;
         this.authorizationEndpointMatcher =
                 PathPatternRequestMatcher.withDefaults().matcher(authorizationEndpointUri);
         // Verified with Nimbus directly rather than NimbusJwtDecoder: that decoder pins the JWT type
@@ -93,7 +115,8 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
         JWTClaimsSet claims;
         try {
-            claims = verify(decryptIfEncrypted(requestObject));
+            claims = verify(decryptIfEncrypted(requestObject),
+                    expectedAlgorithm(request.getParameter(OAuth2ParameterNames.CLIENT_ID)));
         } catch (IllegalArgumentException ex) {
             log.debug("Rejecting request object: {}", ex.getMessage());
             writeError(response, "invalid_request_object", ex.getMessage());
@@ -130,15 +153,44 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     }
 
     /**
-     * Checks the type, the signature against the client's published key, the audience and the
-     * expiry. Any of them failing means the request object is not one this server should act on.
+     * The algorithm this client registered, JARM-style: absent means the default rather than
+     * anything goes, and an unregistered client is not one whose request objects mean anything.
      */
-    private JWTClaimsSet verify(String requestObject) {
+    private String expectedAlgorithm(String clientId) {
+        RegisteredClient client = clientId == null ? null
+                : this.registeredClients.findByClientId(clientId);
+        if (client == null) {
+            return DEFAULT_SIGNING_ALG;
+        }
+        Object configured = client.getClientSettings().getSetting(SIGNING_ALG_SETTING);
+        return configured == null ? DEFAULT_SIGNING_ALG : String.valueOf(configured);
+    }
+
+    /**
+     * Checks the algorithm against the registration, the type, the signature against the client's
+     * published key, the audience and the expiry. Any of them failing means the request object is
+     * not one this server should act on.
+     */
+    private JWTClaimsSet verify(String requestObject, String expectedAlgorithm) {
         SignedJWT jwt;
         try {
             jwt = SignedJWT.parse(requestObject);
         } catch (ParseException ex) {
+            // An unsigned JWT parses as a plain one, never as a signed one, so alg: none lands here
+            // rather than anywhere a signature could have been checked.
             throw new IllegalArgumentException("The request object is not a signed JWT");
+        }
+        String algorithm = String.valueOf(jwt.getHeader().getAlgorithm());
+        if (!algorithm.equals(expectedAlgorithm)) {
+            // RFC 9101 section 10.1 and the reason the setting exists: a client that registered one
+            // algorithm and sent another is not a client being helpful, it is a request this server
+            // has no agreement about. Accepting whatever arrives is how algorithm confusion starts.
+            throw new IllegalArgumentException("The request object is signed with " + algorithm
+                    + ", and this client registered " + expectedAlgorithm);
+        }
+        if (!SUPPORTED_SIGNING_ALGS.contains(algorithm)) {
+            throw new IllegalArgumentException("This server does not check " + algorithm
+                    + " signatures on request objects");
         }
         if (!REQUEST_OBJECT_TYPE.equals(String.valueOf(jwt.getHeader().getType()))) {
             // RFC 9101 section 10.8: the explicit type is what stops a JWT minted for something else

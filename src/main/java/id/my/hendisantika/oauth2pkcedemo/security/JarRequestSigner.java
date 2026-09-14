@@ -15,6 +15,8 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jose.PlainHeader;
+import com.nimbusds.jwt.PlainJWT;
 import com.nimbusds.jwt.SignedJWT;
 
 import java.time.Duration;
@@ -66,6 +68,38 @@ public final class JarRequestSigner {
      *                  signed for one server cannot be replayed at another
      */
     public String sign(String clientId, String issuerUri, Map<String, String> parameters) {
+        return sign(clientId, issuerUri, parameters, JWSAlgorithm.RS256);
+    }
+
+    /**
+     * The same object signed with a named algorithm. One RSA key can carry either RS256 or PS256 -
+     * they differ in the padding, not in the key - which is what makes the registered algorithm a
+     * choice a client could otherwise change from one request to the next.
+     */
+    public String sign(String clientId, String issuerUri, Map<String, String> parameters,
+                       JWSAlgorithm algorithm) {
+        try {
+            SignedJWT requestObject = new SignedJWT(
+                    new JWSHeader.Builder(algorithm).type(OAUTH_AUTHZ_REQ).keyID(key.getKeyID()).build(),
+                    claims(clientId, issuerUri, parameters));
+            requestObject.sign(new RSASSASigner(key));
+            return requestObject.serialize();
+        } catch (JOSEException ex) {
+            throw new IllegalStateException("Unable to sign the request object", ex);
+        }
+    }
+
+    /**
+     * A request object with {@code alg: none} and no signature at all. RFC 9101 section 4 requires
+     * one to be signed; this exists so a page can show what happens to one that is not.
+     */
+    public String unsigned(String clientId, String issuerUri, Map<String, String> parameters) {
+        return new PlainJWT(new PlainHeader.Builder().type(OAUTH_AUTHZ_REQ).build(),
+                claims(clientId, issuerUri, parameters)).serialize();
+    }
+
+    private static JWTClaimsSet claims(String clientId, String issuerUri,
+                                       Map<String, String> parameters) {
         Instant now = Instant.now();
         JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
                 // RFC 9101 section 4: the client is the issuer of its own request object.
@@ -75,19 +109,9 @@ public final class JarRequestSigner {
                 .issueTime(Date.from(now))
                 .expirationTime(Date.from(now.plus(Duration.ofMinutes(5))));
         parameters.forEach(claims::claim);
-
-        try {
-            SignedJWT requestObject = new SignedJWT(
-                    new JWSHeader.Builder(JWSAlgorithm.RS256).type(OAUTH_AUTHZ_REQ).keyID(key.getKeyID()).build(),
-                    claims.build());
-            requestObject.sign(new RSASSASigner(key));
-            return requestObject.serialize();
-        } catch (JOSEException ex) {
-            throw new IllegalStateException("Unable to sign the request object", ex);
-        }
+        return claims.build();
     }
 
-    /** Signed with a key the authorization server has never seen, for the failing case. */
     /**
      * RFC 9101 section 6.2: signed first, then encrypted to the authorization server. The order is
      * the same as JARM's and for the same reason - the signature has to be over what the server will
@@ -118,6 +142,7 @@ public final class JarRequestSigner {
         }
     }
 
+    /** Signed with a key the authorization server has never seen, for the failing case. */
     public String signWithAnotherKey(String clientId, String issuerUri, Map<String, String> parameters) {
         return generate().sign(clientId, issuerUri, parameters);
     }

@@ -6,6 +6,7 @@ import id.my.hendisantika.oauth2pkcedemo.controller.DpopNonceController;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarmClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarmController;
 import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
 import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
@@ -82,6 +83,7 @@ public class DemoDataInitializer {
             seedJarmVariant(registeredClientRepository, properties, properties.jarmEcClient(), "ES256");
             seedJarmVariant(registeredClientRepository, properties, properties.jarmNoneClient(), "none");
             seedJarmEncryptedClient(registeredClientRepository, properties);
+            seedJarPsClient(registeredClientRepository, properties);
             seedJarmEncryptionMethod(registeredClientRepository, properties,
                     properties.jarmGcmClient(), "A256GCM");
             seedJarmEncryptionMethod(registeredClientRepository, properties,
@@ -413,6 +415,37 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered JARM client [{}] for {}", client.clientId(), encryptionMethod);
+    }
+
+    /**
+     * A client that registered PS256 for its request objects. It publishes the same key as the other
+     * JAR client - one RSA key carries either algorithm - so the only difference between them is the
+     * word on the registration, which is exactly what the page is about.
+     */
+    void seedJarPsClient(RegisteredClientRepository registeredClientRepository,
+                         DemoProperties properties) {
+        DemoProperties.Client client = properties.jarPsClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .setting(JwtSecuredAuthorizationRequestFilter.SIGNING_ALG_SETTING, "PS256")
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered PS256 request object client [{}]", client.clientId());
     }
 
     /**

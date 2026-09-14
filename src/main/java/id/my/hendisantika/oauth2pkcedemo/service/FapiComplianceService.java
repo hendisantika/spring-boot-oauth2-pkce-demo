@@ -115,7 +115,7 @@ public class FapiComplianceService {
                 properties.dpopNonceClient(), properties.jarmClient(),
                 properties.jarmEcClient(), properties.jarmNoneClient(),
                 properties.jarmEncryptedClient(), properties.jarmGcmClient(),
-                properties.jarmUnsupportedEncClient());
+                properties.jarmUnsupportedEncClient(), properties.jarPsClient());
     }
 
     private static List<FapiCheck> checksFor(RegisteredClient client) {
