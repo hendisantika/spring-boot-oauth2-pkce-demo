@@ -626,6 +626,16 @@ switch, and what the documents said each time.
 
 ![Reading the switch](docs/images/115-jar-required-reading.png)
 
+**115. Requiring request objects, one client at a time** — two clients registered while you watch,
+and the six requests that follow.
+
+![Six requests](docs/images/116-jar-client-required-six-requests.png)
+
+**116. Requiring request objects, one client at a time** — what the registration endpoint had to be
+taught, and two things it quietly did not honour.
+
+![Reading the client setting](docs/images/117-jar-client-required-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -1887,8 +1897,9 @@ Notes:
 * **A signed request object is accepted under both settings.** The switch removes ways of asking
   rather than adding checks to the one that remains.
 * **The last row needs no server switch.** Its client registered `require_signed_request_object` for
-  itself. Client metadata locks one door; server metadata locks all of them, and a deployment that can
-  enumerate its clients usually turns the lock one at a time.
+  itself. [Client metadata locks one door](#require_signed_request_object-as-client-metadata); server
+  metadata locks all of them, and a deployment that can enumerate its clients usually turns the lock
+  one at a time.
 * **Only a GET is judged.** The consent screen POSTs back to the same endpoint to continue an
   authorization request that was already made and already checked; treating that as a fresh request
   with a missing request object would refuse the user's own approval.
@@ -1898,6 +1909,54 @@ Notes:
 * **What the page does is not what a deployment should do.** Moving a server-wide security setting at
   runtime, from a web page, is a demonstration: it is global for every client while the run lasts and
   is put back in a `finally` block. A real deployment sets it in configuration, once.
+
+## `require_signed_request_object` as client metadata
+
+`/jar-client-required` is the other half of RFC 9101 §10.5. The
+[server-wide switch](#require_signed_request_object) locks every door at once; this one is
+*registered*, so a client can ask for the lock itself at
+[registration time](#dynamic-client-registration-rfc-7591) without the operator deciding anything
+about anybody else. The page registers two clients through the registration endpoint while you watch
+— the server switch stays `false` throughout, so nothing below is the server's doing:
+
+| Sent | Client | Registered | Carried | What the server did |
+|---|---|---|---|---|
+| an ordinary request | the control client | nothing | no request object | an authorization code |
+| an ordinary request | registered client A | `require_signed_request_object` | no request object | `This client registered require_signed_request_object` |
+| a signed request object | registered client A | `require_signed_request_object` | signed | the consent screen |
+| an unsigned request object | registered client A | `require_signed_request_object` | unsigned | `signed with none, and this client registered RS256` |
+| an unsigned request object | registered client B | `require_signed…` + `none` | unsigned | `This client registered require_signed_request_object` |
+| a signed request object | registered client B | `require_signed…` + `none` | signed | `signed with RS256, and this client registered none` |
+
+Notes:
+
+* **The same defence, at a different blast radius.** The server switch is a decision about every
+  client, including ones registered years ago by people who have left. The client setting is a
+  decision about one client, taken by whoever registers it — which is usually how a lock like this
+  actually gets turned.
+* **The registration endpoint had to be taught this.** Spring Authorization Server's converters have
+  a field for every metadata name they know and drop the rest, so `require_signed_request_object`
+  arrived at the endpoint and went nowhere. Both are replaced
+  (`RequestObjectClientRegistrationConverters`): one keeps the value on the registration, the other
+  echoes it back in the response, because RFC 7591 §3.2.1 makes the response the description of the
+  client as the server now holds it — and without the echo a caller cannot tell a server that
+  understood it from one that ignored it.
+* **A client can register two things that cannot both be satisfied.** Client B asked for
+  `require_signed_request_object` and [`request_object_signing_alg: none`](#request_object_signing_alg-none).
+  Its unsigned objects are refused by the defence and its signed ones for not being the algorithm it
+  registered: nothing it sends can work. Neither rule is wrong; the registration is, and a server
+  that silently picked one to ignore would be hiding that from whoever has to debug it.
+* **The middle refusal is not the defence.** Client A's unsigned object is refused for the algorithm
+  it did not register, never reaching the `require_signed_request_object` check. Two rules can refuse
+  the same request, and which one spoke is the difference between "sign this" and "sign this
+  differently".
+* **Two things the registration asked for and did not get.** These clients asked for
+  `token_endpoint_auth_method: none` and came back `client_secret_basic` with a generated secret —
+  `OidcClientRegistrationRegisteredClientConverter` handles `client_secret_post`, `client_secret_jwt`
+  and `private_key_jwt`, and everything else falls to an else branch (checked against the 7.1.1
+  sources). They also asked for no scopes, because this server refuses a registration that asks for
+  authority beyond the initial access token's. Neither changes what the page is about, and both are
+  worth noticing before building on a registration response you did not read.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2325,6 +2384,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectEncryptionMethodController.java  /jar-enc-method
 │   ├── UnsignedRequestObjectController.java  /jar-none
 │   ├── RequiredRequestObjectController.java  /jar-required
+│   ├── ClientRequiredRequestObjectController.java  /jar-client-required
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2375,6 +2435,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectEncryptionMethodService.java  the same request encrypted six ways
 │   ├── UnsignedRequestObjectService.java  six request objects, five unsigned
 │   ├── RequiredRequestObjectService.java  four requests, under both settings
+│   ├── ClientRequiredRequestObjectService.java  registers two clients, then asks them
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2486,6 +2547,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RequestObjectPolicy.java         RFC 9101 §10.5's server-wide switch, held in one place
     ├── RequiredRequestAttempt.java      one request, and its fate under each setting
     ├── RequiredRequestRun.java          the four, and what the documents said
+    ├── RequestObjectClientRegistrationConverters.java  keeps and echoes the two
+    │                                    request object settings a registration carries
+    ├── ClientRequiredAttempt.java       one request to a client that asked for the lock
+    ├── ClientRequiredRun.java           the six, and the registration behind two of them
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
