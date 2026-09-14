@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Request object encryption algorithm')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>A registration the spec says is only a declaration</h1>
+    <p class="lead">
+        <code>request_object_encryption_alg</code> is the JWE <code>alg</code> a client says it may
+        wrap <a th:href="@{/jar-enc}">its request objects</a> with. Its sibling,
+        <a th:href="@{/jar-alg}"><code>request_object_signing_alg</code></a>, comes with an
+        instruction: request objects from this client <em>must be rejected</em> if not signed with
+        that algorithm. This one comes with the opposite — the client "may still use other supported
+        encryption algorithms", in the registration spec's own words. This server does not take that
+        offer, and the page is about why.
+    </p>
+
+    <div class="alert" th:if="${jarEncAlgError}" th:text="${jarEncAlgError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Three clients, one server key. All of these algorithms wrap the same content encryption
+            key with the same RSA key and differ only in how — so nothing but the registration says
+            which one a request should have arrived with.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:44%">Registered nothing, so RSA-OAEP-256</th>
+                <td><code th:text="${defaultClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered RSA-OAEP-512</th>
+                <td><code th:text="${oaep512ClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered RSA1_5</th>
+                <td><code th:text="${rsa15ClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        A real JWA algorithm, and the one Bleichenbacher's attack is about. This
+                        server does not implement it.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Wrapped to</th>
+                <td><code th:text="${serverKeyId}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-enc-alg}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send six request objects</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Six request objects</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:20%">Sent</th>
+                <th style="width:24%">Client</th>
+                <th style="width:14%">Registered</th>
+                <th style="width:14%">Header said</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td><strong th:text="${attempt.label}">-</strong></td>
+                <td><code style="white-space:nowrap" th:text="${attempt.clientId}">-</code></td>
+                <td><code style="white-space:nowrap" th:text="${attempt.registeredAlg}">-</code></td>
+                <td>
+                    <code style="white-space:nowrap" th:text="${attempt.sentAlg}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${attempt.encrypted() and !attempt.matchesRegistration()}">not what
+                        it registered</span>
+                    <span class="hint" style="display:block"
+                          th:unless="${attempt.encrypted()}">not encrypted</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.everyEncryptedRowMatchedItsRegistration()}">
+                Nothing wrapped with an algorithm its client had not registered was acted on.
+            </span>
+            <span th:unless="${run.everyEncryptedRowMatchedItsRegistration()}">
+                Something was acted on that did not match its registration. Read the outcomes rather
+                than this sentence.
+            </span>
+            <span th:if="${run.someRowMatchedItsRegistrationAndWasStillRefused()}">
+                And matching the registration was not enough on its own: an algorithm this server
+                never implemented is refused whoever registered it.
+            </span>
+        </p>
+        <p class="hint">
+            This server decrypts <code th:text="${run.supportedAlgs}">-</code>, and a client that
+            registers nothing is taken to have registered
+            <code th:text="${run.defaultAlg}">-</code>.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-enc-alg/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>This server is stricter than the spec it is implementing.</strong> OpenID Connect
+            Dynamic Client Registration says the client "MAY still use other supported encryption
+            algorithms or send unencrypted Request Objects, even when this parameter is present" —
+            so read literally, <code>request_object_encryption_alg</code> constrains nothing and
+            rows two and four would both be fine. A declaration that constrains nothing leaves the
+            choice of key-wrapping algorithm with whoever sent the request, which is the party you
+            least want choosing it. The refusals here are a deliberate departure, and worth knowing
+            is a departure.
+        </p>
+        <p class="hint">
+            <strong>The unencrypted row is where the spec is followed.</strong> Registering an
+            algorithm is a statement about <em>how</em> a client will encrypt, not a promise
+            <em>that</em> it will. The last row is a plain signed object from a client that
+            registered RSA-OAEP-512, and it is acted on. A deployment that wants encryption to be
+            mandatory has to say so somewhere else — that is what a profile like FAPI is for.
+        </p>
+        <p class="hint">
+            <strong>Matching the registration is necessary, not sufficient.</strong> The fifth row
+            sends exactly what its client registered and is refused anyway: RSA1_5 is a real JWA
+            algorithm that this server does not implement. A registration cannot add an algorithm to
+            a server, and one left out of the supported set was left out on purpose — RSA1_5 is the
+            padding Bleichenbacher's attack is about.
+        </p>
+        <p class="hint">
+            <strong>Only the wrapping changes.</strong> Every accepted row decrypts to the same
+            three-part signed JWT, which is then checked exactly as
+            <a th:href="@{/jar}">an unencrypted one</a> is — type, signature, audience, expiry. The
+            <code>alg</code> decides how the content encryption key travels and nothing else, and
+            <code>request_object_encryption_enc</code> would decide the other half, the way
+            <a th:href="@{/jarm-enc-method}">JARM's two settings</a> divide the same work.
+        </p>
+        <p class="hint">
+            <strong>The asymmetry between the two registrations is real.</strong> One says request
+            objects <em>must be rejected</em> if the signature algorithm does not match; the other
+            says the client may do as it likes. Both describe the same JWT, arriving at the same
+            endpoint, from the same client — the difference is in the spec text, not in anything
+            about the risk.
+        </p>
+    </div>
+</main>
+</body>
+</html>
