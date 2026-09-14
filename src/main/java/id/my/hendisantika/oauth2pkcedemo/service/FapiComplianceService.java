@@ -300,6 +300,61 @@ public class FapiComplianceService {
         return FapiCheck.pass(requirement, reference, "Registered " + algorithm);
     }
 
+    /**
+     * The content encryption method, which no FAPI profile names at all - not the Baseline, not
+     * Advanced (section 8.6.1 forbids RSA1_5, which is a key-wrapping algorithm rather than an enc),
+     * and not FAPI 2.0. What does reach it is RFC 8725 section 3.1, which FAPI 2.0 section 5.4.1
+     * requires adherence to: a supported set must exist, nothing outside it may be used, and the
+     * header must name what was actually used. So this row asks whether the registration names an
+     * enc this server would actually accept rather than whether it is on a list of blessed ones.
+     */
+    private static FapiCheck requestObjectEncryptionMethodCheck(RegisteredClient client) {
+        String requirement = "The request object enc is one this server supports";
+        String reference = "RFC 8725 \u00a73.1, required by FAPI 2.0 \u00a75.4.1";
+
+        Object registeredAlg = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ALG_SETTING);
+        Object registered = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ENC_SETTING);
+
+        if (registered == null) {
+            if (registeredAlg == null) {
+                return FapiCheck.notApplicable(requirement, reference,
+                        "Neither half of the request object encryption registration is set, so there "
+                                + "is no declared content encryption method to check");
+            }
+            // The registration spec supplies one here, and only here: "If
+            // request_object_encryption_alg is specified, the default request_object_encryption_enc
+            // value is A128CBC-HS256." A default that depends on its sibling being present, which is
+            // not how either of the other two rows behave.
+            String fallback = JwtSecuredAuthorizationRequestFilter.DEFAULT_ENCRYPTION_ENC;
+            return FapiCheck.of(
+                    JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS.contains(fallback),
+                    requirement, reference,
+                    "Registered " + registeredAlg + " and no enc, which the registration spec makes "
+                            + fallback + " because an alg is present");
+        }
+
+        if (registeredAlg == null) {
+            // The registration the spec does not allow, reported the same way the alg row reports it.
+            return FapiCheck.notApplicable(requirement, reference,
+                    "Registered " + registered + " with no request_object_encryption_alg beside it, "
+                            + "which the registration spec does not allow. This server refuses its "
+                            + "encrypted request objects, so this method is never used");
+        }
+
+        String method = String.valueOf(registered);
+        return FapiCheck.of(
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS.contains(method),
+                requirement, reference,
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS.contains(method)
+                        ? "Registered " + method
+                        : "Registered " + method + ", which is not in this server's supported set. "
+                        + "RFC 8725 says nothing outside that set may be used, and this server "
+                        + "refuses its encrypted request objects rather than widening the set to "
+                        + "match a registration");
+    }
+
     private static List<FapiCheck> checksFor(RegisteredClient client) {
         List<FapiCheck> checks = new ArrayList<>();
 
@@ -329,6 +384,7 @@ public class FapiComplianceService {
 
         checks.add(requestObjectAlgorithmCheck(client));
         checks.add(requestObjectEncryptionCheck(client));
+        checks.add(requestObjectEncryptionMethodCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
             checks.add(FapiCheck.of(!client.getTokenSettings().isReuseRefreshTokens(),
