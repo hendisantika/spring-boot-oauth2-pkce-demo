@@ -156,7 +156,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(6));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(7));
     }
 
     /**
@@ -263,6 +263,58 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     void theForbiddenEncryptionAlgorithmIsOneThisServerAlsoRefuses() {
         assertThat(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS)
                 .doesNotContain("RSA1_5");
+    }
+
+    /**
+     * No FAPI profile names a content encryption method, so the row asks what RFC 8725 §3.1 asks -
+     * whether the registered enc is in a supported set at all - and a registration naming one this
+     * server will not decrypt is a real failure rather than a curiosity.
+     */
+    @Test
+    void theEncRowFailsAMethodThisServerWillNotDecrypt() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(encMethodCheckFor(checks, properties.jarUnsupportedEncClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.reference()).contains("RFC 8725");
+                    assertThat(check.observed()).contains("A192CBC-HS384").contains("supported set");
+                });
+
+        assertThat(encMethodCheckFor(checks, properties.jarGcmClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    assertThat(check.observed()).contains("A256GCM");
+                });
+    }
+
+    /**
+     * The one default in this trio that depends on its sibling: the registration spec supplies
+     * A128CBC-HS256 only when an alg was registered, so a client with an alg and no enc has a
+     * declared method and a client with neither does not.
+     */
+    @Test
+    void theEncDefaultAppliesOnlyWhenAnAlgorithmWasRegistered() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(encMethodCheckFor(checks, properties.jarOaep512Client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    assertThat(check.observed())
+                            .contains(JwtSecuredAuthorizationRequestFilter.DEFAULT_ENCRYPTION_ENC)
+                            .contains("because an alg is present");
+                });
+
+        assertThat(encMethodCheckFor(checks, properties.client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+                    assertThat(check.observed()).contains("Neither half");
+                });
+    }
+
+    private FapiCheck encMethodCheckFor(Map<String, List<FapiCheck>> checks,
+                                        DemoProperties.Client configured) {
+        return rowFor(checks, configured, "enc is one this server supports");
     }
 
     private FapiCheck encryptionCheckFor(Map<String, List<FapiCheck>> checks,
