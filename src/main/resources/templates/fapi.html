@@ -120,6 +120,28 @@
             does not allow, and this server refuses its encrypted request objects outright.
         </p>
         <p class="hint">
+            <strong>The last row is a mechanism one profile required and the next one removed.</strong>
+            FAPI 1.0 Advanced §5.2.2 had the server <em>"require a JWS signed JWT request object
+            passed by value with the <code>request</code> parameter or by reference with the
+            <code>request_uri</code> parameter"</em> — by reference was blessed. FAPI 2.0 took it
+            out: its comparison table replaces the request object's <code>nbf</code> and
+            <code>exp</code> claims with <em>"request_uri has limited lifetime"</em>, for the stated
+            reason that this <em>"Prevents pre-generation of requests"</em>, and §5.3.2 has the
+            client send only <code>client_id</code> and a <code>request_uri</code> whose parameters
+            <em>"are sent in the pushed authorization request"</em>. A
+            <a th:href="@{/request-uris}">pre-registered URL</a> is neither short-lived nor pushed,
+            so the two clients that registered one fail the row.
+        </p>
+        <p class="hint">
+            <strong>Both kinds of reference arrive in the same parameter.</strong> A
+            <a th:href="@{/par}">pushed</a> <code>request_uri</code> and a fetched one are told apart
+            by scheme, not by which is which in the registration — so this row is about the fetched
+            kind only, and a client using PAR is not failing it. Passing it also depends on a switch:
+            with <a th:href="@{/request-uri-registration}"><code>require_request_uri_registration</code></a>
+            off, a client that registered nothing could still name any https URL and have this server
+            go and get it, so the row reads that switch live rather than assuming where it is left.
+        </p>
+        <p class="hint">
             <strong>Three settings, three different meanings of "omitted".</strong> Worth reading the
             rows together, because they do not behave alike. An absent
             <code>request_object_signing_alg</code> means <code>RS256</code>, unconditionally. An
