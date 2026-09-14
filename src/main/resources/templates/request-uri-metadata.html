@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('request_uri metadata')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>One parameter, two unrelated features</h1>
+    <p class="lead">
+        <code>request_uri</code> means two different things. In RFC 9101 §5.2 it is a URL the client
+        hosts and the authorization server <em>fetches</em>; in <a th:href="@{/par}">RFC 9126</a> it
+        is a reference the server itself handed out. OpenID Connect Discovery's
+        <code>request_uri_parameter_supported</code> is about the first one only — and RFC 9126 §5
+        says a pushed reference is usable <em>"regardless of other authorization server metadata such
+        as <code>request_uri_parameter_supported</code>"</em>. So this server publishes
+        <code>false</code> and accepts one anyway, which is correct and takes some explaining.
+    </p>
+
+    <div class="alert" th:if="${requestUriMetadataError}" th:text="${requestUriMetadataError}">error</div>
+
+    <div class="card">
+        <h2>What the documents say, and what silence would have said</h2>
+        <p class="hint">
+            OpenID Connect Discovery §3 gives each of these a default for when it is omitted. Two of
+            the three defaults describe this server backwards.
+        </p>
+        <table style="margin-top:12px">
+            <thead>
+            <tr>
+                <th style="width:46%">Metadata</th>
+                <th style="width:27%">Published here</th>
+                <th>Default if omitted</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="entry : ${published}">
+                <td><code th:text="${entry.key}">-</code></td>
+                <td><code th:text="${entry.value}">-</code></td>
+                <td>
+                    <code th:text="${defaults.get(entry.key)}">-</code>
+                    <span class="hint" style="display:block"
+                          th:unless="${entry.value == defaults.get(entry.key)}">the opposite</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Four authorization requests from <code th:text="${clientId}">-</code>, one for each way
+            of pointing at a request object.
+        </p>
+        <form th:action="@{/request-uri-metadata}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send four requests</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Four ways to point at a request object</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:21%">Sent</th>
+                <th style="width:13%">Parameter</th>
+                <th style="width:22%">Value</th>
+                <th style="width:19%">Metadata said</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.parameter}">-</code></td>
+                <td style="overflow-wrap:anywhere">
+                    <code class="hint" th:text="${attempt.shortValue()}">-</code>
+                </td>
+                <td><span class="hint" style="overflow-wrap:anywhere"
+                          th:text="${attempt.metadataSaid}">-</span></td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px" th:if="${run.thePushedReferenceWorkedAnyway()}">
+            The third row was acted on while the metadata beside it said <code>false</code>, which is
+            RFC 9126 §5's "regardless" in practice rather than in prose.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/request-uri-metadata/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Silence is not neutral.</strong> Omitted, these default to
+            <code>request_parameter_supported: false</code> and
+            <code>request_uri_parameter_supported: true</code> — so a server that publishes neither is
+            claiming it does not read <code>request</code> and does fetch <code>request_uri</code>.
+            This server is the other way round on both counts, and Spring Authorization Server
+            advertises neither, having no notion of either parameter. Until this page they were
+            absent, which is to say wrong.
+        </p>
+        <p class="hint">
+            <strong>The second and third rows are the same parameter.</strong> One is a URL this
+            server would have to go and fetch; the other is a reference it issued minutes earlier.
+            They share a name and nothing else. A client reading
+            <code>request_uri_parameter_supported: false</code> should conclude "do not host request
+            objects for this server", not "do not push".
+        </p>
+        <p class="hint">
+            <strong>The refusal now says which kind it was.</strong> Before this page, both a URL and
+            an unknown reference came back as <code>[invalid_request] OAuth 2.0 Parameter:
+            request_uri</code> — the authorization server's failed lookup of a pushed reference the
+            client never claimed to have. A <code>request_uri</code> with an http or https scheme is
+            now refused with the reason, and everything else is still left to that lookup, which is
+            the check that owns it. The test is the scheme rather than the shape of a pushed
+            reference: RFC 9126 §4 leaves that format to the server.
+        </p>
+        <p class="hint">
+            <strong><code>require_request_uri_registration</code> is published and moot.</strong> It
+            asks whether <code>request_uri</code> values must be pre-registered with
+            <code>request_uris</code>, which only means something for the feature this server does not
+            implement. <code>false</code> is accurate; it is not permission to host one.
+        </p>
+        <p class="hint">
+            <strong>Fetching is a door this server keeps shut.</strong> RFC 9101 §10.4.1 and §10.4.2
+            are both about it: a server that fetches a URL on a client's say-so can be aimed at a
+            victim, and the reference itself is unsigned and rewritable in the browser. PAR gets the
+            same job done without the server making an outbound request at all — which is why the
+            <a th:href="@{/request-uri}">lifetime page</a> is about references rather than URLs.
+        </p>
+    </div>
+</main>
+</body>
+</html>
