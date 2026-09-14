@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo;
 
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.service.FapiComplianceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +45,9 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
     @Autowired
     private DemoProperties properties;
+
+    @Autowired
+    private RequestObjectPolicy requestObjectPolicy;
 
     private MockMvc mockMvc() {
         return MockMvcBuilders.webAppContextSetup(webApplicationContext).apply(springSecurity()).build();
@@ -92,6 +96,40 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(checks).anySatisfy(check -> {
             assertThat(check.requirement()).contains("pushed authorization requests");
             assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+        });
+    }
+
+    /**
+     * FAPI 2.0 dropped the signed request object in favour of a pushed one, so the row is reported
+     * as not applicable rather than as a pass or a gap - and it still says what this server holds.
+     */
+    @Test
+    void theRequestObjectRowSaysWhichProfileAsksForIt() {
+        List<FapiCheck> checks = fapiComplianceService.serverChecks();
+
+        assertThat(checks).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("Request objects are signed");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+            assertThat(check.reference()).contains("FAPI 1.0 Advanced").contains("FAPI 2.0");
+            assertThat(check.observed())
+                    .contains("require_signed_request_object")
+                    .contains("server-wide it is "
+                            + requestObjectPolicy.requireSignedRequestObject())
+                    .containsPattern("\\d+ of the \\d+ clients below set it");
+        });
+    }
+
+    /** The same lock, one specification along, and this server does not have that one. */
+    @Test
+    void theParRowNamesTheRequirementItFails() {
+        List<FapiCheck> checks = fapiComplianceService.serverChecks();
+
+        assertThat(checks).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("requires pushed authorization requests");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+            assertThat(check.observed())
+                    .contains("shall reject authorization requests sent without")
+                    .contains("require_pushed_authorization_requests");
         });
     }
 
