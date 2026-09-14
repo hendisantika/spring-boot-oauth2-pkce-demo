@@ -8,8 +8,10 @@ import org.springframework.security.oauth2.server.authorization.settings.Authori
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -101,6 +103,52 @@ public final class ServerMetadataCustomizer {
      */
     public void customize(OidcProviderConfiguration.Builder configuration) {
         apply(configuration::claim, configuration::grantTypes, configuration::scopes);
+    }
+
+    /**
+     * The claims this class adds, collected through the same {@link #apply} call that writes them
+     * into both documents. Reading them back is what lets a check compare what this server
+     * advertises against what it actually enforces, instead of reporting one constant twice and
+     * calling that agreement.
+     * <p>
+     * The grant type and scope callbacks are handed a consumer that does nothing: those mutate the
+     * builder's own lists rather than arriving as claims, and nothing here needs them.
+     */
+    public Map<String, Object> publishedClaims() {
+        Map<String, Object> claims = new LinkedHashMap<>();
+        apply(claims::put, grantTypes -> { }, scopes -> { });
+        return claims;
+    }
+
+    /**
+     * Whether one advertised list says what this server actually does. A server that advertises an
+     * algorithm it will not accept, or accepts one it never advertised, has told its clients
+     * something untrue - and every client that read the document has planned against the wrong set.
+     * <p>
+     * Kept here rather than beside the checks that call it, because this class is what decides what
+     * the documents say: the question "does the document match the code" belongs with the document.
+     *
+     * @param published the claims, as {@link #publishedClaims()} returns them
+     * @param name      the metadata name to look up
+     * @param enforced  the set the code actually applies
+     * @return {@code null} when the two agree, or a description of how they do not
+     */
+    public static String disagreement(Map<String, Object> published, String name,
+                                      Set<String> enforced) {
+        List<String> enforcedList = enforced.stream().sorted().toList();
+        Object value = published.get(name);
+        if (!(value instanceof Collection<?> collection)) {
+            return name + " is not in the discovery documents, so a client has no way to learn that "
+                    + "this server enforces " + enforcedList + " except by being refused";
+        }
+
+        List<String> publishedList = collection.stream().map(String::valueOf).sorted().toList();
+        if (!publishedList.equals(enforcedList)) {
+            return name + " advertises " + publishedList + " but this server enforces " + enforcedList
+                    + ". A document that disagrees with the code is worse than no document: every "
+                    + "client reading it plans against the wrong set";
+        }
+        return null;
     }
 
     /**
