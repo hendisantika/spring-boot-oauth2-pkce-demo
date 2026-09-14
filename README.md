@@ -560,6 +560,16 @@ produce.
 
 ![Reading the shapes](docs/images/103-jarm-enc-method-reading.png)
 
+**103. Request object encryption** — the same request three ways, and what each leaves readable in
+the URL.
+
+![Three request objects](docs/images/104-jar-enc-three-objects.png)
+
+**104. Request object encryption** — why the signature is still checked, and which way the keys
+point.
+
+![Reading the request objects](docs/images/105-jar-enc-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -1570,6 +1580,41 @@ Notes:
 * **Nothing about the plaintext changes.** Every encrypted row decrypts to the same three-part signed
   JWT it would have carried unencrypted. `enc` decides the wrapping and nothing else.
 
+## Request object encryption
+
+`/jar-enc` is RFC 9101 §6.2, and the mirror of
+[JARM's encryption](#authorization_encrypted_response_alg). A signed request object settles that the
+request arrived as the client wrote it; it says nothing about who can read it. The request travels in
+the browser's URL carrying whatever the client put there — a `login_hint` is somebody's email
+address, [authorization details](#rich-authorization-requests) are an amount and an account number.
+
+The same request, sent three ways:
+
+| Sent | Shape | What the server did | Readable in the URL |
+|---|---|---|---|
+| Signed, as RFC 9101 requires | a JWS | acted on it | `client_id`, `redirect_uri`, `scope`, `login_hint`, `state` |
+| Signed, then encrypted to this server | a JWE | acted on it | nothing |
+| Encrypted to a key this server does not hold | a JWE | `The request object could not be decrypted` | nothing |
+
+Notes:
+
+* **Signed then encrypted, and both still checked.** The server decrypts first and then does exactly
+  what it did before — type, signature against the client's published key, audience, expiry.
+  Encryption says only that nobody else read the request; the signature check is not optional once
+  one arrives encrypted, and a test pins that a wrongly signed object inside a correct JWE is still
+  refused.
+* **The direction is the opposite of JARM's.** There the server encrypts to a key the client
+  publishes; here the client encrypts to a key the server publishes. Each party encrypts to whoever
+  is going to read it, which is why both sides end up publishing a key set.
+* **The server's encryption key is not one of its signing keys.** A third key was added to
+  `/oauth2/jwks` marked `use: enc`, leaving the RS256 and ES256 keys alone. A client picks by that
+  marking, and the published set still carries no private material.
+* **Addressed elsewhere is refused before the signature is looked at,** because until it is decrypted
+  there is nothing to look at.
+* **[Pushing the request](#pushed-authorization-requests) solves an overlapping problem.** A pushed
+  request never travels through the browser, so nothing in it reaches a log on the way; encryption is
+  what protects an object that does travel that way. FAPI asks for both.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -1607,7 +1652,8 @@ The client's key is read from this demo's own configuration rather than the clie
 registration.
 
 The same idea pointed at the answer instead of the question is
-[JARM](#jwt-secured-authorization-responses-jarm).
+[JARM](#jwt-secured-authorization-responses-jarm). Hiding the question from everything the
+URL passes is [request object encryption](#request-object-encryption).
 
 ## Authorization server metadata (RFC 8414)
 
@@ -1989,6 +2035,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmAlgorithmController.java     /jarm-alg
 │   ├── JarmEncryptionController.java    /jarm-enc
 │   ├── JarmEncryptionMethodController.java  /jarm-enc-method
+│   ├── RequestObjectEncryptionController.java  /jar-enc
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2033,6 +2080,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmAlgorithmService.java        the same request from three registrations
 │   ├── JarmEncryptionService.java       one answer signed, one signed and encrypted
 │   ├── JarmEncryptionMethodService.java  the same answer wrapped three ways
+│   ├── RequestObjectEncryptionService.java  the same request sent three ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2129,6 +2177,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── JarmEncryptionRun.java           the two answers, the header, and what was inside
     ├── JarmEncryptionMethodAttempt.java  one registration, and the shape it produced
     ├── JarmEncryptionMethodRun.java     the three shapes side by side
+    ├── RequestObjectAttempt.java        one request object, and what it gave away
+    ├── RequestObjectRun.java            the three request objects
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
