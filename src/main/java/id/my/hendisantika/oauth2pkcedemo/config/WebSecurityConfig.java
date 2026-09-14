@@ -83,6 +83,7 @@ public class WebSecurityConfig {
                         .requestMatchers("/jar-alg", "/jar-alg/**").permitAll()
                         .requestMatchers("/jar-enc-alg", "/jar-enc-alg/**").permitAll()
                         .requestMatchers("/jar-enc-method", "/jar-enc-method/**").permitAll()
+                        .requestMatchers("/jar-none", "/jar-none/**").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
                         .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/jarm-client-jwks.json", "/fapi").permitAll()

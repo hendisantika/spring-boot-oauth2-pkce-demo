@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Unsigned request objects')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>The algorithm that is not one</h1>
+    <p class="lead">
+        <a th:href="@{/jar-alg}"><code>request_object_signing_alg</code></a> can be registered as
+        <code>none</code>, and then the request object is a JWT with an empty signature. Reading the
+        specifications in order is an odd experience: RFC 9101 §4 says the claims are "signed or
+        signed and encrypted", §6.1 says decrypting one yields "a signed Request Object" — and then
+        §10.5 spends a security consideration defining a switch to turn unsigned ones off, which is
+        only worth writing if they are otherwise on. OpenID Connect Dynamic Client Registration
+        settles it in five words: <em>the value none MAY be used</em>.
+    </p>
+
+    <div class="alert" th:if="${jarNoneError}" th:text="${jarNoneError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Three clients and six request objects, five of them carrying no signature at all.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:38%">Registered <code>none</code></th>
+                <td><code th:text="${noneClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered <code>none</code>, and the defence against it</th>
+                <td><code th:text="${strictClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        RFC 9101 §10.5's <code>require_signed_request_object</code>, as client
+                        metadata, on a client whose algorithm is <code>none</code>.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Registered nothing, so RS256</th>
+                <td><code th:text="${signingClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>This server's own <code>require_signed_request_object</code></th>
+                <td><code th:text="${serverRequiresSigned}">-</code>
+                    <span class="hint" style="display:block">
+                        Published in <a th:href="@{/metadata}">the discovery documents</a>, where a
+                        client can read it rather than find out by being refused.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-none}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send six request objects</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Six request objects</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:24%">Sent</th>
+                <th style="width:21%">Client</th>
+                <th style="width:13%">Registered</th>
+                <th style="width:13%">Header said</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.clientId}">-</code></td>
+                <td><code th:text="${attempt.registeredAlg}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${attempt.requireSignedRegistered}">+ require_signed</span>
+                </td>
+                <td>
+                    <code th:text="${attempt.sentAlg}">-</code>
+                    <span class="hint" style="display:block"
+                          th:unless="${attempt.matchesRegistration()}">not what it registered</span>
+                    <span class="hint" style="display:block" th:if="${attempt.encrypted}">inside a
+                        JWE</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.everyAcceptedRowWasUnsigned()}">
+                Every row that was acted on carried no signature — including the second, which was
+                refused for carrying one.
+            </span>
+            <span th:if="${run.nothingAcceptedWhereSigningWasRequired()}">
+                Nothing was accepted from the client that registered the defence, whatever else its
+                registration said.
+            </span>
+        </p>
+        <p class="hint">
+            This server checks <code th:text="${run.supportedAlgs}">-</code>, and its own
+            <code>require_signed_request_object</code> is
+            <code th:text="${run.serverRequiresSignedRequestObjects}">-</code>.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-none/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Accepting <code>none</code> is not the same as accepting anything.</strong> The
+            second row is a properly signed RS256 object from the client that registered
+            <code>none</code>, and it is refused — the registration is an agreement about what will
+            arrive, and a better object than the one agreed is still not the one agreed. The third
+            row is the same rule pointing the other way. <code>none</code> is a value in that
+            agreement, not an escape from it.
+        </p>
+        <p class="hint">
+            <strong>What is left doing the work.</strong> Strip the signature and a request object
+            still buys the two things it was reached for beside integrity: the parameters travel as
+            one unit the server reads instead of the query string, and
+            <a th:href="@{/par}">pushing it</a> keeps it off the browser entirely. What it stops
+            buying is any answer to "who wrote this". That is why RFC 9101 §6.3's rule — the
+            <code>client_id</code> in the request and the one in the object <em>MUST</em> be
+            identical — is the last row here: with a signature it is a formality, because the object
+            could only have come from the client whose key verified it. Without one it is the only
+            thing tying the object to the client the request names.
+        </p>
+        <p class="hint">
+            <strong>The encrypted row is the one worth staring at.</strong> It is confidential and it
+            is accepted, and it proves nothing about who sent it: this server publishes its
+            encryption key, so anyone at all can produce a JWE addressed to it. Encryption and
+            signing answer different questions, and only one of them is "was this really the client".
+            A JWE around an <code>alg: none</code> object looks like security and is not.
+        </p>
+        <p class="hint">
+            <strong>The defence wins over the algorithm.</strong> The fourth row's client registered
+            <code>none</code> and <code>require_signed_request_object</code> together, which is a
+            registration that contradicts itself. RFC 9101 §10.5 is a downgrade defence, and a
+            downgrade defence that could be talked out of it by the thing it defends against would
+            not be one — so it outranks the algorithm, and the same is true of the server-wide switch
+            in the row above.
+        </p>
+        <p class="hint">
+            <strong>Both switches are now published.</strong>
+            <code>request_object_signing_alg_values_supported</code> and
+            <code>require_signed_request_object</code> appear in
+            <a th:href="@{/metadata}">both discovery documents</a>; Spring Authorization Server
+            advertises neither, having no notion of the <code>request</code> parameter at all. A
+            client that cannot discover which algorithms are accepted finds out by being refused.
+        </p>
+    </div>
+</main>
+</body>
+</html>
