@@ -72,6 +72,8 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jarm-ec-client` | none (public) | required | no | code | no |
 | `pkce-jarm-none-client` | none (public) | required | no | code | no |
 | `pkce-jarm-encrypted-client` | none (public) | required | no | code | no |
+| `pkce-jarm-gcm-client` | none (public) | required | no | code | no |
+| `pkce-jarm-unsupported-enc-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -548,6 +550,15 @@ five.
 **100. JARM encryption** — what stays readable, and what is inside once the client decrypts it.
 
 ![The JWE header](docs/images/101-jarm-enc-header.png)
+
+**101. JARM content encryption** — three registrations differing in one word, and the shapes they
+produce.
+
+![Three registrations](docs/images/102-jarm-enc-method-shapes.png)
+
+**102. JARM content encryption** — why CBC pads and GCM does not.
+
+![Reading the shapes](docs/images/103-jarm-enc-method-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1514,12 +1525,50 @@ Notes:
   `A128CBC-HS256` — JARM's default, visible in the JWE header. The header stays readable by design:
   it says which key and which algorithms undo the encryption, and `cty: JWT` (RFC 7519 §5.2) says
   there is another JWT inside.
+* **What the key then encrypts with is a separate setting**, and the shapes it produces differ
+  measurably: [`authorization_encrypted_response_enc`](#authorization_encrypted_response_enc).
 * **A client that asks for this and publishes nothing is refused,** exactly as one asking for a
   signing algorithm the server cannot produce is. There is no key to encrypt to, and answering in the
   clear instead would defeat the setting.
 * **The demo's client and server share a process,** so this one key set is read from the bean rather
   than fetched from a port the application would be calling itself on. Every other JWKS URL still goes
   over the network, as a real one always would.
+
+## `authorization_encrypted_response_enc`
+
+A JWE is encrypted twice over. [`alg`](#authorization_encrypted_response_alg) says how the content
+encryption key is wrapped for the recipient; `enc` says what that key then encrypts the payload with.
+They are chosen independently, and `/jarm-enc-method` changes only the second — three registrations
+identical but for one word, with `alg` fixed at `RSA-OAEP-256` throughout.
+
+| Client | Registered as | `enc` in the header | Shape of the JWE |
+|---|---|---|---|
+| `pkce-jarm-encrypted-client` | nothing | `A128CBC-HS256` | iv 16 bytes, ciphertext 928, tag 16 — 9 bytes of padding over a 919-character payload |
+| `pkce-jarm-gcm-client` | `A256GCM` | `A256GCM` | iv 12 bytes, ciphertext 911, tag 16 — no padding at all |
+| `pkce-jarm-unsupported-enc-client` | `A192CBC-HS384` | no JWE at all | `invalid_request` |
+
+Notes:
+
+* **CBC pads and GCM does not.** `A128CBC-HS256` is AES in CBC mode with a separate HMAC, and CBC
+  works a block at a time, so the payload is rounded up to a multiple of sixteen bytes whether it
+  needs it or not. `A256GCM` is a stream cipher with an authentication tag, and its ciphertext is
+  exactly as long as what went in. That is the difference the measurements show, and the only one
+  visible from outside.
+* **The IV differs too** — sixteen bytes for CBC, one cipher block; twelve for GCM, the size its
+  counter construction is defined for. Neither is secret; both travel in the clear as the JWE's
+  second-to-last segment.
+* **Both are authenticated, by different routes.** CBC gets its integrity from the HMAC named in the
+  second half of `A128CBC-HS256`, computed over the ciphertext; GCM produces its tag while
+  encrypting. Either way the tag is 16 bytes and a changed byte makes decryption fail.
+* **The key lengths are not what they look like.** `A128CBC-HS256` needs a 256-bit content encryption
+  key — half for AES-128, half for the HMAC — while `A256GCM` needs 256 bits for AES alone. The
+  wrapped key is the same size in both rows regardless, because RSA-OAEP output is fixed by the
+  modulus rather than by its contents.
+* **An unsupported method is refused, not downgraded.** `A192CBC-HS384` is a real JWA method this
+  server does not offer; falling back to one it does would hand the client something other than what
+  it registered, without saying so.
+* **Nothing about the plaintext changes.** Every encrypted row decrypts to the same three-part signed
+  JWT it would have carried unencrypted. `enc` decides the wrapping and nothing else.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1939,6 +1988,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmController.java              /jarm
 │   ├── JarmAlgorithmController.java     /jarm-alg
 │   ├── JarmEncryptionController.java    /jarm-enc
+│   ├── JarmEncryptionMethodController.java  /jarm-enc-method
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -1982,6 +2032,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmService.java                 one authorization, asked for seven ways
 │   ├── JarmAlgorithmService.java        the same request from three registrations
 │   ├── JarmEncryptionService.java       one answer signed, one signed and encrypted
+│   ├── JarmEncryptionMethodService.java  the same answer wrapped three ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2076,6 +2127,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── JarmAlgorithmRun.java            the three registrations and the published keys
     ├── JarmClientKeys.java              the client's key pair, and how it decrypts
     ├── JarmEncryptionRun.java           the two answers, the header, and what was inside
+    ├── JarmEncryptionMethodAttempt.java  one registration, and the shape it produced
+    ├── JarmEncryptionMethodRun.java     the three shapes side by side
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
