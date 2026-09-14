@@ -742,6 +742,15 @@ row its key-wrapping algorithm passes.
 
 ![The enc default applied](docs/images/139-fapi-enc-default.png)
 
+**140. FAPI 2.0** — all eight client checks, on the client that registered three `request_uris`.
+
+![Eight checks and a pre-registered reference](docs/images/140-fapi-request-uris.png)
+
+**141. FAPI 2.0** — reading the request object rows together: what each profile asks, and what an
+absent value means in each.
+
+![The reading notes](docs/images/141-fapi-reading-this.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2720,6 +2729,33 @@ because they do not behave alike:
 That last default is conditional on its sibling being present, which is why a client with an `alg`
 and no `enc` has declared a method while a client with neither has declared nothing, and why the two
 rows are worded differently rather than sharing one branch.
+
+The eighth check reads [`request_uris`](#request_uris), and it is the only row here where the two
+profiles disagree with each other. FAPI 1.0 Advanced §5.2.2 required the server to *"require a JWS
+signed JWT request object passed by value with the `request` parameter or by reference with the
+`request_uri` parameter"* — by reference was blessed. FAPI 2.0 removed it. Its comparison table
+replaces the request object's `nbf` and `exp` claims with *"request_uri has limited lifetime"*, for
+the stated reason that this *"Prevents pre-generation of requests"*, and §5.3.2 has the client send
+only `client_id` and a `request_uri` whose parameters *"are sent in the pushed authorization request
+according to [RFC9126]"*.
+
+A pre-registered URL is neither short-lived nor pushed, so the two clients that registered one fail:
+
+| Registered | Result | Why |
+|---|---|---|
+| 3 `request_uris` (`pkce-fetched-request-client`) | FAIL | The parameters in a fetched document never went through the pushed endpoint |
+| 1 `request_uri` (`pkce-confidential-client`) | FAIL | One URL, registered to a second client so [the fetching page](#request_uris) can show the list is per client |
+| none | PASS | 32 of the 34, **while `require_request_uri_registration` is true** |
+
+That last row is conditional, and the check reads the switch live rather than assuming it. With
+[`require_request_uri_registration`](#require_request_uri_registration) off, a client that registered
+nothing could still name any https URL and have this server go and fetch it, so every one of those 32
+rows turns red together. It is the only per-client row here whose outcome depends on server
+configuration rather than on the registration alone.
+
+Note that both kinds of reference arrive in the same `request_uri` parameter and are told apart by
+scheme — `http(s)` is fetched, anything else is left to PAR — so this row is about the fetched kind
+only. A client using PAR is not failing it.
 
 Only `pkce-fapi-client`, `pkce-mtls-client` and `pkce-mtls-refresh-client` meet every client
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
