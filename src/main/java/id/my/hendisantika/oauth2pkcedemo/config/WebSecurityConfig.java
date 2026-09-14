@@ -1,6 +1,7 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.CheckSessionIframeController;
+import id.my.hendisantika.oauth2pkcedemo.controller.JarmController;
 import id.my.hendisantika.oauth2pkcedemo.controller.LogoutDemoController;
 import id.my.hendisantika.oauth2pkcedemo.security.PkceAuditingAuthorizationRequestRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequestResolver;
@@ -136,7 +137,11 @@ public class WebSecurityConfig {
                 // user signing in elsewhere in the same browser, which rotates the shared session's
                 // token - an artefact of running client and phone in one browser, not of CIBA.
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/backchannel/**", "/ciba/poll",
-                        "/mixup/attacker/token"))
+                        "/mixup/attacker/token",
+                        // A form_post.jwt response is submitted by a page the authorization server
+                        // wrote, carrying no token of this application's - which is exactly the
+                        // shape of a response arriving from a server elsewhere.
+                        JarmController.CALLBACK_URI))
                 // The front-channel logout page embeds the client's own logout endpoint in
                 // iframes, and the default DENY would stop the browser loading them. In a real
                 // deployment the client and the server are different origins and this is the

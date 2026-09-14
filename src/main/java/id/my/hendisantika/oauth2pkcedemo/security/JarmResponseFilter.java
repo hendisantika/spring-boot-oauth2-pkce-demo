@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletResponseWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -22,6 +23,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.IOException;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -45,8 +47,18 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     public static final String RESPONSE_MODE = "response_mode";
     public static final String RESPONSE = "response";
 
-    /** The modes that mean "signed, delivered on the query string", which is all the code flow needs. */
+    /** Signed, on the query string. {@code jwt} means this one for the authorization code flow. */
     public static final Set<String> QUERY_JWT_MODES = Set.of("jwt", "query.jwt");
+
+    /** Signed, after the {@code #} - where a browser keeps it out of the request it sends. */
+    public static final String FRAGMENT_JWT = "fragment.jwt";
+
+    /** Signed, in the body of a form the browser posts - so it is in no URL at all. */
+    public static final String FORM_POST_JWT = "form_post.jwt";
+
+    /** Every mode this understands. Anything else is left to the authorization server. */
+    public static final Set<String> JWT_MODES =
+            Set.of("jwt", "query.jwt", FRAGMENT_JWT, FORM_POST_JWT);
 
     /** Short: a response is redeemed immediately or not at all. */
     private static final Duration LIFETIME = Duration.ofMinutes(2);
@@ -70,8 +82,13 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     }
 
     public static boolean wantsJwtResponse(HttpServletRequest request) {
+        String mode = responseModeOf(request);
+        return mode != null && JWT_MODES.contains(mode);
+    }
+
+    private static String responseModeOf(HttpServletRequest request) {
         String mode = request.getParameter(RESPONSE_MODE);
-        return mode != null && QUERY_JWT_MODES.contains(mode.trim());
+        return mode == null ? null : mode.trim();
     }
 
     /**
@@ -102,7 +119,7 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
             return;
         }
         filterChain.doFilter(request, new JarmRedirect(response, redirectUri,
-                request.getParameter(OAuth2ParameterNames.CLIENT_ID)));
+                request.getParameter(OAuth2ParameterNames.CLIENT_ID), responseModeOf(request)));
     }
 
     /** Wraps only the one thing that matters: where the authorization endpoint sends the browser. */
@@ -110,11 +127,14 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
 
         private final String redirectUri;
         private final String clientId;
+        private final String responseMode;
 
-        private JarmRedirect(HttpServletResponse response, String redirectUri, String clientId) {
+        private JarmRedirect(HttpServletResponse response, String redirectUri, String clientId,
+                             String responseMode) {
             super(response);
             this.redirectUri = redirectUri;
             this.clientId = clientId;
+            this.responseMode = responseMode;
         }
 
         @Override
@@ -126,11 +146,46 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
             }
             Map<String, String> parameters = parametersOf(location);
             String jwt = sign(parameters, clientId);
-            log.debug("Delivering a {} authorization response as a signed JWT",
-                    parameters.containsKey(OAuth2ParameterNames.ERROR) ? "failed" : "successful");
+            log.debug("Delivering a {} authorization response as a signed JWT, by {}",
+                    parameters.containsKey(OAuth2ParameterNames.ERROR) ? "failed" : "successful",
+                    responseMode);
+
+            if (FORM_POST_JWT.equals(responseMode)) {
+                formPost(jwt);
+                return;
+            }
+            if (FRAGMENT_JWT.equals(responseMode)) {
+                // After the #, where a browser keeps it: the fragment is never sent to the server
+                // the URI points at, so the response stays out of that server's logs entirely.
+                super.sendRedirect(redirectUri + "#" + RESPONSE + "="
+                        + URLEncoder.encode(jwt, StandardCharsets.UTF_8));
+                return;
+            }
             super.sendRedirect(UriComponentsBuilder.fromUriString(redirectUri)
                     .queryParam(RESPONSE, jwt)
                     .build().encode(StandardCharsets.UTF_8).toUriString());
+        }
+
+        /**
+         * OAuth 2.0 Form Post Response Mode: a page whose only purpose is to submit itself, so the
+         * response travels in a request body rather than in any URL. That matters for a JWT, which
+         * is long enough to run into URL length limits, and which would otherwise sit in browser
+         * history and in every log along the way.
+         */
+        private void formPost(String jwt) throws IOException {
+            String html = """
+                    <!DOCTYPE html>
+                    <html><head><title>Submitting the response</title></head>
+                    <body onload="document.forms[0].submit()">
+                    <form method="post" action="%s">
+                    <input type="hidden" name="%s" value="%s"/>
+                    <noscript><button type="submit">Continue</button></noscript>
+                    </form></body></html>"""
+                    .formatted(escape(redirectUri), RESPONSE, escape(jwt));
+            setStatus(HttpServletResponse.SC_OK);
+            setContentType(MediaType.TEXT_HTML_VALUE);
+            setCharacterEncoding(StandardCharsets.UTF_8);
+            getWriter().write(html);
         }
     }
 
@@ -155,6 +210,11 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
         });
         return jwtEncoder.encode(JwtEncoderParameters.from(
                 JwsHeader.with(SignatureAlgorithm.RS256).build(), claims.build())).getTokenValue();
+    }
+
+    /** Only the characters that could end the attribute; the values here are a URI and a JWT. */
+    private static String escape(String value) {
+        return value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;");
     }
 
     /** The redirect URI the client registered, which is the only place a response may be sent. */
