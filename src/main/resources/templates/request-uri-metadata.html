@@ -11,8 +11,8 @@
         is a reference the server itself handed out. OpenID Connect Discovery's
         <code>request_uri_parameter_supported</code> is about the first one only — and RFC 9126 §5
         says a pushed reference is usable <em>"regardless of other authorization server metadata such
-        as <code>request_uri_parameter_supported</code>"</em>. So this server publishes
-        <code>false</code> and accepts one anyway, which is correct and takes some explaining.
+        as <code>request_uri_parameter_supported</code>"</em>. This server does both, and one of them
+        involves no fetching at all.
     </p>
 
     <div class="alert" th:if="${requestUriMetadataError}" th:text="${requestUriMetadataError}">error</div>
@@ -103,9 +103,9 @@
             <code>request_parameter_supported: false</code> and
             <code>request_uri_parameter_supported: true</code> — so a server that publishes neither is
             claiming it does not read <code>request</code> and does fetch <code>request_uri</code>.
-            This server is the other way round on both counts, and Spring Authorization Server
-            advertises neither, having no notion of either parameter. Until this page they were
-            absent, which is to say wrong.
+            This server reads both, and Spring Authorization Server advertises neither, having no
+            notion of either parameter. The table above marks each value that differs from what
+            silence would have claimed.
         </p>
         <p class="hint">
             <strong>The second and third rows are the same parameter.</strong> One is a URL this
@@ -115,26 +115,30 @@
             objects for this server", not "do not push".
         </p>
         <p class="hint">
-            <strong>The refusal now says which kind it was.</strong> Before this page, both a URL and
-            an unknown reference came back as <code>[invalid_request] OAuth 2.0 Parameter:
-            request_uri</code> — the authorization server's failed lookup of a pushed reference the
-            client never claimed to have. A <code>request_uri</code> with an http or https scheme is
-            now refused with the reason, and everything else is still left to that lookup, which is
-            the check that owns it. The test is the scheme rather than the shape of a pushed
-            reference: RFC 9126 §4 leaves that format to the server.
+            <strong>Which check speaks depends on the scheme.</strong> A <code>request_uri</code> with
+            an http or https scheme is a URL to fetch, and is handled by
+            <a th:href="@{/request-uri-registration}">the registration rules</a>; anything else is
+            left to the authorization server's lookup of a pushed reference, which is the check that
+            owns those. The test is the scheme rather than the shape of a pushed reference, because
+            RFC 9126 §4 leaves that format to the server.
         </p>
         <p class="hint">
-            <strong><code>require_request_uri_registration</code> is published and moot.</strong> It
-            asks whether <code>request_uri</code> values must be pre-registered with
-            <code>request_uris</code>, which only means something for the feature this server does not
-            implement. <code>false</code> is accurate; it is not permission to host one.
+            <strong><code>require_request_uri_registration</code> is the one that constrains
+            fetching.</strong> It asks whether <code>request_uri</code> values must be pre-registered
+            with <code>request_uris</code>, and this server publishes <code>true</code> — its default
+            in the spec is <code>false</code>, which is the permissive reading of a feature that
+            makes the server go somewhere on a browser parameter's say-so.
+            <a th:href="@{/request-uri-registration}">Its own page</a> sends the same URL under both
+            settings.
         </p>
         <p class="hint">
-            <strong>Fetching is a door this server keeps shut.</strong> RFC 9101 §10.4.1 and §10.4.2
-            are both about it: a server that fetches a URL on a client's say-so can be aimed at a
-            victim, and the reference itself is unsigned and rewritable in the browser. PAR gets the
-            same job done without the server making an outbound request at all — which is why the
-            <a th:href="@{/request-uri}">lifetime page</a> is about references rather than URLs.
+            <strong>Fetching is the door with the hinges on the outside.</strong> RFC 9101 §10.4.1 and
+            §10.4.2 are both about it: a server that fetches a URL on a client's say-so can be aimed
+            at a victim, and the reference itself is unsigned and rewritable in the browser. PAR gets
+            the same job done without the server making any outbound request — which is why the
+            <a th:href="@{/request-uri}">lifetime page</a> is about references rather than URLs, and
+            why the row above that was fetched is the only row here that cost this server a
+            connection.
         </p>
     </div>
 </main>

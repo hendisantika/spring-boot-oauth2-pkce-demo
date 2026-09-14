@@ -89,6 +89,9 @@ public class WebSecurityConfig {
                         .requestMatchers("/par-required", "/par-required/**").permitAll()
                         .requestMatchers("/par-server-required", "/par-server-required/**").permitAll()
                         .requestMatchers("/request-uri-metadata", "/request-uri-metadata/**").permitAll()
+                        .requestMatchers("/request-uri-registration", "/request-uri-registration/**").permitAll()
+                        // RFC 9101 section 5.2.1: the client's own hosting, which the server fetches.
+                        .requestMatchers("/hosted/**").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
                         .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/jarm-client-jwks.json", "/fapi").permitAll()

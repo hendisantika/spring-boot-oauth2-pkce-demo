@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('require_request_uri_registration')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>A list of places the server is willing to go</h1>
+    <p class="lead">
+        RFC 9101 §5.2 lets a client host its request object and hand the server a URL, and §5.2.3 says
+        the server <em>must</em> then send a GET to it. That is an authorization server making an
+        outbound request because an unauthenticated browser parameter told it to, which §10.4.1 spends
+        a section on. Its first mitigation is to "check that the value of the
+        <code>request_uri</code> parameter does not point to an unexpected location" —
+        <code>require_request_uri_registration</code> is the switch that turns the client's registered
+        <code>request_uris</code> into that list of expected ones.
+    </p>
+
+    <div class="alert" th:if="${requestUriRegistrationError}"
+         th:text="${requestUriRegistrationError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Four URLs are sent twice, once with the requirement on and once with it off. This
+            application hosts every one of them — a demo that pointed a server at somebody else's
+            host to prove a point would be making the point the wrong way round.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:34%">Right now</th>
+                <td><code>require_request_uri_registration</code> is
+                    <code th:text="${currently}">-</code></td>
+            </tr>
+            <tr>
+                <th>The client</th>
+                <td><code th:text="${clientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Its registered <code>request_uris</code></th>
+                <td>
+                    <span th:each="uri : ${registeredUris}" style="display:block">
+                        <code th:text="${uri}">-</code>
+                    </span>
+                </td>
+            </tr>
+        </table>
+        <form th:action="@{/request-uri-registration}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send four URLs, twice</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Four URLs, both ways</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:24%">Sent</th>
+                <th style="width:19%">URL</th>
+                <th style="width:28%">Registration required</th>
+                <th>Requirement off</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td><strong>What the documents said</strong>
+                    <span class="hint" style="display:block">
+                        <code>/.well-known/openid-configuration</code>, read at each turn.
+                    </span></td>
+                <td><span class="hint">—</span></td>
+                <td><code th:text="'require_request_uri_registration: ' + ${run.publishedWhenRequired}">-</code></td>
+                <td><code th:text="'require_request_uri_registration: ' + ${run.publishedWhenNotRequired}">-</code></td>
+            </tr>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <code class="hint" th:text="${attempt.path()}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${attempt.registeredForThisClient}">registered</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcomeWhenRequired}"
+                          th:style="${attempt.acceptedWhenRequired} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcomeWhenNotRequired}"
+                          th:style="${attempt.acceptedWhenNotRequired} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.theRegisteredUrlWorkedBothWays()}">
+                The registered URL was fetched and used under both settings.
+            </span>
+            <span th:text="'Exactly ' + ${run.refusedUnderBothSettings()} + ' rows were refused '
+                    + 'whichever way the setting went — those are the checks that do not depend on '
+                    + 'it.'">-</span>
+        </p>
+        <p class="hint" th:if="${run.metadataFollowedTheSetting()}">
+            And the published document tracked the setting, so a client can tell in advance whether
+            hosting an unregistered URL is worth trying.
+        </p>
+        <p class="hint" th:if="${run.restoredAfterwards}">
+            The setting is back where it was.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/request-uri-registration/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Only the second row moves.</strong> It is a URL this application hosts and this
+            client never registered — belonging, in fact, to another client's list. With the
+            requirement on it is refused before any request leaves the server; with it off the server
+            goes and fetches it, and is saved only by a later check noticing the object names
+            somebody else. That is the entire value of the setting — not that a different object got
+            through, but that the outbound request happened at all — and also why the default here is
+            <code>true</code> while OpenID Connect Discovery's default is <code>false</code>.
+        </p>
+        <p class="hint">
+            <strong>The list is per client, not a list of URLs the server likes.</strong> The same URL
+            is registered — to somebody else. A client that could use another client's registered URL
+            would make the registration a formality, and the rewrite attack RFC 9101 §10.4.2
+            describes works by changing exactly this parameter in the browser.
+        </p>
+        <p class="hint">
+            <strong>Registration is necessary, not sufficient.</strong> The last two rows are on the
+            client's own list and refused under both settings: one serves <code>text/plain</code>
+            (§10.4.1 clause (b): check the media type of the response, which means fetching with an
+            open <code>Accept</code> and judging what arrives) and one returns an object carrying its own
+            <code>request_uri</code>, which §4 forbids and clause (d) is about — a server that
+            followed it would be fetching recursively on a stranger's say-so. The fetch also refuses
+            anything that is not <code>https</code> — except, in this demo only, a URL on this
+            server's own origin, because <a th:href="@{/fapi}">nothing here is served over TLS</a> —
+            caps the response, times out after two seconds and does not follow redirects, since a URL
+            that can bounce elsewhere is a URL the list no longer describes.
+        </p>
+        <p class="hint">
+            <strong>Nothing about verification changes.</strong> What comes back over that GET is
+            checked exactly as <a th:href="@{/jar}">an object passed by value</a> is — type,
+            algorithm against the registration, signature, audience, expiry, client id. Fetching
+            decides where the bytes came from and settles nothing about whether to believe them.
+        </p>
+        <p class="hint">
+            <strong>The other <code>request_uri</code> is unaffected.</strong> A reference from
+            <a th:href="@{/par}">the pushed endpoint</a> is not a URL and is never fetched; RFC 9126
+            §5 says it works regardless of this metadata, and
+            <a th:href="@{/request-uri-metadata}">the page next door</a> shows both kinds arriving in
+            the same parameter.
+        </p>
+    </div>
+</main>
+</body>
+</html>

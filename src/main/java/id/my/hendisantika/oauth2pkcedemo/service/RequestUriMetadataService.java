@@ -1,6 +1,7 @@
 package id.my.hendisantika.oauth2pkcedemo.service;
 
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
+import id.my.hendisantika.oauth2pkcedemo.controller.HostedRequestObjectController;
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriMetadataAttempt;
@@ -46,8 +47,8 @@ import java.util.regex.Pattern;
 @Service
 public class RequestUriMetadataService {
 
-    /** Where a client would host a request object for a server that fetches them. RFC 9101 §5.2. */
-    public static final String HOSTED_REQUEST_OBJECT = "https://client.example.org/request-object.jwt";
+    /** Where the client hosts its request object, and a URL it registered. RFC 9101 §5.2. */
+    public static final String HOSTED_REQUEST_OBJECT = HostedRequestObjectController.HOSTED_URI;
 
     /** Shaped like one of this server's pushed references, and issued by nobody. */
     public static final String INVENTED_REFERENCE = "urn:ietf:params:oauth:request_uri:never-issued";
@@ -65,9 +66,9 @@ public class RequestUriMetadataService {
         this.restClient = RestClient.create(properties.issuerUri());
     }
 
-    /** The confidential client, because one of the four rows has to push. */
+    /** The client that hosts a request object and can also push one. */
     public DemoProperties.Client client() {
-        return properties.confidentialClient();
+        return properties.fetchedRequestClient();
     }
 
     /** What OpenID Connect Discovery section 3 says each of these means when it is not published. */
@@ -79,16 +80,27 @@ public class RequestUriMetadataService {
         return defaults;
     }
 
-    /** The same three, as this server actually publishes them, read back from the document. */
+    /**
+     * The same three, as this server actually publishes them, read back from the document rather
+     * than from the constants that fill it in. Reading it over HTTP is the point - it is the only
+     * way to show what a client would see - so when the server cannot reach itself the page says
+     * so instead of pretending to know.
+     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> published() {
-        Map<String, Object> document = restClient.get()
-                .uri("/.well-known/openid-configuration")
-                .retrieve().body(Map.class);
+        Map<String, Object> document;
+        try {
+            document = restClient.get()
+                    .uri("/.well-known/openid-configuration")
+                    .retrieve().body(Map.class);
+        } catch (RuntimeException ex) {
+            log.debug("Could not read the published document back: {}", ex.getMessage());
+            document = null;
+        }
         Map<String, Object> values = new LinkedHashMap<>();
         for (String name : defaultsIfOmitted().keySet()) {
             Object value = document == null ? null : document.get(name);
-            values.put(name, value == null ? "absent" : value);
+            values.put(name, value == null ? "unreachable" : value);
         }
         return values;
     }
@@ -113,16 +125,18 @@ public class RequestUriMetadataService {
                 ServerMetadataCustomizer.REQUEST_PARAMETER_SUPPORTED + ": true"));
         attempts.add(probe.send("By a URL to fetch",
                 "RFC 9101 §5.2: the client hosts the object and the server goes and gets it.",
-                OAuth2ParameterNames.REQUEST_URI, HOSTED_REQUEST_OBJECT,
-                ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + ": false"));
+                OAuth2ParameterNames.REQUEST_URI,
+                properties.issuerUri() + HOSTED_REQUEST_OBJECT,
+                ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + ": true"));
         attempts.add(probe.send("By a pushed reference",
-                "RFC 9126: the same parameter, carrying something the server handed out itself.",
+                "RFC 9126: the same parameter, carrying something the server handed out itself - "
+                        + "and never fetched.",
                 OAuth2ParameterNames.REQUEST_URI, push(client),
-                ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + ": false"));
+                ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + ": true"));
         attempts.add(probe.send("By a reference nobody issued",
                 "Shaped like the row above, and unknown to the server that would have issued it.",
                 OAuth2ParameterNames.REQUEST_URI, INVENTED_REFERENCE,
-                ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + ": false"));
+                ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + ": true"));
 
         log.debug("request_uri metadata run finished; {} of {} accepted",
                 attempts.stream().filter(RequestUriMetadataAttempt::accepted).count(), attempts.size());
