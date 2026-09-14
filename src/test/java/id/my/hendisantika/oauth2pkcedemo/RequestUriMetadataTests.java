@@ -65,16 +65,16 @@ class RequestUriMetadataTests extends AbstractMySqlIntegrationTest {
             assertThat(metadata)
                     .contains("\"" + ServerMetadataCustomizer.REQUEST_PARAMETER_SUPPORTED + "\":true")
                     .contains("\"" + ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED
-                            + "\":false")
+                            + "\":true")
                     .contains("\"" + ServerMetadataCustomizer.REQUIRE_REQUEST_URI_REGISTRATION
-                            + "\":false");
+                            + "\":true");
         }
     }
 
     /** RFC 9101 section 5.1, and what request_parameter_supported: true is claiming. */
     @Test
     void aRequestObjectByValueIsAccepted() throws Exception {
-        DemoProperties.Client client = properties.confidentialClient();
+        DemoProperties.Client client = properties.fetchedRequestClient();
         Map<String, String> query = new LinkedHashMap<>();
         query.put("client_id", client.clientId());
         query.put(JwtSecuredAuthorizationRequestFilter.REQUEST,
@@ -83,29 +83,14 @@ class RequestUriMetadataTests extends AbstractMySqlIntegrationTest {
         assertThat(authorize(query)).doesNotContain("error=");
     }
 
-    /**
-     * RFC 9101 section 5.2 is the feature request_uri_parameter_supported is about, and the refusal
-     * says so rather than leaving the client with a failed lookup of a pushed reference.
-     */
+    /** A URL somewhere else is judged by the registration rules rather than by the lookup. */
     @Test
-    void aUrlToFetchIsRefusedByName() throws Exception {
+    void theSchemeIsWhatDecidesWhichCheckSpeaks() throws Exception {
         Map<String, String> query = new LinkedHashMap<>();
-        query.put("client_id", properties.confidentialClient().clientId());
-        query.put("request_uri", RequestUriMetadataService.HOSTED_REQUEST_OBJECT);
+        query.put("client_id", properties.fetchedRequestClient().clientId());
+        query.put("request_uri", "https://client.example.org/request-object.jwt");
 
-        assertThat(refusal(query))
-                .contains("does not fetch request objects by reference")
-                .contains(ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + " is false");
-    }
-
-    /** And http is refused the same way as https: the scheme is the test, not the host. */
-    @Test
-    void theSchemeIsWhatIsJudged() throws Exception {
-        Map<String, String> query = new LinkedHashMap<>();
-        query.put("client_id", properties.confidentialClient().clientId());
-        query.put("request_uri", "http://client.example.org/request-object.jwt");
-
-        assertThat(refusal(query)).contains("does not fetch request objects by reference");
+        assertThat(refusal(query)).contains("not registered for this client");
     }
 
     /**
