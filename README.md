@@ -82,6 +82,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jar-enc-only-client` | none (public) | required | no | code | no |
 | `pkce-jar-none-client` | none (public) | required | no | code | no |
 | `pkce-jar-none-strict-client` | none (public) | required | no | code | no |
+| `pkce-par-required-client` | `client_secret_basic` | required | **required** | code | no |
 
 ## What the flow looks like
 
@@ -636,6 +637,15 @@ and the six requests that follow.
 taught, and two things it quietly did not honour.
 
 ![Reading the client setting](docs/images/117-jar-client-required-reading.png)
+
+**117. Requiring pushed requests** — five ways to start an authorization request, and the one that
+works.
+
+![Five requests](docs/images/118-par-required-five-requests.png)
+
+**118. Requiring pushed requests** — why a signed request object is not a pushed one.
+
+![Reading the PAR lock](docs/images/119-par-required-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1959,6 +1969,48 @@ Notes:
   authority beyond the initial access token's. Neither changes what the page is about, and both are
   worth noticing before building on a registration response you did not read.
 
+## `require_pushed_authorization_requests`
+
+`/par-required` is RFC 9126 §6. [Pushing the request](#pushed-authorization-requests) sends the
+parameters over an authenticated back channel and hands the browser a reference — worth nothing while
+the same client can also put them in a query string. The setting is the client saying it will not:
+*"whether the only means of initiating an authorization request the client is allowed to use is
+PAR"*. Five requests, with the server-wide value `false` throughout:
+
+| Sent | Client | Carried | Refused by | What the server did |
+|---|---|---|---|---|
+| an ordinary request | `pkce-confidential-client` | every parameter, in the query string | — | the consent screen |
+| an ordinary request | `pkce-par-required-client` | every parameter, in the query string | the client's registration | `This client registered require_pushed_authorization_requests` |
+| a pushed request | `pkce-par-required-client` | `client_id` and `request_uri` | — | an authorization code |
+| a `request_uri` nobody issued | `pkce-par-required-client` | `client_id` and `request_uri` | the authorization server | `invalid_request` |
+| a signed request object instead | `pkce-par-required-client` | `client_id` and a signed `request` | the client's registration | `This client registered require_pushed_authorization_requests` |
+
+Notes:
+
+* **The first two rows are the same request.** Same parameters, same query string, same kind of
+  confidential client — one acted on and one not, and the only difference is a boolean on a
+  registration. That is the piece [the PAR page](#pushed-authorization-requests) cannot show, because
+  a demo that pushes voluntarily proves nothing about a client that would rather not.
+* **Two checks, in order, and the page says which spoke.** The registered lock asks only whether a
+  `request_uri` is present — a question about how the request was *started*. Whether that reference
+  is real, alive and this client's is the authorization server's own check, and the invented-reference
+  row is refused by that one. The difference is "push it" versus "push it again".
+* **A signed request object is not a pushed one.** The last row carries a perfectly good
+  [JAR request object](#jwt-secured-authorization-requests-jar) and is refused anyway. JAR stops the
+  request being changed in the browser; PAR stops it going through the browser at all. They compose —
+  FAPI asks for both — but neither substitutes for the other.
+* **Both halves are in the RFC; one is implemented here.** RFC 9126 defines
+  `require_pushed_authorization_requests` twice: §6 as client metadata, which is this page, and §5 as
+  server metadata meaning the server "accepts authorization request data only via PAR". The §5 value
+  is published as `false` in both documents — accurate, and there is no switch to make it true, which
+  is why [FAPI 2.0's server-wide requirement](#fapi-20-security-profile) still fails. (An earlier
+  version of that FAPI row said RFC 9126 defines no server metadata for this. It does, in §5; the row
+  now says so.)
+* **Spring Authorization Server has no setting for it either.** It travels as
+  `settings.client.require-pushed-authorization-requests`, read by `PushedAuthorizationRequiredFilter`,
+  and is carried through [the registration endpoint](#dynamic-client-registration-rfc-7591) beside the
+  request object settings so a client can register for it the way §6 describes.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -2127,7 +2179,7 @@ requests, PKCE, sender-constrained tokens, and client authentication that involv
 
 | Requirement | Why it fails |
 |---|---|
-| The server requires pushed authorization requests | `ClientSettings` has no `require_pushed_authorization_requests`, so a client can always fall back to an ordinary request |
+| The server requires pushed authorization requests | The profile wants every client rejected, not the willing ones. [The client-level lock](#require_pushed_authorization_requests) is implemented; RFC 9126 §5's server-wide half is published as `false` with no switch to make it true |
 | All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
 
 A third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
@@ -2146,8 +2198,9 @@ server-wide value read live from `RequestObjectPolicy`, and a count of the clien
 [set it for themselves](#require_signed_request_object-as-client-metadata). Reading the two rows
 together is the point — FAPI 2.0 §5.3.1 says the server *"shall reject authorization requests sent
 without [RFC9126]"*, which is the same lock one specification along, and that is the one this server
-cannot turn: `ClientSettings` has no `require_pushed_authorization_requests` (checked against the
-7.1.1 sources) and RFC 9126 defines no server metadata for it either.
+cannot turn for everybody: `ClientSettings` has no `require_pushed_authorization_requests` of its own
+(checked against the 7.1.1 sources), so the setting here is a custom one, and RFC 9126 §5's
+server-wide value is published as `false`.
 
 Per client, only `pkce-fapi-client` — registered specifically to the profile — meets every
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
@@ -2401,6 +2454,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── UnsignedRequestObjectController.java  /jar-none
 │   ├── RequiredRequestObjectController.java  /jar-required
 │   ├── ClientRequiredRequestObjectController.java  /jar-client-required
+│   ├── ParRequiredController.java       /par-required
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2452,6 +2506,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── UnsignedRequestObjectService.java  six request objects, five unsigned
 │   ├── RequiredRequestObjectService.java  four requests, under both settings
 │   ├── ClientRequiredRequestObjectService.java  registers two clients, then asks them
+│   ├── ParRequiredService.java          five ways to start one request
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2567,6 +2622,10 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     │                                    request object settings a registration carries
     ├── ClientRequiredAttempt.java       one request to a client that asked for the lock
     ├── ClientRequiredRun.java           the six, and the registration behind two of them
+    ├── PushedAuthorizationRequiredFilter.java  refuses a request that did not arrive
+    │                                    through the pushed endpoint
+    ├── ParRequiredAttempt.java          one request, and which check refused it
+    ├── ParRequiredRun.java              the five, and the published server-wide value
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
