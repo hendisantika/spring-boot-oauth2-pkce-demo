@@ -515,14 +515,19 @@ each addressed to whoever asked.
 
 ![The signed response](docs/images/94-introspection-signed-response.png)
 
-**94. JARM** — the same authorization asked for five ways. Two answers are signed, one is tampered
+**94. JARM** — the same authorization asked for seven ways. Four answers are signed, one is tampered
 with, and two arrive in the clear.
 
-![Five answers](docs/images/95-jarm-five-answers.png)
+![Seven answers](docs/images/95-jarm-seven-answers.png)
 
 **95. JARM** — inside the signed answers: a code and a refusal, each with `iss`, `aud` and `exp`.
 
 ![The signed claims](docs/images/96-jarm-signed-claims.png)
+
+**96. JARM** — the three deliveries: after the hash, in a form the browser posts, and a mode this
+server does not read.
+
+![The delivery modes](docs/images/97-jarm-delivery-modes.png)
 
 ## Refresh tokens and public clients
 
@@ -1387,7 +1392,9 @@ The same authorization is asked for five ways:
 | Asked for a signed response | `jwt` | verifies | one `response` parameter |
 | A refusal, signed the same way | `jwt` | verifies | `error: invalid_scope`, inside the JWT |
 | The signed answer, with the code changed | `jwt` | **fails** | — |
-| Asked for a mode nothing here implements | `form_post` | none | `code`, `state`, `iss` |
+| Delivered after the hash | `fragment.jwt` | verifies | `#response=…` |
+| Delivered in a form the browser posts | `form_post.jwt` | verifies | a self-submitting page; the client read it from its own request body |
+| Asked for a mode nothing here implements | `fragment` | none | `code`, `state`, `iss` |
 
 Notes:
 
@@ -1405,9 +1412,18 @@ Notes:
   same damage either way.
 * **Tampering fails on the signature, not the contents.** The fourth row is the second row's answer
   with one claim rewritten — right issuer, right audience, plausible code, and refused.
-* **Two delivery modes are missing, and only the delivery.** JARM also defines `fragment.jwt` and
-  `form_post.jwt`, which differ in how the JWT reaches the client rather than in what it contains.
-  This implements `jwt` and `query.jwt`, the pair that means "on the query string".
+* **Three deliveries, one JWT.** The signed response is identical in every mode; what differs is
+  where it travels. `query.jwt` (and plain `jwt`, the same thing for this flow) puts it on the query
+  string, where it reaches the client's server in the request line and therefore its access log.
+  `fragment.jwt` puts it after the `#`, which a browser never sends to that server at all.
+  `form_post.jwt` puts it in no URL whatsoever — the authorization server answers with a page that
+  submits itself, and the client reads its own request body. Length is the practical reason for the
+  last one: a signed response is roughly a kilobyte, and URLs have limits that vary by browser and by
+  every proxy in between.
+* **The form post arrives without a CSRF token**, because it is submitted by a page the authorization
+  server wrote — which is the shape of any response arriving from a server elsewhere. `/jarm/callback`
+  is exempted for that reason, and it is the one endpoint here that reads a JARM response out of a
+  body rather than a URL.
 
 ## JWT-secured authorization requests (JAR)
 
