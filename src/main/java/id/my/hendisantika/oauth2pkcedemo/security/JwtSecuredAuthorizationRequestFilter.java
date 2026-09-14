@@ -76,6 +76,23 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     public static final Set<String> SUPPORTED_ENCRYPTION_ALGS =
             Set.of("RSA-OAEP-256", "RSA-OAEP-512");
 
+    /**
+     * OpenID Connect Dynamic Client Registration: the JWE {@code enc} a client declares it may
+     * encrypt request objects with. The other half of the pair, and registered the same way.
+     */
+    public static final String ENCRYPTION_ENC_SETTING = "settings.client.request-object-encryption-enc";
+
+    /**
+     * The registration spec's own default rather than one invented here: "if
+     * request_object_encryption_alg is specified, the default request_object_encryption_enc value is
+     * A128CBC-HS256".
+     */
+    public static final String DEFAULT_ENCRYPTION_ENC = "A128CBC-HS256";
+
+    /** The content encryption methods this server will decrypt a request object with. */
+    public static final Set<String> SUPPORTED_ENCRYPTION_METHODS =
+            Set.of("A128CBC-HS256", "A256GCM");
+
     /** Claims that carry the JWT's own identity rather than authorization request parameters. */
     private static final List<String> JWT_CLAIMS = List.of("iss", "aud", "exp", "iat", "nbf", "jti");
 
@@ -129,9 +146,7 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
         JWTClaimsSet claims;
         try {
-            claims = verify(
-                    decryptIfEncrypted(requestObject,
-                            registered(clientId, ENCRYPTION_ALG_SETTING, DEFAULT_ENCRYPTION_ALG)),
+            claims = verify(decryptIfEncrypted(requestObject, clientId),
                     registered(clientId, SIGNING_ALG_SETTING, DEFAULT_SIGNING_ALG));
         } catch (IllegalArgumentException ex) {
             log.debug("Rejecting request object: {}", ex.getMessage());
@@ -154,10 +169,10 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      * algorithm is not a promise to always encrypt: OpenID Connect Dynamic Client Registration says
      * in as many words that the client may still send unencrypted request objects.
      *
-     * @param expectedAlgorithm the JWE {@code alg} this client registered
+     * @param clientId whose registration says which algorithms its request objects may arrive with
      * @return the signed request object, whether it arrived wrapped or not
      */
-    private String decryptIfEncrypted(String requestObject, String expectedAlgorithm) {
+    private String decryptIfEncrypted(String requestObject, String clientId) {
         if (requestObject.split("\\.").length != 5) {
             return requestObject;
         }
@@ -168,6 +183,19 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         } catch (ParseException ex) {
             throw new IllegalArgumentException("The request object is not a well-formed JWE");
         }
+
+        String registeredAlg = registeredSetting(clientId, ENCRYPTION_ALG_SETTING);
+        String registeredEnc = registeredSetting(clientId, ENCRYPTION_ENC_SETTING);
+        if (registeredEnc != null && registeredAlg == null) {
+            // The registration spec: when request_object_encryption_enc is included,
+            // request_object_encryption_alg MUST also be provided. A registration that names a
+            // content encryption method and nothing to wrap its key with is incomplete, and an
+            // incomplete registration is not one this server can honour.
+            throw new IllegalArgumentException("This client registered " + registeredEnc
+                    + " and no algorithm to wrap the key with");
+        }
+        String expectedAlgorithm = registeredAlg == null ? DEFAULT_ENCRYPTION_ALG : registeredAlg;
+        String expectedMethod = registeredEnc == null ? DEFAULT_ENCRYPTION_ENC : registeredEnc;
 
         String algorithm = String.valueOf(encrypted.getHeader().getAlgorithm());
         if (!algorithm.equals(expectedAlgorithm)) {
@@ -182,6 +210,16 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
             // an algorithm left out of the supported set is left out deliberately.
             throw new IllegalArgumentException("This server does not decrypt " + algorithm
                     + " request objects");
+        }
+
+        String method = String.valueOf(encrypted.getHeader().getEncryptionMethod());
+        if (!method.equals(expectedMethod)) {
+            throw new IllegalArgumentException("The request object's content is encrypted with "
+                    + method + ", and this client registered " + expectedMethod);
+        }
+        if (!SUPPORTED_ENCRYPTION_METHODS.contains(method)) {
+            throw new IllegalArgumentException("This server does not decrypt " + method
+                    + " content");
         }
 
         try {
@@ -200,13 +238,19 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      * and an unregistered client is not one whose request objects mean anything.
      */
     private String registered(String clientId, String setting, String fallback) {
+        String configured = registeredSetting(clientId, setting);
+        return configured == null ? fallback : configured;
+    }
+
+    /** What this client registered for one setting, or null where it registered nothing. */
+    private String registeredSetting(String clientId, String setting) {
         RegisteredClient client = clientId == null ? null
                 : this.registeredClients.findByClientId(clientId);
         if (client == null) {
-            return fallback;
+            return null;
         }
         Object configured = client.getClientSettings().getSetting(setting);
-        return configured == null ? fallback : String.valueOf(configured);
+        return configured == null ? null : String.valueOf(configured);
     }
 
     /**

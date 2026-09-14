@@ -268,6 +268,30 @@ app:
     scopes:
       - openid
       - profile
+  # Registered to encrypt the request object's content with A256GCM rather than the default.
+  jar-gcm-client:
+    registration-id: pkce-jar-gcm-client
+    client-id: pkce-jar-gcm-client
+    client-name: PKCE JAR A256GCM Client
+    scopes:
+      - openid
+      - profile
+  # Registered for A192CBC-HS384, which is a real JWA method this server does not offer.
+  jar-unsupported-enc-client:
+    registration-id: pkce-jar-unsupported-enc-client
+    client-id: pkce-jar-unsupported-enc-client
+    client-name: PKCE JAR Unsupported enc Client
+    scopes:
+      - openid
+      - profile
+  # Registered with an enc and no alg, which the registration spec does not allow.
+  jar-enc-only-client:
+    registration-id: pkce-jar-enc-only-client
+    client-id: pkce-jar-enc-only-client
+    client-name: PKCE JAR enc-without-alg Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

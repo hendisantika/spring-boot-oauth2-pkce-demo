@@ -42,6 +42,9 @@ public record DemoProperties(String issuerUri,
                              Client jarPsClient,
                              Client jarOaep512Client,
                              Client jarRsa15Client,
+                             Client jarGcmClient,
+                             Client jarUnsupportedEncClient,
+                             Client jarEncOnlyClient,
                              List<DemoUser> demoUsers) {
 
     /**

@@ -136,9 +136,19 @@ public final class JarRequestSigner {
      * registered algorithm a choice a client could otherwise change from one request to the next.
      */
     public String encrypt(String signedRequestObject, RSAKey serverKey, JWEAlgorithm algorithm) {
+        return encrypt(signedRequestObject, serverKey, algorithm, EncryptionMethod.A128CBC_HS256);
+    }
+
+    /**
+     * The two halves named separately. The {@code alg} decides how the content encryption key
+     * travels; the {@code enc} decides what that key then does to the payload - and they are chosen,
+     * and registered, independently.
+     */
+    public String encrypt(String signedRequestObject, RSAKey serverKey, JWEAlgorithm algorithm,
+                          EncryptionMethod method) {
         try {
             JWEObject encrypted = new JWEObject(
-                    new JWEHeader.Builder(algorithm, EncryptionMethod.A128CBC_HS256)
+                    new JWEHeader.Builder(algorithm, method)
                             .keyID(serverKey.getKeyID())
                             // So the server knows a JWT is inside rather than arbitrary bytes.
                             .contentType("JWT")

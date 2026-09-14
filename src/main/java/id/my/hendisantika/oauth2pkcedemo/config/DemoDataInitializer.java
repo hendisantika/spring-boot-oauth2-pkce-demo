@@ -450,43 +450,64 @@ public class DemoDataInitializer {
     }
 
     /**
-     * Two clients that registered a JWE algorithm for their request objects: one the server offers
-     * and one it does not. Neither publishes a key of its own - request objects are encrypted to the
-     * server's key, so what is registered here is only how the wrapping is done.
+     * The clients that registered something about how their request objects are encrypted. None
+     * publishes a key of its own - request objects are encrypted to the server's key, so what is
+     * registered here is only how the wrapping and the content encryption are done.
      */
     void seedRequestEncryptionClients(RegisteredClientRepository registeredClientRepository,
                                       DemoProperties properties) {
         seedRequestEncryptionClient(registeredClientRepository, properties,
-                properties.jarOaep512Client(), "RSA-OAEP-512");
+                properties.jarOaep512Client(), "RSA-OAEP-512", null);
         seedRequestEncryptionClient(registeredClientRepository, properties,
-                properties.jarRsa15Client(), "RSA1_5");
+                properties.jarRsa15Client(), "RSA1_5", null);
+        seedRequestEncryptionClient(registeredClientRepository, properties,
+                properties.jarGcmClient(), "RSA-OAEP-256", "A256GCM");
+        seedRequestEncryptionClient(registeredClientRepository, properties,
+                properties.jarUnsupportedEncClient(), "RSA-OAEP-256", "A192CBC-HS384");
+        // The registration spec says this one is not allowed to exist: an enc with no alg beside it.
+        seedRequestEncryptionClient(registeredClientRepository, properties,
+                properties.jarEncOnlyClient(), null, "A256GCM");
     }
 
+    /**
+     * @param encryptionAlg the JWE {@code alg}, or null for the client that registers a method and
+     *                      no algorithm to wrap its key with
+     * @param encryptionEnc the JWE {@code enc}, or null to leave it at the registered default
+     */
     private void seedRequestEncryptionClient(RegisteredClientRepository registeredClientRepository,
                                              DemoProperties properties, DemoProperties.Client client,
-                                             String encryptionAlg) {
+                                             String encryptionAlg, String encryptionEnc) {
         if (registeredClientRepository.findByClientId(client.clientId()) != null) {
             return;
         }
+        ClientSettings.Builder settings = ClientSettings.builder()
+                .requireProofKey(true)
+                .requireAuthorizationConsent(false);
+        if (encryptionAlg != null) {
+            settings.setting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ALG_SETTING,
+                    encryptionAlg);
+        }
+        if (encryptionEnc != null) {
+            settings.setting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ENC_SETTING,
+                    encryptionEnc);
+        }
+
         RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId(client.clientId())
                 .clientName(client.clientName())
                 .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
-                .clientSettings(ClientSettings.builder()
-                        .requireProofKey(true)
-                        .requireAuthorizationConsent(false)
-                        .setting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ALG_SETTING,
-                                encryptionAlg)
-                        .build())
+                .clientSettings(settings.build())
                 .tokenSettings(TokenSettings.builder()
                         .accessTokenTimeToLive(Duration.ofMinutes(10))
                         .build());
         client.scopes().forEach(builder::scope);
 
         registeredClientRepository.save(builder.build());
-        log.info("Registered [{}] for {} request objects", client.clientId(), encryptionAlg);
+        log.info("Registered [{}] for {} / {} request objects", client.clientId(),
+                encryptionAlg == null ? "no alg" : encryptionAlg,
+                encryptionEnc == null ? "the default enc" : encryptionEnc);
     }
 
     /**
