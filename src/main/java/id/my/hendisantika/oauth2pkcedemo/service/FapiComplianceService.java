@@ -50,6 +50,14 @@ public class FapiComplianceService {
      */
     private static final Set<String> ACCEPTED_SIGNING_ALGS = Set.of("PS256", "ES256", "EdDSA");
 
+    /**
+     * The one algorithm FAPI names for JWE. Section 8.6.1 of FAPI 1.0 Advanced is a single sentence
+     * - "For JWE, both clients and authorization servers shall not use the RSA1_5 algorithm" - so
+     * unlike its treatment of JWS this is a prohibition rather than a list to choose from, and
+     * everything else a client might register passes.
+     */
+    private static final String FORBIDDEN_ENCRYPTION_ALG = "RSA1_5";
+
     private final RegisteredClientRepository registeredClientRepository;
     private final AuthorizationServerSettings settings;
     /** The handler that actually sends authorization responses, so the check below is about it. */
@@ -236,6 +244,62 @@ public class FapiComplianceService {
         return FapiCheck.pass(requirement, reference, "Registered " + algorithm);
     }
 
+    /**
+     * The encryption half, which is a different shape of requirement from the signing half. FAPI 1.0
+     * Advanced section 8.6.1 forbids exactly one algorithm and says nothing about the rest, and FAPI
+     * 2.0 carries no JWE requirement at all - its own comparison table gives the reason, that it
+     * keeps ID tokens out of the front channel and so needs no encryption there.
+     */
+    private static FapiCheck requestObjectEncryptionCheck(RegisteredClient client) {
+        String requirement = "Request objects are not encrypted with RSA1_5";
+        String reference = "FAPI 1.0 Advanced \u00a78.6.1; not carried into FAPI 2.0";
+
+        Object registered = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ALG_SETTING);
+        Object registeredMethod = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ENC_SETTING);
+
+        if (registered == null) {
+            if (registeredMethod != null) {
+                // OpenID Connect Registration: "When request_object_encryption_enc is included,
+                // request_object_encryption_alg MUST also be provided." Such a client has declared
+                // that it encrypts without saying what wraps the key, and this server refuses its
+                // encrypted request objects rather than guessing - so no JWE alg is ever agreed with
+                // it, and there is none for this row to judge.
+                return FapiCheck.notApplicable(requirement, reference,
+                        "Registered " + registeredMethod + " and no request_object_encryption_alg, "
+                                + "which the registration spec does not allow. This server refuses "
+                                + "its encrypted request objects, so no algorithm is ever agreed");
+            }
+            // The registration spec is explicit about the omitted case, and it is not a default the
+            // way the signing one is: "the RP is not declaring whether it might encrypt any Request
+            // Objects." Encryption here is opt-in per request, and the algorithm this server would
+            // fall back to if one did arrive encrypted is one the profile permits anyway.
+            return FapiCheck.notApplicable(requirement, reference,
+                    "No request_object_encryption_alg registered, which the registration spec reads "
+                            + "as not declaring whether it might encrypt at all. An encrypted "
+                            + "request object from it would be unwrapped as "
+                            + JwtSecuredAuthorizationRequestFilter.DEFAULT_ENCRYPTION_ALG
+                            + ", which this profile permits");
+        }
+
+        String algorithm = String.valueOf(registered);
+        if (FORBIDDEN_ENCRYPTION_ALG.equals(algorithm)) {
+            return FapiCheck.fail(requirement, reference,
+                    "Registered " + algorithm + ", the one algorithm the profile names. This server "
+                            + "does not decrypt it either, so the prohibition and this server's "
+                            + "supported list happen to agree - the request objects are refused "
+                            + "before the profile is consulted");
+        }
+        if (!JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS.contains(algorithm)) {
+            return FapiCheck.pass(requirement, reference,
+                    "Registered " + algorithm + ", which the profile does not forbid - but this "
+                            + "server does not decrypt it, so every encrypted request object it "
+                            + "sends is refused");
+        }
+        return FapiCheck.pass(requirement, reference, "Registered " + algorithm);
+    }
+
     private static List<FapiCheck> checksFor(RegisteredClient client) {
         List<FapiCheck> checks = new ArrayList<>();
 
@@ -264,6 +328,7 @@ public class FapiComplianceService {
                         + "confirmed from here"));
 
         checks.add(requestObjectAlgorithmCheck(client));
+        checks.add(requestObjectEncryptionCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
             checks.add(FapiCheck.of(!client.getTokenSettings().isReuseRefreshTokens(),
