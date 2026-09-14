@@ -170,6 +170,24 @@ public class FapiComplianceService {
                         + "a server that accepts them - so this is a gap this demo keeps on purpose, "
                         + "which is not the same as one it has not noticed")));
 
+        // The encryption half of the same idea, and it passes - which is worth having beside the one
+        // that does not. §8.6.1 binds both sides the way §8.6 does, but the demonstration this demo
+        // needed here is the refusal, so RSA1_5 never had to be in the supported set.
+        boolean advertisesForbidden = JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS
+                .contains(FORBIDDEN_ENCRYPTION_ALG);
+        checks.add(FapiCheck.of(!advertisesForbidden,
+                "Advertised request object encryption algorithms exclude RSA1_5",
+                "FAPI 1.0 Advanced \u00a78.6.1; not carried into FAPI 2.0",
+                ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ALG_VALUES_SUPPORTED + " is "
+                        + JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS.stream()
+                        .sorted().toList()
+                        + (advertisesForbidden
+                        ? ", and " + FORBIDDEN_ENCRYPTION_ALG + " is in it, which §8.6.1 forbids "
+                        + "authorization servers as well as clients"
+                        : ". §8.6.1 binds both sides the way §8.6 does, and a client below registered "
+                        + FORBIDDEN_ENCRYPTION_ALG + " and fails its own row - what that page "
+                        + "demonstrates is the refusal, so this server never needed to support it")));
+
         checks.add(FapiCheck.of(properties.issuerUri().startsWith("https://"),
                 "All endpoints are served over TLS", "FAPI 2.0 §5.3",
                 "The issuer is " + properties.issuerUri()
