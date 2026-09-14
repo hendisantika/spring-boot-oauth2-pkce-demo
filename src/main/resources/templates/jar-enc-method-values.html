@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('request_object_encryption_enc_values_supported')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Two lists multiply; a registration does not</h1>
+    <p class="lead">
+        <code>request_object_encryption_enc_values_supported</code> is the last of the three lists
+        RFC 9101 §4 names. It is advertised separately from
+        <a th:href="@{/jar-enc-alg-values}">the algorithm list</a>, and a client picks one value from
+        each — so the two together offer every pair. Its own registration names one pair and no
+        other. This page sends all of them, from two clients, and marks the single cell each may
+        occupy.
+    </p>
+
+    <div class="alert" th:if="${encryptionMethodValuesError}"
+         th:text="${encryptionMethodValuesError}">error</div>
+
+    <div class="card">
+        <h2>What the document advertises</h2>
+        <table style="margin-top:12px">
+            <tr th:each="entry : ${advertised}">
+                <th style="width:46%"><code th:text="${entry.key}">-</code></th>
+                <td style="overflow-wrap:anywhere"><code th:text="${entry.value}">-</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Every advertised pair, twice over, plus one method the lists leave out.
+        </p>
+        <form th:action="@{/jar-enc-method-values}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send every combination</button>
+        </form>
+    </div>
+
+    <div th:if="${run != null}">
+        <div class="card" th:each="grid : ${run.grids}">
+            <h2 th:text="${grid.clientId}">-</h2>
+            <p class="hint">
+                Registered <code th:text="${grid.registeredAlg}">-</code> and
+                <code th:text="${grid.registeredEnc}">-</code><span
+                    th:if="${grid.theMethodWasImplied()}">, which this server reads as
+                <code th:text="${grid.resolvedEnc}">-</code>. That method is OpenID Connect
+                Registration §2's default for a client that registered an algorithm; reading a client
+                that registered <em>neither</em> as holding both defaults is
+                <a th:href="@{/jar-enc-alg}">this server's own tightening</a></span>.
+            </p>
+            <table style="margin-top:12px">
+                <thead>
+                <tr>
+                    <th style="width:28%">alg ↓ / enc →</th>
+                    <th th:each="enc : ${run.encs}" th:text="${enc}">-</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="alg : ${run.algs}">
+                    <th><code th:text="${alg}">-</code></th>
+                    <td th:each="enc : ${run.encs}">
+                        <span th:with="cell=${grid.cell(alg, enc)}"
+                              th:text="${cell == null} ? '—' : ${cell.shortOutcome()}"
+                              th:style="${cell != null and cell.accepted}
+                                        ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+            <p class="hint" style="margin-top:10px"
+               th:text="'One of the ' + ${run.combinations()} + ' advertised pairs, and this client '
+                        + 'may use ' + ${grid.accepted()} + '.'">-</p>
+        </div>
+
+        <div class="card">
+            <h2>And one the lists leave out</h2>
+            <table>
+                <tr>
+                    <th style="width:28%">Client</th>
+                    <td><code th:text="${run.offTheListClientId}">-</code></td>
+                </tr>
+                <tr>
+                    <th>Sent</th>
+                    <td><code th:text="${run.offTheList.alg} + ' / ' + ${run.offTheList.enc}">-</code>
+                        <span class="hint" style="display:block">
+                            Registered by this client, and the method is on neither list.
+                        </span></td>
+                </tr>
+                <tr>
+                    <th>What the server did</th>
+                    <td><span th:text="${run.offTheList.outcome}" style="color:#b3261e">-</span></td>
+                </tr>
+            </table>
+            <p class="hint" style="margin-top:12px" th:if="${run.everyClientHadExactlyOneCell()}">
+                Each grid has exactly one accepted cell out of
+                <span th:text="${run.combinations()}">-</span>, and the row below it is refused by the
+                list rather than by a registration.
+            </p>
+            <p style="margin-top:12px">
+                <a class="btn secondary" th:href="@{/jar-enc-method-values/reset}">Clear</a>
+            </p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The grids are the page.</strong> The two lists advertise every pair between them,
+            and each client may use one. A client reading discovery and choosing freely from both
+            lists has three ways out of four to be wrong, and the wrongness is not about
+            cryptography — every cell here is a well-formed JWE this server could open.
+        </p>
+        <p class="hint">
+            <strong>One client never registered a method at all.</strong>
+            <code>pkce-demo-client</code> registered neither half, and still has a pair: OpenID
+            Connect Registration §2 says the method defaults to <code>A128CBC-HS256</code> when an
+            algorithm is registered — which that client did not do either, so both halves of its pair
+            come from this server reading silence as the defaults rather than as permission. Its
+            accepted cell is the top left, and nothing about that is visible in the lists.
+        </p>
+        <p class="hint">
+            <strong>The refusals say which half was wrong.</strong> A cell marked
+            <em>wrong alg</em> was refused before the content encryption mattered; one marked
+            <em>wrong enc</em> got past the algorithm and failed on the method. Two checks in
+            sequence, and a client debugging from a single "invalid_request_object" would not know
+            which of its two registrations to look at.
+        </p>
+        <p class="hint">
+            <strong>Off the list is a third kind of no.</strong> The last row sends
+            <code>A192CBC-HS384</code> from the client that registered it — so it is not a mismatch.
+            It is refused because the method is on neither list, which is what
+            <a th:href="@{/jar-enc-method}">the method page</a> shows from the registration's side
+            and this one shows from the document's.
+        </p>
+        <p class="hint">
+            <strong>That completes RFC 9101 §4's three lists.</strong>
+            <a th:href="@{/jar-alg-values}">Signing algorithms</a>,
+            <a th:href="@{/jar-enc-alg-values}">encryption algorithms</a> and the methods here are all
+            published, all derived from the constants the filter enforces, and all three were either
+            absent or wrong a few rounds ago.
+        </p>
+    </div>
+</main>
+</body>
+</html>
