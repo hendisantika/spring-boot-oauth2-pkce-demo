@@ -55,6 +55,15 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     public static final String REQUEST_OBJECT_TYPE = "oauth-authz-req+jwt";
 
     /**
+     * RFC 9101 section 5.2 passes a request object by reference: the client hands over a URL and the
+     * authorization server fetches it. This server does not implement that, which is what it
+     * publishes as {@code request_uri_parameter_supported: false}.
+     */
+    public static final String REQUEST_URI_NOT_FETCHED =
+            "This server does not fetch request objects by reference; "
+                    + ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + " is false";
+
+    /**
      * RFC 9101 section 10.1: the algorithm a client says it will sign request objects with. Spring
      * Authorization Server has no setting for it, so it travels as a custom one on the registration.
      */
@@ -168,6 +177,18 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         String requestObject = request.getParameter(REQUEST);
         if (!this.authorizationEndpointMatcher.matches(request)) {
             filterChain.doFilter(request, response);
+            return;
+        }
+
+        String requestUri = request.getParameter(OAuth2ParameterNames.REQUEST_URI);
+        if (StringUtils.hasText(requestUri) && requestUri.regionMatches(true, 0, "http", 0, 4)) {
+            // A request_uri that is a URL to fetch, rather than a reference the pushed endpoint
+            // handed out. Both arrive in the same parameter and mean entirely different things, and
+            // without this the client gets the authorization server's failed lookup of a reference
+            // it never asked for. The test is the scheme rather than the shape of the other kind:
+            // RFC 9126 section 4 leaves the format of a pushed request_uri to the server.
+            log.debug("Rejecting a request_uri this server would have to fetch: {}", requestUri);
+            writeError(response, OAuth2ErrorCodes.INVALID_REQUEST, REQUEST_URI_NOT_FETCHED);
             return;
         }
 

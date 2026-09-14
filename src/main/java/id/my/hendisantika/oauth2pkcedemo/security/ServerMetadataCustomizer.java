@@ -50,6 +50,20 @@ public final class ServerMetadataCustomizer {
     public static final String REQUIRE_PUSHED_AUTHORIZATION_REQUESTS =
             "require_pushed_authorization_requests";
 
+    /** OpenID Connect Discovery section 3: the {@code request} parameter, which this server reads. */
+    public static final String REQUEST_PARAMETER_SUPPORTED = "request_parameter_supported";
+
+    /**
+     * OpenID Connect Discovery section 3: the {@code request_uri} parameter, meaning a URL the
+     * server fetches the request object from. This one does not, so the value is false - and
+     * <a href="https://www.rfc-editor.org/rfc/rfc9126#section-5">RFC 9126 section 5</a> says a
+     * request_uri obtained from the pushed endpoint is usable "regardless" of it.
+     */
+    public static final String REQUEST_URI_PARAMETER_SUPPORTED = "request_uri_parameter_supported";
+
+    /** OpenID Connect Discovery section 3, and moot where nothing is fetched by reference. */
+    public static final String REQUIRE_REQUEST_URI_REGISTRATION = "require_request_uri_registration";
+
     private final AuthorizationServerSettings settings;
     private final DemoProperties properties;
 
@@ -110,6 +124,12 @@ public final class ServerMetadataCustomizer {
         // only via PAR", read live so the document describes the server rather than its defaults.
         claim.accept(REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
                 this.pushedAuthorizationPolicy.requirePushedRequests());
+        // OpenID Connect Discovery section 3. Publishing these is not decoration: omitted, they
+        // default to request_parameter_supported=false and request_uri_parameter_supported=true,
+        // which describes this server backwards on both counts.
+        claim.accept(REQUEST_PARAMETER_SUPPORTED, true);
+        claim.accept(REQUEST_URI_PARAMETER_SUPPORTED, false);
+        claim.accept(REQUIRE_REQUEST_URI_REGISTRATION, false);
         // The lists are edited rather than appended to: the OIDC document already declares openid,
         // and a document that names a value twice is describing itself carelessly.
         grantTypes.accept(values ->
