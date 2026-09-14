@@ -15,10 +15,16 @@ public record MetadataEntry(String name,
                             String value,
                             String requirement,
                             String definedBy,
-                            boolean inBothDocuments) implements Serializable {
+                            boolean inBothDocuments,
+                            String demonstratedAt) implements Serializable {
 
     /** A field RFC 8414 section 2 says a server must publish. */
     public boolean required() {
         return "REQUIRED".equals(requirement);
+    }
+
+    /** Whether somewhere in this demo shows what the value does, rather than only what it says. */
+    public boolean hasDemonstration() {
+        return demonstratedAt != null && !demonstratedAt.isBlank();
     }
 }

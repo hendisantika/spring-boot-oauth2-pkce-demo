@@ -82,12 +82,24 @@ public class AuthorizationServerMetadataService {
             Map.entry("check_session_iframe", "OpenID Connect Session Management §3.3"),
             Map.entry("end_session_endpoint", "OpenID Connect RP-Initiated Logout"));
 
+    /**
+     * Pages that show a published value doing something, keyed by the field they are about. A
+     * document says what a server claims; these say what it does about the claim.
+     */
+    private static final Map<String, String> DEMONSTRATED_BY = Map.of(
+            "require_pushed_authorization_requests", "/par-server-required");
+
     private final RestClient restClient;
     private final DemoProperties properties;
 
     public AuthorizationServerMetadataService(DemoProperties properties) {
         this.properties = properties;
         this.restClient = RestClient.create();
+    }
+
+    /** The pages rows are linked to, so a test can check that none of them is a dead end. */
+    public static Map<String, String> demonstrations() {
+        return DEMONSTRATED_BY;
     }
 
     /**
@@ -135,7 +147,8 @@ public class AuthorizationServerMetadataService {
                 render(document.get(name)),
                 REQUIREMENT.getOrDefault(name, DEFINED_BY.containsKey(name) ? "-" : "OPTIONAL"),
                 DEFINED_BY.getOrDefault(name, "RFC 8414 §2"),
-                otherDocument.containsKey(name))));
+                otherDocument.containsKey(name),
+                DEMONSTRATED_BY.get(name))));
         return entries;
     }
 

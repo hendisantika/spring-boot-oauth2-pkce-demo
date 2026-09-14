@@ -85,6 +85,9 @@
                     <span class="hint" style="display:block" th:unless="${entry.inBothDocuments}">
                         not in the OpenID document
                     </span>
+                    <span class="hint" style="display:block" th:if="${entry.hasDemonstration()}">
+                        <a th:href="${entry.demonstratedAt}">see what it does</a>
+                    </span>
                 </td>
                 <td>
                     <span th:text="${entry.requirement}"
