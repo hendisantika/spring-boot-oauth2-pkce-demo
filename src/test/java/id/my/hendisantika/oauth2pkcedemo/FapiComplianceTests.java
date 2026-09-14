@@ -139,6 +139,34 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         });
     }
 
+    /**
+     * The row no FAPI profile asks for, kept because thirty-two of the client rows lean on it. It
+     * reads the switch live, so it is asserted in both positions.
+     */
+    @Test
+    void theRequestUriRegistrationRowTracksTheSwitchAndNamesItsSpec() {
+        assertThat(requestUriPolicy.requireRegistration()).isTrue();
+        assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("Fetched request_uris must be pre-registered");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+            assertThat(check.reference()).contains("RFC 9101").contains("no FAPI profile names it");
+            assertThat(check.observed())
+                    .contains("does not point to an unexpected location")
+                    .contains("Discovery makes the default false")
+                    .containsPattern("\\d+ of the \\d+ clients below have registered a URL");
+        });
+
+        boolean previous = requestUriPolicy.requireRegistration(false);
+        try {
+            assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+                assertThat(check.requirement()).contains("Fetched request_uris must be pre-registered");
+                assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+            });
+        } finally {
+            requestUriPolicy.requireRegistration(previous);
+        }
+    }
+
     @Test
     void theMechanismsTheProfileMandatesAreAllPresent() {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
