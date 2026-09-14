@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('DPoP nonce')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Proving it now, not earlier</h1>
+    <p class="lead">
+        RFC 9449 section 9. A <a th:href="@{/dpop}">DPoP proof</a> says the caller holds a key. It
+        does not say <em>when</em> they held it: a proof made this morning is as good as one made a
+        second ago, so anyone who captured one has a window to use it in. A server that cares closes
+        that window by handing out a <strong>nonce</strong> and insisting the next proof echo it back.
+    </p>
+
+    <div class="alert" th:if="${nonceError}" th:text="${nonceError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The probe gets a DPoP-bound token and then calls a resource that demands a nonce five
+            times: without one, with the one it was just given, with that same one again, with one
+            nobody issued, and with the fresh one the accepted call came back with.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Client</th>
+                <td><code th:text="${clientId}">pkce-dpop-nonce-client</code></td>
+            </tr>
+            <tr>
+                <th>Resource</th>
+                <td><code th:text="${apiUri}">-</code>
+                    <span class="hint" style="display:block">
+                        DPoP only, and every proof must carry a nonce issued in the last
+                        <code th:text="${lifetimeSeconds}">300</code> seconds.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/dpop-nonce}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Call it five times</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The key and the token</h2>
+        <table>
+            <tr>
+                <th style="width:26%">Key thumbprint</th>
+                <td><code th:text="${run.thumbprint}">-</code></td>
+            </tr>
+            <tr>
+                <th>Token's cnf.jkt</th>
+                <td><code th:text="${run.boundTo}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${run.boundTo == run.thumbprint}">
+                        The same value: the proof on the token request is what bound it.
+                    </span></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five calls</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Proof carried</th>
+                <th style="width:16%">Answer</th>
+                <th>And came back with</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block"
+                          th:text="${attempt.nonceSent} == null ? 'no nonce claim' : ${attempt.nonceSent}">-</span>
+                </td>
+                <td><code th:text="${attempt.outcome()}"
+                          th:style="${attempt.isAccepted()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code></td>
+                <td>
+                    <span class="hint" style="display:block">
+                        DPoP-Nonce: <code th:text="${attempt.nonceGivenBack}">-</code>
+                    </span>
+                    <span class="hint" style="display:block" th:if="${attempt.challenge != null}"
+                          th:text="${attempt.challenge}">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            The second row is the loop closing: refused, handed a nonce, new proof, accepted. The
+            fifth is why it only has to close once — every answer carries a nonce for next time, the
+            accepted ones included, so a client that keeps the last one it saw is never refused
+            again.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/dpop-nonce/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Neither half of this exists in Spring Security.</strong> The strings
+            <code>use_dpop_nonce</code> and <code>DPoP-Nonce</code> appear nowhere in its resource
+            server, and the proof verifier in Spring Authorization Server never looks at a
+            <code>nonce</code> claim — it checks the signature, the method, the URI, the token hash,
+            the identifier and the age, and stops there. The challenge, the store and the check on
+            this page are all this demo's.
+        </p>
+        <p class="hint">
+            <strong>What a nonce actually buys.</strong> Everything else in a proof is fixed by the
+            client: it chooses the identifier, the timestamp, the method and the URI, so it can make
+            a proof at any moment and keep it. The nonce is the one value it cannot predict, which
+            turns "this caller has the key" into "this caller had the key just now". That matters for
+            a proof that leaks in a log or a crash dump, and for a client whose machine an attacker
+            has only briefly.
+        </p>
+        <p class="hint">
+            <strong>Single use is this server's choice, not the specification's.</strong> RFC 9449
+            leaves the lifetime and the reuse policy entirely to whoever issues the nonce; one good
+            until it expires is equally conformant, and busier servers do exactly that. Spending each
+            one here makes the third row say something rather than repeat the second.
+        </p>
+        <p class="hint">
+            <strong>The nonce is read before the proof is verified, deliberately.</strong> The filter
+            parses the claim without checking the signature, because all it decides is whether to ask
+            for a nonce — a request that gets past it still has to satisfy Spring's own verification
+            or be refused anyway. Checking the signature first would mean a client with no nonce yet
+            is told its proof is bad, which is true of nothing.
+        </p>
+        <p class="hint">
+            <strong>The authorization server can ask for one too</strong>, in exactly the same shape:
+            RFC 9449 section 8 has the token endpoint answer <code>400</code> with
+            <code>use_dpop_nonce</code> and a <code>DPoP-Nonce</code> header. This page does the
+            resource server half because that is where the proof is presented over and over; the
+            token endpoint sees one proof per grant, and the window a captured one opens there is
+            already narrow.
+        </p>
+        <p class="hint">
+            <strong>The <a th:href="@{/dpop}">DPoP page</a> is deliberately left alone.</strong> Its
+            resource server accepts a proof on its own, which is the ordinary arrangement and the one
+            worth seeing first. This is a separate endpoint so that both can be true at once.
+        </p>
+    </div>
+</main>
+</body>
+</html>

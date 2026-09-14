@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
 import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
+import id.my.hendisantika.oauth2pkcedemo.controller.DpopNonceController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
 import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
@@ -73,6 +74,7 @@ public class DemoDataInitializer {
             seedSilentClient(registeredClientRepository, properties);
             seedRequestUriClient(registeredClientRepository, properties);
             seedRarClient(registeredClientRepository, properties);
+            seedDpopNonceClient(registeredClientRepository, properties);
         };
     }
 
@@ -271,6 +273,35 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered code binding client [{}]", client.clientId());
+    }
+
+    /**
+     * The client the DPoP nonce page drives. Public: DPoP binds a token to a key, which is exactly
+     * the case where the client has no secret to bind it to instead.
+     */
+    void seedDpopNonceClient(RegisteredClientRepository registeredClientRepository,
+                             DemoProperties properties) {
+        DemoProperties.Client client = properties.dpopNonceClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + DpopNonceController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered DPoP nonce client [{}]", client.clientId());
     }
 
     /**

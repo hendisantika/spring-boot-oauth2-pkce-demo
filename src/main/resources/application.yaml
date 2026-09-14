@@ -186,6 +186,15 @@ app:
     scopes:
       - openid
       - profile
+  # Public and PKCE, because DPoP is about the key rather than the client's credentials. Consent is
+  # off so the probe can get a bound token in one round trip.
+  dpop-nonce-client:
+    registration-id: pkce-dpop-nonce-client
+    client-id: pkce-dpop-nonce-client
+    client-name: PKCE DPoP Nonce Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password
