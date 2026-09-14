@@ -90,6 +90,15 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     /** JARM section 4.2: the default when a client asks for encryption and says nothing more. */
     public static final String DEFAULT_ENCRYPTION_METHOD = "A128CBC-HS256";
 
+    /**
+     * The content encryption this server offers. {@code alg} decides how the content encryption key
+     * is wrapped; {@code enc} decides what that key then encrypts the payload with, and the two are
+     * chosen independently. JWA registers more than these three - this is a list, not a limit of the
+     * format.
+     */
+    public static final Set<String> SUPPORTED_ENCRYPTION_METHODS =
+            Set.of("A128CBC-HS256", "A256GCM", "A128GCM");
+
     /** What this server can actually sign with, which is what it has keys for. */
     public static final Set<String> SUPPORTED_ALGORITHMS = Set.of("RS256", "ES256");
 
@@ -317,8 +326,12 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
         if (algorithm == null) {
             return signedJwt;
         }
-        Object method = client.getClientSettings().getSetting(ENCRYPTED_RESPONSE_ENC);
+        String method = encryptionMethodFor(client);
         String jwkSetUrl = client.getClientSettings().getJwkSetUrl();
+        if (method == null) {
+            log.debug("{} registered a content encryption this server does not offer", clientId);
+            return null;
+        }
         if (jwkSetUrl == null) {
             log.debug("{} asked for encrypted responses and publishes no keys", clientId);
             return null;
@@ -327,8 +340,7 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
             RSAKey key = encryptionKeyOf(jwkSetUrl);
             JWEObject encrypted = new JWEObject(
                     new JWEHeader.Builder(JWEAlgorithm.parse(String.valueOf(algorithm)),
-                            EncryptionMethod.parse(method == null
-                                    ? DEFAULT_ENCRYPTION_METHOD : String.valueOf(method)))
+                            EncryptionMethod.parse(method))
                             .keyID(key.getKeyID())
                             // RFC 7519 section 5.2: a nested JWT says so, so the client knows to
                             // verify a signature once it has decrypted rather than read claims.
@@ -341,6 +353,23 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
             log.debug("Unable to encrypt a response for {}: {}", clientId, ex.getMessage());
             return null;
         }
+    }
+
+    /**
+     * The content encryption for a registration: what it asked for, JARM's default when it asked for
+     * nothing, or {@code null} when it named one this server does not offer.
+     */
+    public String encryptionMethodFor(RegisteredClient client) {
+        Object configured = client == null ? null
+                : client.getClientSettings().getSetting(ENCRYPTED_RESPONSE_ENC);
+        String method = configured == null ? DEFAULT_ENCRYPTION_METHOD : String.valueOf(configured);
+        return SUPPORTED_ENCRYPTION_METHODS.contains(method) ? method : null;
+    }
+
+    /** As above, by client id, for anything that has only that. */
+    public String encryptionMethodFor(String clientId) {
+        return encryptionMethodFor(clientId == null ? null
+                : this.registeredClientRepository.findByClientId(clientId));
     }
 
     /** The first key in the client's published set that can be encrypted to. */
