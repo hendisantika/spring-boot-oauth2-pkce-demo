@@ -120,13 +120,15 @@
             client that registered this lock has not satisfied it by signing.
         </p>
         <p class="hint">
-            <strong>The server-wide half exists in the RFC and not here.</strong> RFC 9126 defines
+            <strong>There is a server-wide half too.</strong> RFC 9126 defines
             <code>require_pushed_authorization_requests</code> twice: §6 as client metadata, which is
             this page, and §5 as server metadata meaning the server "accepts authorization request
-            data only via PAR". This server publishes the §5 value as <code>false</code> in
-            <a th:href="@{/metadata}">both documents</a> — accurate, and there is no switch here to
-            make it true. <a th:href="@{/fapi}">FAPI 2.0 §5.3.1</a> asks for exactly that server-wide
-            rejection, which is why that row on the profile page still fails.
+            data only via PAR". The §5 value is published as <code>false</code> in
+            <a th:href="@{/metadata}">both documents</a> and has
+            <a th:href="@{/par-server-required}">a page of its own</a>, where turning it on refuses
+            the ordinary request from every client at once — which is what
+            <a th:href="@{/fapi}">FAPI 2.0 §5.3.1</a> asks for, and why that row fails while the
+            switch is off.
         </p>
         <p class="hint">
             <strong>Spring Authorization Server has no setting for this either.</strong> It travels

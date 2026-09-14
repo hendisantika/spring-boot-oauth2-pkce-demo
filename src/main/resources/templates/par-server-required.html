@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Requiring pushed requests, server-wide')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>The same lock, for every client at once</h1>
+    <p class="lead">
+        RFC 9126 defines <code>require_pushed_authorization_requests</code> twice.
+        <a th:href="@{/par-required}">§6 is client metadata</a>, which one client registers for
+        itself; §5 is server metadata — <em>"whether the authorization server accepts authorization
+        request data only via PAR"</em> — and applies to every client, including the ones registered
+        years ago by people who have left. This page is the second one, and it is also the switch
+        <a th:href="@{/fapi}">FAPI 2.0 §5.3.1</a> has been asking for.
+    </p>
+
+    <div class="alert" th:if="${serverParError}" th:text="${serverParError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Four requests are sent twice: once with the server-wide switch off, once with it on. The
+            switch is global while the run lasts and is put back afterwards — a deployment sets this
+            once in configuration rather than moving it under traffic.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:38%">Right now</th>
+                <td><code>require_pushed_authorization_requests</code> is
+                    <code th:text="${currently}">-</code></td>
+            </tr>
+            <tr>
+                <th>An ordinary client</th>
+                <td><code th:text="${ordinaryClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered the client-side lock</th>
+                <td><code th:text="${lockedClientId}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/par-server-required}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send four requests, twice</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The same four requests, both ways</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:24%">Sent</th>
+                <th style="width:19%">Client</th>
+                <th style="width:26%">Switch off</th>
+                <th>Switch on</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td><strong>What the documents said</strong>
+                    <span class="hint" style="display:block">
+                        <code>/.well-known/oauth-authorization-server</code>, read at the moment each
+                        column ran.
+                    </span></td>
+                <td><span class="hint">every client</span></td>
+                <td><code th:text="'require_par: ' + ${run.publishedWhenOff}">-</code></td>
+                <td><code th:text="'require_par: ' + ${run.publishedWhenOn}">-</code></td>
+            </tr>
+            <tr>
+                <td><strong>What the profile page said</strong>
+                    <span class="hint" style="display:block">
+                        <a th:href="@{/fapi}">FAPI 2.0 §5.3.1</a>, asked the same two moments.
+                    </span></td>
+                <td><span class="hint">every client</span></td>
+                <td><code th:text="${run.fapiRowWhenOff}">-</code></td>
+                <td><code th:text="${run.fapiRowWhenOn}">-</code></td>
+            </tr>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.clientId}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${attempt.clientRequiresPar}">+ require_par</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcomeWhenOff}"
+                          th:style="${attempt.acceptedWhenOff} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcomeWhenOn}"
+                          th:style="${attempt.acceptedWhenOn} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:text="${run.changedWithTheSwitch()} + ' of the four requests changed answer.'">-</span>
+            <span th:if="${run.everyPushedRowSurvivedBothSettings()}">
+                The pushed request was accepted under both, which is the shape of the thing: the
+                switch removes ways of asking rather than adding checks to the one that remains.
+            </span>
+        </p>
+        <p class="hint" th:if="${run.metadataFollowedTheSwitch()}">
+            The published document tracked the switch rather than describing a value fixed at
+            startup.
+        </p>
+        <p class="hint" th:if="${run.theProfileRowFollowedTheSwitch()}">
+            And so did the profile page — the requirement it has been failing since this demo began
+            passes while the switch is on, because that check reads the running configuration rather
+            than a list of intentions.
+        </p>
+        <p class="hint" th:if="${run.restoredAfterwards}">
+            The switch is back where it was.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/par-server-required/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>This is the row the FAPI page could not pass.</strong> FAPI 2.0 §5.3.1 says the
+            server "shall reject authorization requests sent without [RFC9126]" — every client, not
+            the willing ones — and until this switch existed there was nothing to turn. Watch the
+            profile row follow it: that check asks the running configuration, so it went green by the
+            configuration changing rather than by the check being rewritten.
+        </p>
+        <p class="hint">
+            <strong>Server metadata outranks the registration, and never the other way.</strong> The
+            last row's client had already locked its own door, so it is refused in both columns. A
+            client cannot register its way out of the server's rule, which is the only arrangement
+            that makes a server-wide rule worth having.
+        </p>
+        <p class="hint">
+            <strong>A signed request object is still not a pushed one.</strong> The third row carries
+            a valid <a th:href="@{/jar}">JAR request object</a> and is refused while the switch is on.
+            <a th:href="@{/jar-required}">The JAR switch</a> is the same idea for the other door, and
+            a deployment that wants both has to turn both — which is exactly what FAPI asks for.
+        </p>
+        <p class="hint">
+            <strong>The pushed endpoint is unaffected, and must be.</strong> A switch that refused
+            requests at <code>/oauth2/par</code> as well would leave a client no way in at all. What
+            it refuses is arriving at the authorization endpoint any other way.
+        </p>
+        <p class="hint">
+            <strong>What this page does is not what a deployment should do.</strong> Moving a
+            server-wide security setting at runtime, from a web page, is a demonstration: it is
+            global for every client while the run lasts and is put back in a <code>finally</code>
+            block. A real deployment sets it in configuration, once, and publishes it in
+            <a th:href="@{/metadata}">the documents</a> so clients can see it.
+        </p>
+    </div>
+</main>
+</body>
+</html>
