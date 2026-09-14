@@ -69,6 +69,8 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-rar-client` | `client_secret_basic` | required | **yes** | code | no |
 | `pkce-dpop-nonce-client` | none (public) | required | no | code | no |
 | `pkce-jarm-client` | none (public) | required | no | code | no |
+| `pkce-jarm-ec-client` | none (public) | required | no | code | no |
+| `pkce-jarm-none-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -528,6 +530,14 @@ with, and two arrive in the clear.
 server does not read.
 
 ![The delivery modes](docs/images/97-jarm-delivery-modes.png)
+
+**97. JARM algorithms** — three clients that differ in one setting. Two are honoured; one cannot be.
+
+![Three registrations](docs/images/98-jarm-alg-registrations.png)
+
+**98. JARM algorithms** — the two keys the server publishes, and the `kid` that tells them apart.
+
+![The published keys](docs/images/99-jarm-alg-keys.png)
 
 ## Refresh tokens and public clients
 
@@ -1412,6 +1422,8 @@ Notes:
   same damage either way.
 * **Tampering fails on the signature, not the contents.** The fourth row is the second row's answer
   with one claim rewritten — right issuer, right audience, plausible code, and refused.
+* **Which algorithm signs it is the client's choice**, recorded on the registration as
+  `authorization_signed_response_alg` — [its own page](#authorization_signed_response_alg).
 * **Three deliveries, one JWT.** The signed response is identical in every mode; what differs is
   where it travels. `query.jwt` (and plain `jwt`, the same thing for this flow) puts it on the query
   string, where it reaches the client's server in the request line and therefore its access log.
@@ -1424,6 +1436,40 @@ Notes:
   server wrote — which is the shape of any response arriving from a server elsewhere. `/jarm/callback`
   is exempted for that reason, and it is the one endpoint here that reads a JARM response out of a
   body rather than a URL.
+
+## `authorization_signed_response_alg`
+
+`/jarm-alg` is about the one setting that decides how a
+[JARM response](#jwt-secured-authorization-responses-jarm) is signed. The algorithm is the client's
+choice, not the server's, and it lives on the registration — three clients here differ in it and in
+nothing else.
+
+| Client | Registered as | `alg` in the header | Signed with |
+|---|---|---|---|
+| `pkce-jarm-client` | nothing | `RS256` | the RSA key |
+| `pkce-jarm-ec-client` | `ES256` | `ES256` | the EC key |
+| `pkce-jarm-none-client` | `none` | no JWT at all | `invalid_request`, in the clear |
+
+Notes:
+
+* **The algorithm belongs to the registration, not the request.** A client cannot ask per
+  authorization request, and that is the point: it knows in advance what it will have to verify, so
+  an answer signed with anything else is refused before it is read rather than trusted because it
+  arrived.
+* **Omitting the setting means `RS256`,** which is JARM's default — a default of "no signature" would
+  make the mode opt-out by accident.
+* **`none` is not a value this can take.** JARM forbids it: a response mode whose purpose is a
+  signature cannot be satisfied by an unsigned JWT. Rather than quietly hand that client loose
+  parameters — the silent failure [the JARM page](#jwt-secured-authorization-responses-jarm) is about
+  — the server answers with an error in the clear, and the page says it is the registration that
+  cannot be honoured rather than the request that failed.
+* **The server has to have the key.** Supporting `ES256` meant adding a P-256 key beside the RSA one;
+  the encoder picks by algorithm and cannot invent a curve. A registration naming an algorithm there
+  is no key for is in exactly the same position as `none`. A test pins that the extra key changes
+  nothing else: ordinary tokens are still `RS256`.
+* **Spring Authorization Server has no setting for this,** because it has no JARM. `ClientSettings`
+  carries arbitrary named settings, so the value lives there and the filter reads it — which is how a
+  deployment would extend a registration ahead of the library.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1841,6 +1887,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── DpopNonceController.java         /dpop-nonce
 │   ├── IntrospectionJwtController.java  /introspection-jwt
 │   ├── JarmController.java              /jarm
+│   ├── JarmAlgorithmController.java     /jarm-alg
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
@@ -1880,7 +1927,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RarEnforcementService.java       two tokens, five payment instructions
 │   ├── DpopNonceService.java            a bound token, then five calls with five proofs
 │   ├── IntrospectionJwtService.java     one token, introspected four ways
-│   ├── JarmService.java                 one authorization, asked for five ways
+│   ├── JarmService.java                 one authorization, asked for seven ways
+│   ├── JarmAlgorithmService.java        the same request from three registrations
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1970,7 +2018,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── IntrospectionJwtRun.java         the four answers
     ├── JarmResponseFilter.java          repackages the authorization response as a signed JWT
     ├── JarmAttempt.java                 one answer, and whether it could be checked
-    ├── JarmRun.java                     the five answers
+    ├── JarmRun.java                     the seven answers
+    ├── JarmAlgorithmAttempt.java        one client, its setting, and the header it got
+    ├── JarmAlgorithmRun.java            the three registrations and the published keys
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
