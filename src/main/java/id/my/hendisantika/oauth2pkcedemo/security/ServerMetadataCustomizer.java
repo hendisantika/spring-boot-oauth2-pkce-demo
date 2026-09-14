@@ -53,14 +53,17 @@ public final class ServerMetadataCustomizer {
     private final AuthorizationServerSettings settings;
     private final DemoProperties properties;
 
-    /** Read on every request rather than captured, so the published value is the live one. */
+    /** Read on every request rather than captured, so the published values are the live ones. */
     private final RequestObjectPolicy requestObjectPolicy;
+    private final PushedAuthorizationPolicy pushedAuthorizationPolicy;
 
     public ServerMetadataCustomizer(AuthorizationServerSettings settings, DemoProperties properties,
-                                    RequestObjectPolicy requestObjectPolicy) {
+                                    RequestObjectPolicy requestObjectPolicy,
+                                    PushedAuthorizationPolicy pushedAuthorizationPolicy) {
         this.settings = settings;
         this.properties = properties;
         this.requestObjectPolicy = requestObjectPolicy;
+        this.pushedAuthorizationPolicy = pushedAuthorizationPolicy;
     }
 
     /** RFC 8414, {@code /.well-known/oauth-authorization-server}. */
@@ -104,9 +107,9 @@ public final class ServerMetadataCustomizer {
         claim.accept(REQUIRE_SIGNED_REQUEST_OBJECT_METADATA,
                 this.requestObjectPolicy.requireSignedRequestObject());
         // RFC 9126 section 5: "whether the authorization server accepts authorization request data
-        // only via PAR". False, and true is not reachable - the lock this server implements is the
-        // per-client one from section 6. Publishing the accurate false beats publishing nothing.
-        claim.accept(REQUIRE_PUSHED_AUTHORIZATION_REQUESTS, false);
+        // only via PAR", read live so the document describes the server rather than its defaults.
+        claim.accept(REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
+                this.pushedAuthorizationPolicy.requirePushedRequests());
         // The lists are edited rather than appended to: the OIDC document already declares openid,
         // and a document that names a value twice is describing itself carelessly.
         grantTypes.accept(values ->

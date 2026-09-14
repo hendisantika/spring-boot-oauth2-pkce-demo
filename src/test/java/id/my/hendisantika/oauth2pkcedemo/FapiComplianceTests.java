@@ -129,8 +129,8 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
             assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
             assertThat(check.observed())
                     .contains("shall reject authorization requests sent without")
-                    .contains("both client metadata (§6) and server metadata (§5)")
-                    .containsPattern("\\d+ of the \\d+ clients below set it");
+                    .contains("§5's server-wide require_pushed_authorization_requests is false")
+                    .containsPattern("set by \\d+ of the \\d+ clients below");
         });
     }
 

@@ -39,11 +39,16 @@ public final class PushedAuthorizationRequiredFilter extends OncePerRequestFilte
     private final RequestMatcher authorizationEndpointMatcher;
     private final RegisteredClientRepository registeredClients;
 
+    /** RFC 9126 section 5, the server-wide half, which outranks what any one client registered. */
+    private final PushedAuthorizationPolicy policy;
+
     public PushedAuthorizationRequiredFilter(String authorizationEndpointUri,
-                                             RegisteredClientRepository registeredClients) {
+                                             RegisteredClientRepository registeredClients,
+                                             PushedAuthorizationPolicy policy) {
         this.authorizationEndpointMatcher =
                 PathPatternRequestMatcher.withDefaults().matcher(authorizationEndpointUri);
         this.registeredClients = registeredClients;
+        this.policy = policy;
     }
 
     /**
@@ -64,7 +69,8 @@ public final class PushedAuthorizationRequiredFilter extends OncePerRequestFilte
         }
 
         String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
-        if (!requiresPushedRequests(clientId)) {
+        String refusal = whyPushingIsRequired(clientId);
+        if (refusal == null) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -72,21 +78,34 @@ public final class PushedAuthorizationRequiredFilter extends OncePerRequestFilte
         // Presence of the parameter is all this filter judges. Whether the reference is one this
         // server issued, is still alive, and belongs to this client is the authorization server's
         // own check, and it runs immediately after.
-        log.debug("Rejecting an authorization request from [{}] that did not come through PAR", clientId);
+        log.debug("Rejecting an authorization request from [{}] that did not come through PAR: {}",
+                clientId, refusal);
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write("{\"error\":\"" + OAuth2ErrorCodes.INVALID_REQUEST
-                + "\",\"error_description\":\"This client registered "
-                + "require_pushed_authorization_requests\"}");
+                + "\",\"error_description\":\"" + refusal + "\"}");
     }
 
-    private boolean requiresPushedRequests(String clientId) {
+    /**
+     * RFC 9126 defines this twice. The server metadata value refuses a request that did not come
+     * through the pushed endpoint from everybody; the client metadata value refuses one from a
+     * single client. The server's is checked first because it is the one that cannot be talked out
+     * of by a registration.
+     *
+     * @return why the request cannot proceed, or null where it can
+     */
+    private String whyPushingIsRequired(String clientId) {
+        if (this.policy.requirePushedRequests()) {
+            return "This server accepts authorization request data only via PAR";
+        }
         RegisteredClient client = clientId == null ? null
                 : this.registeredClients.findByClientId(clientId);
         if (client == null) {
-            return false;
+            return null;
         }
         Object setting = client.getClientSettings().getSetting(REQUIRE_PAR_SETTING);
-        return setting != null && Boolean.parseBoolean(String.valueOf(setting));
+        return setting != null && Boolean.parseBoolean(String.valueOf(setting))
+                ? "This client registered require_pushed_authorization_requests"
+                : null;
     }
 }

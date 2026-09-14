@@ -4,6 +4,7 @@ import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +48,8 @@ public class FapiComplianceService {
     private final DemoProperties properties;
     /** RFC 9101 section 10.5's server-wide switch, read live rather than described. */
     private final RequestObjectPolicy requestObjectPolicy;
+    /** RFC 9126 section 5's, the same way. */
+    private final PushedAuthorizationPolicy pushedAuthorizationPolicy;
 
     /**
      * What the profile asks of the authorization server itself, checked against how this one is
@@ -96,17 +99,18 @@ public class FapiComplianceService {
                         + clientsRequiringSignedRequestObjects() + " of the "
                         + configuredClients().size() + " clients below set it for themselves"));
 
-        // Honest failures follow. A profile check that only ever passes is worth nothing.
-        checks.add(FapiCheck.fail("The server requires pushed authorization requests",
-                "FAPI 2.0 §5.3.1",
+        // Honest failures follow. A profile check that only ever passes is worth nothing - and this
+        // one is now capable of passing, which is the only thing that makes its failing mean
+        // anything: the switch exists and is off rather than being absent.
+        checks.add(FapiCheck.of(this.pushedAuthorizationPolicy.requirePushedRequests(),
+                "The server requires pushed authorization requests", "FAPI 2.0 §5.3.1",
                 "The profile says the server \"shall reject authorization requests sent without "
                         + "[RFC9126]\", which is every client rather than the willing ones. RFC 9126 "
-                        + "defines require_pushed_authorization_requests as both client metadata "
-                        + "(§6) and server metadata (§5); the client half is implemented here and "
+                        + "§5's server-wide require_pushed_authorization_requests is "
+                        + this.pushedAuthorizationPolicy.requirePushedRequests()
+                        + " and published in both documents; §6's per-client one is set by "
                         + clientsRequiringPushedRequests() + " of the " + configuredClients().size()
-                        + " clients below set it, but the server-wide half is published as false and "
-                        + "there is no switch to make it true, so a client that did not ask to be "
-                        + "locked down may still send an ordinary authorization request"));
+                        + " clients below"));
 
         checks.add(FapiCheck.of(properties.issuerUri().startsWith("https://"),
                 "All endpoints are served over TLS", "FAPI 2.0 §5.3",
