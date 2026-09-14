@@ -68,6 +68,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-request-uri-client` | `client_secret_basic` | required | **yes** | code | no |
 | `pkce-rar-client` | `client_secret_basic` | required | **yes** | code | no |
 | `pkce-dpop-nonce-client` | none (public) | required | no | code | no |
+| `pkce-jarm-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -513,6 +514,15 @@ each addressed to whoever asked.
 **93. Signed introspection** — the JWT, and the RFC 7662 object inside it.
 
 ![The signed response](docs/images/94-introspection-signed-response.png)
+
+**94. JARM** — the same authorization asked for five ways. Two answers are signed, one is tampered
+with, and two arrive in the clear.
+
+![Five answers](docs/images/95-jarm-five-answers.png)
+
+**95. JARM** — inside the signed answers: a code and a refusal, each with `iss`, `aud` and `exp`.
+
+![The signed claims](docs/images/96-jarm-signed-claims.png)
 
 ## Refresh tokens and public clients
 
@@ -1361,6 +1371,44 @@ Notes:
   the client, which matters because it carries scopes and a subject. Signing is the useful half here,
   where the transport is already private and the point is provenance.
 
+## JWT-secured authorization responses (JARM)
+
+`/jarm` is [JAR](#jwt-secured-authorization-requests-jar) pointed the other way. JAR signs the
+question so the server knows it arrived as written; JARM signs the answer so the client knows the
+same. An ordinary authorization response is a handful of loose query parameters — nothing says who
+sent them, nothing says who they are for, and anything that can reach the redirect URI can change
+them.
+
+The same authorization is asked for five ways:
+
+| Asked | `response_mode` | Signature | What came back |
+|---|---|---|---|
+| The ordinary response | `query` | none | `code`, `state`, `iss`, `session_state` |
+| Asked for a signed response | `jwt` | verifies | one `response` parameter |
+| A refusal, signed the same way | `jwt` | verifies | `error: invalid_scope`, inside the JWT |
+| The signed answer, with the code changed | `jwt` | **fails** | — |
+| Asked for a mode nothing here implements | `form_post` | none | `code`, `state`, `iss` |
+
+Notes:
+
+* **Spring Authorization Server does not read `response_mode` at all.** The string appears nowhere
+  in it. It implements the authorization code flow, where the answer always goes on the query
+  string, so it has never needed the parameter — and a client asking for a signed response gets loose
+  parameters with no indication that it asked for anything. The last row is that happening.
+* **What the signature protects** is three claims the loose form has no room for: `iss`, so a client
+  with several authorization servers knows which one answered — the problem
+  [the mix-up page](#mix-up-attack-defence-iss) solves with a bare parameter anything could have
+  written; `aud`, so a response delivered to the wrong client means nothing; and `exp`, so a captured
+  answer stops being usable. The `code` is protected as a side effect of all three.
+* **The failure is signed too.** A client that cannot trust an error is no better off than one that
+  cannot trust a code: an attacker who can rewrite `error=access_denied` into `code=…` has done the
+  same damage either way.
+* **Tampering fails on the signature, not the contents.** The fourth row is the second row's answer
+  with one claim rewritten — right issuer, right audience, plausible code, and refused.
+* **Two delivery modes are missing, and only the delivery.** JARM also defines `fragment.jwt` and
+  `form_post.jwt`, which differ in how the JWT reaches the client rather than in what it contains.
+  This implements `jwt` and `query.jwt`, the pair that means "on the query string".
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -1396,6 +1444,9 @@ Two things this needed:
 The client's key is read from this demo's own configuration rather than the client registration's
 `jwkSetUrl`, since the client here *is* the authorization server; a deployment would read it off the
 registration.
+
+The same idea pointed at the answer instead of the question is
+[JARM](#jwt-secured-authorization-responses-jarm).
 
 ## Authorization server metadata (RFC 8414)
 
@@ -1773,6 +1824,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RarEnforcementController.java    /rar-enforcement
 │   ├── DpopNonceController.java         /dpop-nonce
 │   ├── IntrospectionJwtController.java  /introspection-jwt
+│   ├── JarmController.java              /jarm
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
@@ -1812,6 +1864,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RarEnforcementService.java       two tokens, five payment instructions
 │   ├── DpopNonceService.java            a bound token, then five calls with five proofs
 │   ├── IntrospectionJwtService.java     one token, introspected four ways
+│   ├── JarmService.java                 one authorization, asked for five ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1899,6 +1952,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── IntrospectionJwtResponseHandler.java  signs the introspection response when asked
     ├── IntrospectionResponseAttempt.java  one answer, signed or not
     ├── IntrospectionJwtRun.java         the four answers
+    ├── JarmResponseFilter.java          repackages the authorization response as a signed JWT
+    ├── JarmAttempt.java                 one answer, and whether it could be checked
+    ├── JarmRun.java                     the five answers
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
