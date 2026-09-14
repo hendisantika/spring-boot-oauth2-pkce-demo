@@ -156,7 +156,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(5));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(6));
     }
 
     /**
@@ -207,16 +207,84 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(check.observed()).contains("ES256").contains("refused");
     }
 
+    /**
+     * Section 8.6.1 forbids one algorithm and lists none, so everything that is not RSA1_5 passes -
+     * a different shape from the signing row, which has a list to be on.
+     */
+    @Test
+    void theEncryptionRowForbidsOneAlgorithmRatherThanRequiringAList() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(encryptionCheckFor(checks, properties.jarRsa15Client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.reference()).contains("FAPI 1.0 Advanced");
+                    assertThat(check.observed()).contains("RSA1_5");
+                });
+
+        // Neither is on any FAPI list; neither is forbidden either, which is the whole test.
+        assertThat(encryptionCheckFor(checks, properties.jarOaep512Client()).outcome())
+                .isEqualTo(FapiCheck.Outcome.PASS);
+        assertThat(encryptionCheckFor(checks, properties.jarGcmClient()).outcome())
+                .isEqualTo(FapiCheck.Outcome.PASS);
+    }
+
+    /**
+     * Registering nothing is not the same as registering a default here, and the row should say what
+     * the registration spec says rather than borrowing the signing row's wording.
+     */
+    @Test
+    void anUndeclaredEncryptionAlgorithmIsNotTreatedAsADefault() {
+        FapiCheck check = encryptionCheckFor(fapiComplianceService.clientChecks(),
+                properties.client());
+
+        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+        assertThat(check.observed()).contains("not declaring whether it might encrypt");
+    }
+
+    /**
+     * The client that registered a content encryption method and nothing to wrap its key with. The
+     * registration spec forbids it, so the row should name that rather than report it as a client
+     * that said nothing.
+     */
+    @Test
+    void theIncompleteEncryptionRegistrationIsCalledOutAsIncomplete() {
+        FapiCheck check = encryptionCheckFor(fapiComplianceService.clientChecks(),
+                properties.jarEncOnlyClient());
+
+        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+        assertThat(check.observed())
+                .contains("no request_object_encryption_alg")
+                .contains("registration spec does not allow");
+    }
+
+    /** RSA1_5 fails the profile and is refused here anyway - the two happen to agree. */
+    @Test
+    void theForbiddenEncryptionAlgorithmIsOneThisServerAlsoRefuses() {
+        assertThat(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS)
+                .doesNotContain("RSA1_5");
+    }
+
+    private FapiCheck encryptionCheckFor(Map<String, List<FapiCheck>> checks,
+                                         DemoProperties.Client configured) {
+        return rowFor(checks, configured, "RSA1_5");
+    }
+
     private FapiCheck algorithmCheckFor(Map<String, List<FapiCheck>> checks,
                                         DemoProperties.Client configured) {
+        return rowFor(checks, configured, "PS256 or ES256");
+    }
+
+    private FapiCheck rowFor(Map<String, List<FapiCheck>> checks,
+                             DemoProperties.Client configured, String requirementFragment) {
         RegisteredClient client = registeredClientRepository.findByClientId(configured.clientId());
         assertThat(client).isNotNull();
 
         return checks.get(client.getClientName()).stream()
-                .filter(check -> check.requirement().contains("PS256 or ES256"))
+                .filter(check -> check.requirement().contains(requirementFragment))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
-                        "no signing algorithm row for " + client.getClientName()));
+                        "no '" + requirementFragment + "' row for " + client.getClientName()));
     }
 
     @Test
