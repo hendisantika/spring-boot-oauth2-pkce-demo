@@ -7,6 +7,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequest
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -67,6 +68,8 @@ public class FapiComplianceService {
     private final RequestObjectPolicy requestObjectPolicy;
     /** RFC 9126 section 5's, the same way. */
     private final PushedAuthorizationPolicy pushedAuthorizationPolicy;
+    /** Whether a fetched request_uri has to have been registered, read live for the same reason. */
+    private final RequestUriPolicy requestUriPolicy;
 
     /**
      * What the profile asks of the authorization server itself, checked against how this one is
@@ -355,7 +358,44 @@ public class FapiComplianceService {
                         + "match a registration");
     }
 
-    private static List<FapiCheck> checksFor(RegisteredClient client) {
+    /**
+     * Whether the client can start an authorization request from a URL it registered in advance.
+     * FAPI 1.0 Advanced section 5.2.2 blessed exactly this - the server "shall require a JWS signed
+     * JWT request object passed by value with the request parameter or by reference with the
+     * request_uri parameter" - and FAPI 2.0 designed it out. Its comparison table replaces the
+     * request object's nbf and exp claims with "request_uri has limited lifetime", for the stated
+     * reason that this "Prevents pre-generation of requests", and section 5.3.2 has the client send
+     * only client_id and a request_uri whose parameters "are sent in the pushed authorization
+     * request according to [RFC9126]". A pre-registered URL is neither short-lived nor pushed.
+     */
+    private FapiCheck preRegisteredRequestUriCheck(RegisteredClient client) {
+        String requirement = "Requests are not started from a pre-registered request_uri";
+        String reference = "FAPI 2.0 \u00a75.3.2; permitted by FAPI 1.0 Advanced \u00a75.2.2";
+
+        Object registered = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING);
+        if (registered != null && !String.valueOf(registered).isBlank()) {
+            long count = String.valueOf(registered).trim().split("\\s+").length;
+            return FapiCheck.fail(requirement, reference,
+                    "Registered " + count + " request_uris. The parameters in a document fetched "
+                            + "from one of them never went through the pushed endpoint, so the "
+                            + "request is pre-generated rather than short-lived - which is the "
+                            + "property FAPI 2.0 replaced the request object to get");
+        }
+
+        // The absence is only worth something while an unregistered URL cannot be used instead, and
+        // that is a switch this demo can move, so it is read rather than assumed.
+        boolean registrationRequired = this.requestUriPolicy.requireRegistration();
+        return FapiCheck.of(registrationRequired, requirement, reference,
+                registrationRequired
+                        ? "No request_uris registered, and require_request_uri_registration is true, "
+                        + "so there is no URL this client could be sent to fetch a request from"
+                        : "No request_uris registered, but require_request_uri_registration is "
+                        + "false, so this client could still name any https URL and have this "
+                        + "server fetch it");
+    }
+
+    private List<FapiCheck> checksFor(RegisteredClient client) {
         List<FapiCheck> checks = new ArrayList<>();
 
         Set<ClientAuthenticationMethod> methods = client.getClientAuthenticationMethods();
@@ -385,6 +425,7 @@ public class FapiComplianceService {
         checks.add(requestObjectAlgorithmCheck(client));
         checks.add(requestObjectEncryptionCheck(client));
         checks.add(requestObjectEncryptionMethodCheck(client));
+        checks.add(preRegisteredRequestUriCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
             checks.add(FapiCheck.of(!client.getTokenSettings().isReuseRefreshTokens(),
