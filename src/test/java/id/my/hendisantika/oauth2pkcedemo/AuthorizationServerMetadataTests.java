@@ -75,6 +75,46 @@ class AuthorizationServerMetadataTests extends AbstractMySqlIntegrationTest {
 
     /** RFC 8414 section 3.1, using the specification's own example. */
     /**
+     * The table covers what the two documents publish between them, so the four fields OpenID
+     * Connect defines and RFC 8414 has no notion of get rows of their own - each marked with which
+     * document has it, in that direction and not the other.
+     */
+    @Test
+    void theOpenIdOnlyFieldsGetRowsThatSaySo() throws Exception {
+        List<MetadataEntry> entries = metadataService.describe(
+                document("/.well-known/" + AuthorizationServerMetadataService.OAUTH_SUFFIX),
+                document("/.well-known/" + AuthorizationServerMetadataService.OIDC_SUFFIX));
+
+        assertThat(entries).extracting(MetadataEntry::name)
+                .contains("end_session_endpoint", "userinfo_endpoint", "subject_types_supported",
+                        "id_token_signing_alg_values_supported");
+        assertThat(entries)
+                .filteredOn(entry -> !entry.inBothDocuments())
+                .isNotEmpty()
+                .allSatisfy(entry -> {
+                    assertThat(entry.inOidcDocument())
+                            .as("%s is one the OpenID document has alone", entry.name())
+                            .isTrue();
+                    assertThat(entry.onlyIn()).isEqualTo("the OpenID document");
+                });
+    }
+
+    /** And a field only the OAuth document had would be labelled the other way round. */
+    @Test
+    void theLabelNamesWhicheverDocumentHasIt() {
+        MetadataEntry oauthOnly = metadataService
+                .describe(Map.of("a_field", "value"), Map.of())
+                .get(0);
+        MetadataEntry oidcOnly = metadataService
+                .describe(Map.of(), Map.of("a_field", "value"))
+                .get(0);
+
+        assertThat(oauthOnly.onlyIn()).isEqualTo("the OAuth document");
+        assertThat(oidcOnly.onlyIn()).isEqualTo("the OpenID document");
+        assertThat(oidcOnly.value()).isEqualTo("value");
+    }
+
+    /**
      * The row for a value this demo has a page for links to it. A document says what a server
      * claims; the page says what it does about the claim, and one is worth little without the other.
      */
