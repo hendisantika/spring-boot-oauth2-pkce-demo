@@ -174,13 +174,31 @@
             list agree.
         </p>
         <p class="hint">
-            The server-side failure that remains is a real gap rather than a configuration choice:
-            RFC 9126 §5's <a th:href="@{/par-server-required}">server-wide
+            <strong>The client rows above are only half of §8.6.</strong> It binds <em>"both clients
+            and authorization servers"</em>, and FAPI 2.0 §5.4.1 says not to <em>"use or accept"</em>
+            <code>none</code> — where accepting is exactly what a supported list declares. So the
+            server table carries the other half:
+            <a th:href="@{/jar-alg-values}"><code>request_object_signing_alg_values_supported</code></a>
+            advertises <code>RS256</code> and <code>none</code> beside <code>PS256</code>, and fails.
+            A client here can register <code>PS256</code> and pass its row while the server it is
+            talking to still accepts <code>none</code> from somebody else.
+        </p>
+        <p class="hint">
+            <strong>That one is a gap kept on purpose.</strong> The
+            <a th:href="@{/jar-none}"><code>none</code></a> and <code>RS256</code> entries exist
+            because the pages demonstrating them need a server that accepts them; removing them to
+            turn the row green would delete the demonstrations. Saying so is the point — a gap a
+            project has decided to keep is a different thing from one it has not noticed, and a
+            checker that cannot tell you which is which is not worth running.
+        </p>
+        <p class="hint">
+            The remaining server failures are real gaps rather than configuration choices: RFC 9126
+            §5's <a th:href="@{/par-server-required}">server-wide
             <code>require_pushed_authorization_requests</code></a> is off, so a client can fall back
             to an ordinary authorization request, and FAPI 2.0 §5.3.1 asks the server to reject those
-            from everyone. The <code>iss</code> row and the per-client PAR lock were gaps here too
-            until they were implemented — the point of a checker that fails is that its rows can
-            change.
+            from everyone; and the issuer is plain HTTP. The <code>iss</code> row and the per-client
+            PAR lock were gaps here too until they were implemented — the point of a checker that
+            fails is that its rows can change.
         </p>
         <p class="hint">
             A profile check that only ever passes tells you nothing. This one is worth reading
