@@ -311,9 +311,10 @@ missing factor.
 
 ![Server requirements, all passing](docs/images/46-fapi-server.png)
 
-**46. FAPI 2.0** — and the three it does not meet, stated rather than omitted.
+**46. FAPI 2.0** — the two it does not meet, stated rather than omitted, and the one the profile
+stopped asking for.
 
-![Three failing requirements](docs/images/47-fapi-failures.png)
+![The failing and not-applicable requirements](docs/images/47-fapi-failures.png)
 
 **47. FAPI 2.0** — per client: one built to the profile, the rest deliberately not.
 
@@ -2129,9 +2130,24 @@ requests, PKCE, sender-constrained tokens, and client authentication that involv
 | The server requires pushed authorization requests | `ClientSettings` has no `require_pushed_authorization_requests`, so a client can always fall back to an ordinary request |
 | All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
 
-The third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
+A third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
 [the mix-up page](#mix-up-attack-defence-iss) implements it. The check asks the bean that actually
 sends authorization responses, so it went green by the code changing, not the check.
+
+One row is neither a pass nor a gap:
+
+| Requirement | Why it is not applicable |
+|---|---|
+| Request objects are signed | FAPI 1.0 Advanced §5.2.2 required it; FAPI 2.0 took it out in favour of a pushed request with a short-lived `request_uri`, and its own comparison table gives the rationale as preventing pre-generated requests |
+
+The row still reports what this server holds, because
+[`require_signed_request_object`](#require_signed_request_object) is implemented here anyway: the
+server-wide value read live from `RequestObjectPolicy`, and a count of the clients that
+[set it for themselves](#require_signed_request_object-as-client-metadata). Reading the two rows
+together is the point — FAPI 2.0 §5.3.1 says the server *"shall reject authorization requests sent
+without [RFC9126]"*, which is the same lock one specification along, and that is the one this server
+cannot turn: `ClientSettings` has no `require_pushed_authorization_requests` (checked against the
+7.1.1 sources) and RFC 9126 defines no server metadata for it either.
 
 Per client, only `pkce-fapi-client` — registered specifically to the profile — meets every
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
