@@ -75,6 +75,8 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jarm-gcm-client` | none (public) | required | no | code | no |
 | `pkce-jarm-unsupported-enc-client` | none (public) | required | no | code | no |
 | `pkce-jar-ps-client` | none (public) | required | no | code | no |
+| `pkce-jar-oaep512-client` | none (public) | required | no | code | no |
+| `pkce-jar-rsa15-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -580,6 +582,16 @@ advance to accept.
 never reaches the question.
 
 ![Reading the algorithms](docs/images/107-jar-alg-reading.png)
+
+**107. Request object encryption algorithm** — six request objects, and the two refusals the
+registration spec would have allowed.
+
+![Six request objects](docs/images/108-jar-enc-alg-six-objects.png)
+
+**108. Request object encryption algorithm** — where this server departs from the spec, and where it
+follows it.
+
+![Reading the algorithms](docs/images/109-jar-enc-alg-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1622,6 +1634,9 @@ Notes:
   marking, and the published set still carries no private material.
 * **Addressed elsewhere is refused before the signature is looked at,** because until it is decrypted
   there is nothing to look at.
+* **The JWE header is checked before the key is used at all.** Which algorithm a client may wrap with
+  is [its own registration](#request_object_encryption_alg), read off the header and compared before
+  any private key operation happens.
 * **[Pushing the request](#pushed-authorization-requests) solves an overlapping problem.** A pushed
   request never travels through the browser, so nothing in it reaches a log on the way; encryption is
   what protects an object that does travel that way. FAPI asks for both.
@@ -1666,6 +1681,48 @@ Notes:
   `request_object_signing_alg` as the client not committing; this server treats it as `RS256`, which
   is a narrower reading and a deliberate one. The permissive reading gives back exactly what
   registering the algorithm was meant to take away.
+
+## `request_object_encryption_alg`
+
+`/jar-enc-alg` is the sibling of [`request_object_signing_alg`](#request_object_signing_alg), and the
+two registrations do not say the same kind of thing. OpenID Connect Dynamic Client Registration on
+the signing one: request objects from this client **"MUST be rejected, if not signed with this
+algorithm"**. On the encryption one: the client **"MAY still use other supported encryption
+algorithms or send unencrypted Request Objects, even when this parameter is present"**.
+
+So read literally, `request_object_encryption_alg` constrains nothing. This server treats it as a
+constraint anyway. Three clients, one server key — every one of these algorithms wraps the same
+content encryption key with the same RSA key and differs only in how:
+
+| Sent | Client | Registered | Header said | What the server did |
+|---|---|---|---|---|
+| Wrapped with what it registered | `pkce-demo-client` | `RSA-OAEP-256` | `RSA-OAEP-256` | an authorization code |
+| A stronger hash than it registered | `pkce-demo-client` | `RSA-OAEP-256` | `RSA-OAEP-512` | `encrypted with RSA-OAEP-512, and this client registered RSA-OAEP-256` |
+| Wrapped with what it registered | `pkce-jar-oaep512-client` | `RSA-OAEP-512` | `RSA-OAEP-512` | an authorization code |
+| The algorithm the other client registered | `pkce-jar-oaep512-client` | `RSA-OAEP-512` | `RSA-OAEP-256` | `encrypted with RSA-OAEP-256, and this client registered RSA-OAEP-512` |
+| Exactly what it registered, and retired here | `pkce-jar-rsa15-client` | `RSA1_5` | `RSA1_5` | `This server does not decrypt RSA1_5 request objects` |
+| Signed only | `pkce-jar-oaep512-client` | `RSA-OAEP-512` | not encrypted | an authorization code |
+
+Notes:
+
+* **This is stricter than the spec it implements, deliberately.** Rows two and four are both legal
+  under the registration text quoted above. A declaration that constrains nothing leaves the choice
+  of key-wrapping algorithm with whoever sent the request, which is the party you least want
+  choosing it — but it is a departure, and worth knowing is a departure.
+* **The unencrypted row is where the spec is followed.** Registering an algorithm says *how* a client
+  will encrypt, not *that* it will. A deployment that wants encryption to be mandatory has to say so
+  somewhere else; that is what a profile is for.
+* **Matching the registration is necessary, not sufficient.** The fifth row sends exactly what its
+  client registered and is refused anyway: `RSA1_5` is a real JWA algorithm this server does not
+  implement, and one left out of `SUPPORTED_ENCRYPTION_ALGS` was left out on purpose — it is the
+  padding Bleichenbacher's attack is about. A registration cannot add an algorithm to a server.
+* **The algorithm is checked before anything is unwrapped.** The header is read, compared and
+  rejected without a private key operation, which is also the order that keeps a wrong `alg` from
+  becoming a decryption attempt.
+* **Only the wrapping changes.** Every accepted row decrypts to the same three-part signed JWT, then
+  checked exactly as an unencrypted one is — type, signature, audience, expiry.
+  `request_object_encryption_enc` would decide the other half, the way
+  [JARM's two settings](#authorization_encrypted_response_enc) divide the same work.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2089,6 +2146,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmEncryptionMethodController.java  /jarm-enc-method
 │   ├── RequestObjectEncryptionController.java  /jar-enc
 │   ├── RequestObjectSigningAlgController.java  /jar-alg
+│   ├── RequestObjectEncryptionAlgController.java  /jar-enc-alg
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2135,6 +2193,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── JarmEncryptionMethodService.java  the same answer wrapped three ways
 │   ├── RequestObjectEncryptionService.java  the same request sent three ways
 │   ├── RequestObjectSigningAlgService.java  the same request signed five ways
+│   ├── RequestObjectEncryptionAlgService.java  the same request wrapped six ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2167,8 +2226,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── AuthenticationContextLevel.java  factors in, acr and amr out
     ├── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
     ├── JarRequestSigner.java            signs RFC 9101 request objects, by name or not at all
-    ├── JwtSecuredAuthorizationRequestFilter.java  verifies one against the registered algorithm,
-    │                                        and uses only what it carries
+    ├── JwtSecuredAuthorizationRequestFilter.java  unwraps and verifies one against the
+    │                                        algorithms its client registered, and uses only
+    │                                        what it carries
     ├── FapiCheck.java                   one requirement, its outcome, and what was observed
     ├── DpopBoundAuthorizationCodeFilter.java  enforces dpop_jkt at the token endpoint
     ├── IssuerIdentifierResponseHandler.java  puts iss on every authorization response
@@ -2236,6 +2296,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RequestObjectRun.java            the three request objects
     ├── SigningAlgAttempt.java           one object, its registration and its header
     ├── SigningAlgRun.java               the five request objects
+    ├── RequestEncryptionAlgAttempt.java  one object, its registration and its JWE header
+    ├── RequestEncryptionAlgRun.java     the six request objects
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
