@@ -10,6 +10,8 @@ import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.IntrospectionJwtResponseHandler;
+import id.my.hendisantika.oauth2pkcedemo.controller.JarmClientJwkSetController;
+import id.my.hendisantika.oauth2pkcedemo.security.JarmClientKeys;
 import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
@@ -67,6 +69,7 @@ import org.springframework.security.oauth2.server.authorization.token.OAuth2Toke
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenClaimNames;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.client.RestClient;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
@@ -129,6 +132,7 @@ public class AuthorizationServerConfig {
             JWKSource<SecurityContext> jwkSource,
             OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer,
             JarRequestSigner jarRequestSigner,
+            JarmClientKeys jarmClientKeys,
             IssuerIdentifierResponseHandler issuerIdentifierResponseHandler,
             ServerMetadataCustomizer serverMetadataCustomizer,
             DemoProperties properties) throws Exception {
@@ -232,7 +236,15 @@ public class AuthorizationServerConfig {
                 .addFilterAfter(
                         new JarmResponseFilter(authorizationServerSettings.getAuthorizationEndpoint(),
                                 registeredClientRepository, new NimbusJwtEncoder(jwkSource),
-                                properties.issuerUri()),
+                                properties.issuerUri())
+                                // The one client that publishes an encryption key lives in this same
+                                // process, so its set is read from the bean rather than fetched from
+                                // a port this application would be calling itself on. Every other
+                                // URL still goes over the network, as a real one always would.
+                                .jwkSetFetcher(url -> url.equals(properties.issuerUri()
+                                        + JarmClientJwkSetController.JARM_CLIENT_JWK_SET_URI)
+                                        ? jarmClientKeys.publicJwkSetJson()
+                                        : RestClient.create().get().uri(url).retrieve().body(String.class)),
                         SecurityContextHolderFilter.class)
                 // Expands a signed request object before anything reads the request parameters, so
                 // acr_values and everything else are taken from the JWT rather than the query string.
@@ -309,6 +321,16 @@ public class AuthorizationServerConfig {
     @Bean
     public JarRequestSigner jarRequestSigner() {
         return JarRequestSigner.generate();
+    }
+
+    /**
+     * The JARM client's own key pair. Encryption runs the opposite way from signing: the server
+     * encrypts to a key only the client holds, so this belongs to the client and only its public
+     * half is published.
+     */
+    @Bean
+    public JarmClientKeys jarmClientKeys() {
+        return JarmClientKeys.generate();
     }
 
     @Bean

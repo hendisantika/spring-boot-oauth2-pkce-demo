@@ -6,6 +6,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletResponseWrapper;
 import lombok.extern.slf4j.Slf4j;
+import com.nimbusds.jose.EncryptionMethod;
+import com.nimbusds.jose.JWEAlgorithm;
+import com.nimbusds.jose.JWEHeader;
+import com.nimbusds.jose.JWEObject;
+import com.nimbusds.jose.Payload;
+import com.nimbusds.jose.crypto.RSAEncrypter;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.KeyUse;
+import com.nimbusds.jose.jwk.RSAKey;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
@@ -18,6 +28,7 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -31,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Created by IntelliJ IDEA.
@@ -67,6 +79,17 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     public static final String SIGNED_RESPONSE_ALG =
             "settings.client.authorization-signed-response-alg";
 
+    /** JARM: set this and the signed response is encrypted to the client on top. */
+    public static final String ENCRYPTED_RESPONSE_ALG =
+            "settings.client.authorization-encrypted-response-alg";
+
+    /** And this names the content encryption; JARM defaults it when only the algorithm is given. */
+    public static final String ENCRYPTED_RESPONSE_ENC =
+            "settings.client.authorization-encrypted-response-enc";
+
+    /** JARM section 4.2: the default when a client asks for encryption and says nothing more. */
+    public static final String DEFAULT_ENCRYPTION_METHOD = "A128CBC-HS256";
+
     /** What this server can actually sign with, which is what it has keys for. */
     public static final Set<String> SUPPORTED_ALGORITHMS = Set.of("RS256", "ES256");
 
@@ -84,6 +107,14 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     private final JwtEncoder jwtEncoder;
     private final String issuerUri;
 
+    /**
+     * How a client's published key set is read. It is a seam because this demo's JARM client lives
+     * in the same process as the server: a real deployment always goes over the network, and the
+     * default here does too.
+     */
+    private Function<String, String> jwkSetFetcher = url ->
+            RestClient.create().get().uri(url).retrieve().body(String.class);
+
     public JarmResponseFilter(String authorizationEndpointUri,
                               RegisteredClientRepository registeredClientRepository,
                               JwtEncoder jwtEncoder, String issuerUri) {
@@ -92,6 +123,12 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
         this.registeredClientRepository = registeredClientRepository;
         this.jwtEncoder = jwtEncoder;
         this.issuerUri = issuerUri;
+    }
+
+    /** @param jwkSetFetcher reads a client's published key set, given its URL */
+    public JarmResponseFilter jwkSetFetcher(Function<String, String> jwkSetFetcher) {
+        this.jwkSetFetcher = jwkSetFetcher;
+        return this;
     }
 
     public static boolean wantsJwtResponse(HttpServletRequest request) {
@@ -176,6 +213,18 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
                 return;
             }
             String jwt = sign(parameters, clientId, algorithm);
+            String encrypted = encryptIfRegistered(jwt, clientId);
+            if (encrypted == null) {
+                super.sendRedirect(UriComponentsBuilder.fromUriString(redirectUri)
+                        .queryParam(OAuth2ParameterNames.ERROR, "invalid_request")
+                        .queryParam(OAuth2ParameterNames.ERROR_DESCRIPTION,
+                                "This server cannot encrypt an authorization response for this client")
+                        .queryParam(OAuth2ParameterNames.STATE,
+                                parameters.getOrDefault(OAuth2ParameterNames.STATE, ""))
+                        .build().encode(StandardCharsets.UTF_8).toUriString());
+                return;
+            }
+            jwt = encrypted;
             log.debug("Delivering a {} authorization response as a signed JWT, by {}",
                     parameters.containsKey(OAuth2ParameterNames.ERROR) ? "failed" : "successful",
                     responseMode);
@@ -246,6 +295,63 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     /** Only the characters that could end the attribute; the values here are a URI and a JWT. */
     private static String escape(String value) {
         return value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;");
+    }
+
+    /**
+     * JARM section 4.2: when a client registers an encryption algorithm, the signed response becomes
+     * the payload of a JWE addressed to it. The order matters and is not a preference - signing
+     * first and encrypting second means the signature is over the response the client will read.
+     * Encrypting first and signing the ciphertext would prove only that somebody signed an opaque
+     * blob, which is no statement about its contents at all.
+     *
+     * @return the response to deliver, unchanged when no encryption was asked for, or {@code null}
+     * when the client asked for one this server cannot produce
+     */
+    private String encryptIfRegistered(String signedJwt, String clientId) {
+        RegisteredClient client = clientId == null ? null
+                : this.registeredClientRepository.findByClientId(clientId);
+        if (client == null) {
+            return signedJwt;
+        }
+        Object algorithm = client.getClientSettings().getSetting(ENCRYPTED_RESPONSE_ALG);
+        if (algorithm == null) {
+            return signedJwt;
+        }
+        Object method = client.getClientSettings().getSetting(ENCRYPTED_RESPONSE_ENC);
+        String jwkSetUrl = client.getClientSettings().getJwkSetUrl();
+        if (jwkSetUrl == null) {
+            log.debug("{} asked for encrypted responses and publishes no keys", clientId);
+            return null;
+        }
+        try {
+            RSAKey key = encryptionKeyOf(jwkSetUrl);
+            JWEObject encrypted = new JWEObject(
+                    new JWEHeader.Builder(JWEAlgorithm.parse(String.valueOf(algorithm)),
+                            EncryptionMethod.parse(method == null
+                                    ? DEFAULT_ENCRYPTION_METHOD : String.valueOf(method)))
+                            .keyID(key.getKeyID())
+                            // RFC 7519 section 5.2: a nested JWT says so, so the client knows to
+                            // verify a signature once it has decrypted rather than read claims.
+                            .contentType("JWT")
+                            .build(),
+                    new Payload(signedJwt));
+            encrypted.encrypt(new RSAEncrypter(key));
+            return encrypted.serialize();
+        } catch (Exception ex) {
+            log.debug("Unable to encrypt a response for {}: {}", clientId, ex.getMessage());
+            return null;
+        }
+    }
+
+    /** The first key in the client's published set that can be encrypted to. */
+    private RSAKey encryptionKeyOf(String jwkSetUrl) throws Exception {
+        String jwks = this.jwkSetFetcher.apply(jwkSetUrl);
+        for (JWK jwk : JWKSet.parse(jwks).getKeys()) {
+            if (jwk instanceof RSAKey rsaKey && KeyUse.SIGNATURE != jwk.getKeyUse()) {
+                return rsaKey;
+            }
+        }
+        throw new IllegalStateException("No usable encryption key at " + jwkSetUrl);
     }
 
     /**
