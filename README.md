@@ -656,6 +656,15 @@ the published document and the profile row read at each turn.
 
 ![Reading the server-wide lock](docs/images/121-par-server-required-reading.png)
 
+**121. request_uri metadata** — what the documents say, what silence would have said, and four ways
+of pointing at a request object.
+
+![Four ways](docs/images/122-request-uri-metadata-four-ways.png)
+
+**122. request_uri metadata** — one parameter, two unrelated features, and which check refuses which.
+
+![Reading the metadata](docs/images/123-request-uri-metadata-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2058,6 +2067,57 @@ Notes:
   runtime, from a web page, is a demonstration: global while the run lasts, and restored in a
   `finally` block. A real deployment sets it in configuration, once.
 
+## `request_uri_parameter_supported`
+
+`/request-uri-metadata` is about a parameter that means two unrelated things. In RFC 9101 §5.2
+`request_uri` is a URL the client hosts and the authorization server **fetches**; in
+[RFC 9126](#pushed-authorization-requests) it is a reference the server itself handed out. OpenID
+Connect Discovery's `request_uri_parameter_supported` is about the first only — and RFC 9126 §5 says a
+pushed reference is usable *"regardless of other authorization server metadata such as
+`request_uri_parameter_supported`"*. So this server publishes `false` and accepts one anyway.
+
+What the documents now say, against what leaving them out would have claimed:
+
+| Metadata | Published here | Default if omitted |
+|---|---|---|
+| `request_parameter_supported` | `true` | `false` — the opposite |
+| `request_uri_parameter_supported` | `false` | `true` — the opposite |
+| `require_request_uri_registration` | `false` | `false` |
+
+And the four ways of pointing at a request object:
+
+| Sent | Parameter | What the server did |
+|---|---|---|
+| by value | `request` | the consent screen |
+| by a URL to fetch | `request_uri` | `This server does not fetch request objects by reference; request_uri_parameter_supported is false` |
+| by a pushed reference | `request_uri` | the consent screen |
+| by a reference nobody issued | `request_uri` | `invalid_request` |
+
+Notes:
+
+* **Silence is not neutral.** Omitted, these default to `request_parameter_supported: false` and
+  `request_uri_parameter_supported: true`, so a server publishing neither claims it does not read
+  `request` and does fetch `request_uri`. This server is the other way round on both counts, and
+  Spring Authorization Server advertises neither, having no notion of either parameter. Until this
+  page they were absent, which is to say wrong.
+* **The second and third rows are the same parameter.** One is a URL this server would have to go and
+  fetch; the other is a reference it issued minutes earlier. A client reading
+  `request_uri_parameter_supported: false` should conclude "do not host request objects for this
+  server", not "do not push".
+* **The refusal now says which kind it was.** Before this page both came back as
+  `[invalid_request] OAuth 2.0 Parameter: request_uri` — the authorization server's failed lookup of a
+  pushed reference the client never claimed to have. A `request_uri` with an `http` or `https` scheme
+  is refused with the reason; everything else is still left to that lookup, which is the check that
+  owns it. The test is the scheme rather than the shape of a pushed reference, because RFC 9126 §4
+  leaves that format to the server.
+* **`require_request_uri_registration` is published and moot.** It asks whether `request_uri` values
+  must be pre-registered with `request_uris`, which only means something for the feature this server
+  does not implement.
+* **Fetching is a door kept shut on purpose.** RFC 9101 §10.4.1 and §10.4.2 are both about it — a
+  server that fetches a URL on a client's say-so can be aimed at a victim, and the reference is
+  unsigned and rewritable in the browser. PAR does the same job without the server making an outbound
+  request at all.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -2504,6 +2564,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ClientRequiredRequestObjectController.java  /jar-client-required
 │   ├── ParRequiredController.java       /par-required
 │   ├── ServerParRequiredController.java  /par-server-required
+│   ├── RequestUriMetadataController.java  /request-uri-metadata
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2557,6 +2618,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── ClientRequiredRequestObjectService.java  registers two clients, then asks them
 │   ├── ParRequiredService.java          five ways to start one request
 │   ├── ServerParRequiredService.java    four requests, under both settings
+│   ├── RequestUriMetadataService.java   four ways to point at one object
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2679,6 +2741,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── PushedAuthorizationPolicy.java   RFC 9126 §5's server-wide switch, in one place
     ├── ServerParRequiredAttempt.java    one request, and its fate under each setting
     ├── ServerParRequiredRun.java        the four, the documents and the profile row
+    ├── RequestUriMetadataAttempt.java   one way of pointing, and what came of it
+    ├── RequestUriMetadataRun.java       the four, beside what the documents claim
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
