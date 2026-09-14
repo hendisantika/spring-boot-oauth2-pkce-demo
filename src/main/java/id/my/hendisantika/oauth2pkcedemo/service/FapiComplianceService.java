@@ -149,6 +149,27 @@ public class FapiComplianceService {
                         + clientsRequiringPushedRequests() + " of the " + configuredClients().size()
                         + " clients below"));
 
+        // The other half of the row the clients below are judged on. FAPI 1.0 Advanced §8.6 binds
+        // "both clients and authorization servers", and FAPI 2.0 §5.4.1 says "not use or accept" -
+        // and a supported list is exactly a statement about what is accepted.
+        List<String> offending = JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream()
+                .filter(algorithm -> !ACCEPTED_SIGNING_ALGS.contains(algorithm))
+                .sorted()
+                .toList();
+        checks.add(FapiCheck.of(offending.isEmpty(),
+                "Advertised request object signing algorithms are PS256 or ES256",
+                "FAPI 1.0 Advanced \u00a78.6, FAPI 2.0 \u00a75.4.1",
+                ServerMetadataCustomizer.REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED + " is "
+                        + JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream()
+                        .sorted().toList()
+                        + (offending.isEmpty()
+                        ? ", all of which the profile asks for"
+                        : ", and " + offending + " should not be there: §8.6 binds \"both clients "
+                        + "and authorization servers\", and §5.4.1 says not to \"use or accept\" "
+                        + "none. These entries are deliberate - the pages that demonstrate them need "
+                        + "a server that accepts them - so this is a gap this demo keeps on purpose, "
+                        + "which is not the same as one it has not noticed")));
+
         checks.add(FapiCheck.of(properties.issuerUri().startsWith("https://"),
                 "All endpoints are served over TLS", "FAPI 2.0 §5.3",
                 "The issuer is " + properties.issuerUri()
