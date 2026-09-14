@@ -220,6 +220,14 @@ app:
     scopes:
       - openid
       - profile
+  # Signed and then encrypted to a key the client publishes, which is the other half of JARM.
+  jarm-encrypted-client:
+    registration-id: pkce-jarm-encrypted-client
+    client-id: pkce-jarm-encrypted-client
+    client-name: PKCE JARM Encrypted Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

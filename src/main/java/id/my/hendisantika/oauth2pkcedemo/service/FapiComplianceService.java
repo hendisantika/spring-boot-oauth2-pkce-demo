@@ -113,7 +113,8 @@ public class FapiComplianceService {
                 properties.freshnessClient(), properties.silentClient(),
                 properties.requestUriClient(), properties.rarClient(),
                 properties.dpopNonceClient(), properties.jarmClient(),
-                properties.jarmEcClient(), properties.jarmNoneClient());
+                properties.jarmEcClient(), properties.jarmNoneClient(),
+                properties.jarmEncryptedClient());
     }
 
     private static List<FapiCheck> checksFor(RegisteredClient client) {

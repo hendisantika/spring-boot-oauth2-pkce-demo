@@ -77,9 +77,10 @@ public class WebSecurityConfig {
                         .requestMatchers("/introspection-jwt", "/introspection-jwt/**").permitAll()
                         .requestMatchers("/jarm", "/jarm/**").permitAll()
                         .requestMatchers("/jarm-alg", "/jarm-alg/**").permitAll()
+                        .requestMatchers("/jarm-enc", "/jarm-enc/**").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
-                        .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/fapi").permitAll()
+                        .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/jarm-client-jwks.json", "/fapi").permitAll()
                         // Drives its own authorization request, so it is reachable signed out and
                         // its redirect URI is its own rather than Spring's client callback.
                         .requestMatchers("/code-binding", "/code-binding/**").permitAll()

@@ -3,6 +3,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
 import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
 import id.my.hendisantika.oauth2pkcedemo.controller.DpopNonceController;
+import id.my.hendisantika.oauth2pkcedemo.controller.JarmClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarmController;
 import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
 import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
@@ -80,6 +81,7 @@ public class DemoDataInitializer {
             seedJarmClient(registeredClientRepository, properties);
             seedJarmVariant(registeredClientRepository, properties, properties.jarmEcClient(), "ES256");
             seedJarmVariant(registeredClientRepository, properties, properties.jarmNoneClient(), "none");
+            seedJarmEncryptedClient(registeredClientRepository, properties);
         };
     }
 
@@ -338,6 +340,41 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered JARM client [{}] for {}", client.clientId(), algorithm);
+    }
+
+    /**
+     * The JARM client whose responses are encrypted as well as signed. The key is the client's, not
+     * the server's, so the registration points at where the client publishes it - the same
+     * {@code jwkSetUrl} a client would use for authentication keys, which is where OpenID Connect
+     * puts both.
+     */
+    void seedJarmEncryptedClient(RegisteredClientRepository registeredClientRepository,
+                                 DemoProperties properties) {
+        DemoProperties.Client client = properties.jarmEncryptedClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + JarmController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .jwkSetUrl(properties.issuerUri()
+                                + JarmClientJwkSetController.JARM_CLIENT_JWK_SET_URI)
+                        .setting(JarmResponseFilter.ENCRYPTED_RESPONSE_ALG, "RSA-OAEP-256")
+                        // enc is left out on purpose: JARM defaults it, and the page shows that.
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered encrypted JARM client [{}]", client.clientId());
     }
 
     /**

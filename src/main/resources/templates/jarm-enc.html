@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('JARM encryption')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>An answer nobody else can read</h1>
+    <p class="lead">
+        <a th:href="@{/jarm}">JARM</a> signs the authorization response, and
+        <a th:href="@{/jarm-alg}">the algorithm</a> is the client's to choose. Signing settles who
+        wrote the answer; it does nothing about who can read it. A signed JWT is base64, not
+        ciphertext — the code and the state are in plain sight to anything that sees the URL. A
+        client that minds registers <code>authorization_encrypted_response_alg</code> as well.
+    </p>
+
+    <div class="alert" th:if="${encError}" th:text="${encError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The same authorization request is made twice: once by a client that only asked for a
+            signature, and once by one that asked for encryption on top.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">Signed only</th>
+                <td><code th:text="${signedOnlyClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Signed and encrypted</th>
+                <td><code th:text="${encryptedClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        <code th:text="${algSetting}">-</code> is <code>RSA-OAEP-256</code>;
+                        <code th:text="${encSetting}">-</code> is left unset, so JARM's default of
+                        <code th:text="${defaultEnc}">A128CBC-HS256</code> applies.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Its published keys</th>
+                <td><code th:text="${jwkSetUri}">-</code>
+                    <span class="hint" style="display:block">
+                        The key belongs to the client: encryption runs the opposite way from signing,
+                        so it is the client that has to publish something.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jarm-enc}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Ask both ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What each client was handed</h2>
+        <table>
+            <tr>
+                <th style="width:30%">Signed only</th>
+                <td>
+                    <code th:text="${run.signedParts()} + ' parts — a JWS'">3 parts</code>
+                    <span class="hint" style="display:block">
+                        Readable without any key at all:
+                        <code th:text="${run.readableFromTheSignedResponse}">[code, state]</code>
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <th>Signed and encrypted</th>
+                <td>
+                    <code th:text="${run.encryptedParts()} + ' parts — a JWE'">5 parts</code>
+                    <span class="hint" style="display:block">
+                        Nothing is readable from it without the client's private key.
+                    </span>
+                </td>
+            </tr>
+        </table>
+        <span class="token" style="margin-top:14px" th:text="${run.encryptedResponse}">-</span>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What stays in the open</h2>
+        <table>
+            <tr th:each="entry : ${run.encryptionHeader}">
+                <th style="width:26%" th:text="${entry.key}">alg</th>
+                <td><code th:text="${entry.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The JWE header has to stay readable: it says which key and which algorithms undo the
+            encryption, and a client with several keys needs the <code>kid</code> to know which of
+            its own to reach for. <code>cty: JWT</code> is the part that says there is another JWT
+            inside — RFC 7519 section 5.2 — so the client knows to verify a signature after
+            decrypting rather than to start reading claims.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>And once the client decrypts it</h2>
+        <p class="hint">
+            Inside is the signed response, unchanged.
+            <span th:if="${run.signatureVerifies}">
+                Its signature verifies against the keys the authorization server publishes — the
+                encryption did not disturb it, because it was wrapped around it rather than applied
+                to it.
+            </span>
+            <span th:unless="${run.signatureVerifies}">Its signature did not verify.</span>
+        </p>
+        <span class="token" th:text="${run.nestedSignedJwt}">-</span>
+        <table style="margin-top:14px">
+            <tr th:each="claim : ${run.claims}">
+                <th style="width:26%" th:text="${claim.key}">code</th>
+                <td><code th:text="${claim.value}">-</code></td>
+            </tr>
+        </table>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jarm-enc/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Signed, then encrypted — the order is not a preference.</strong> JARM nests the
+            signed JWT inside the JWE, so the signature is over the response the client will actually
+            read. Encrypting first and signing the ciphertext would prove only that somebody signed an
+            opaque blob, which is no statement about its contents at all.
+        </p>
+        <p class="hint">
+            <strong>The key is the client's, and that changes who publishes what.</strong> Everywhere
+            else in this demo the authorization server publishes keys and clients verify against
+            them. Encryption runs the other way: the server encrypts to a key only the client can
+            undo, so the client publishes and the server fetches. This one's set lives at
+            <code th:text="${jwkSetUri}">-</code>, and the registration points there.
+        </p>
+        <p class="hint">
+            <strong>What it is actually for.</strong> The response travels over TLS either way, so
+            this is not about the wire. It is about everywhere a URL goes afterwards: the browser's
+            history, a <code>Referer</code> header on the next request, the client's own access log,
+            and every proxy in between. A signed response hands the code and the state to all of
+            them; an encrypted one hands them a blob.
+        </p>
+        <p class="hint">
+            <strong>The method has a default.</strong> The registration here names only
+            <code>alg</code>, and <code>enc</code> comes out as
+            <code th:text="${defaultEnc}">A128CBC-HS256</code> — JARM's default, visible in the header
+            above. A client that wants something else says so;
+            one that says nothing still gets content encryption rather than none.
+        </p>
+        <p class="hint">
+            <strong>A client that asks for this and publishes nothing is refused</strong>, the same
+            way <a th:href="@{/jarm-alg}">a signing algorithm this server cannot produce</a> is. There
+            is no key to encrypt to, and sending the response in the clear instead would defeat the
+            setting entirely.
+        </p>
+    </div>
+</main>
+</body>
+</html>
