@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Requiring request objects, one client at a time')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>One client's door, locked from the inside</h1>
+    <p class="lead">
+        RFC 9101 §10.5 defines <code>require_signed_request_object</code> twice: once as server
+        metadata, which <a th:href="@{/jar-required}">locks every door at once</a>, and once as
+        client metadata, which is this. The difference is not only scope — client metadata is
+        <em>registered</em>, so a client can ask for the lock itself at
+        <a th:href="@{/dynamic-registration}">registration time</a> without the server operator
+        deciding anything about anybody else.
+    </p>
+
+    <div class="alert" th:if="${jarClientRequiredError}" th:text="${jarClientRequiredError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Two clients are registered through the registration endpoint while you watch, each asking
+            for the lock, and their requests are sent beside those of a client that asked for
+            nothing.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:38%">Registered at</th>
+                <td><code th:text="${registrationEndpoint}">-</code></td>
+            </tr>
+            <tr>
+                <th>The control client</th>
+                <td><code th:text="${unlockedClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>The server-wide switch</th>
+                <td><code th:text="${serverRequires}">-</code>
+                    <span class="hint" style="display:block">
+                        Off throughout, so nothing below is the server's doing.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-client-required}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Register two clients and send six requests</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What came back from the registration endpoint</h2>
+        <p class="hint">
+            RFC 7591 §3.2.1: the response describes the client as the server now holds it. A value
+            the server kept and did not echo is one the caller has no way to confirm.
+        </p>
+        <table style="margin-top:12px">
+            <tr th:each="entry : ${run.lockedRegistrationResponse}"
+                th:if="${entry.key == 'client_id' or entry.key == 'require_signed_request_object'
+                        or entry.key == 'token_endpoint_auth_method' or entry.key == 'scope'}">
+                <th style="width:38%"><code th:text="${entry.key}">-</code></th>
+                <td><code th:text="${entry.value}">-</code></td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:10px" th:if="${run.registrationEchoedTheSetting()}">
+            The setting went out in the registration request and came back in the registration
+            response, which is the only way a client learns that the server understood it.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Six requests</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:24%">Sent</th>
+                <th style="width:19%">Client</th>
+                <th style="width:17%">Registered</th>
+                <th style="width:15%">Carried</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.clientId}">-</code></td>
+                <td><code th:text="${attempt.registered}">-</code></td>
+                <td><span class="hint" th:text="${attempt.sent}">-</span></td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.theUnlockedClientWasLeftAlone()}">
+                The first row is the same request the second row makes, from a client that registered
+                nothing, and it is acted on — which is what "client metadata" buys you over
+                <a th:href="@{/jar-required}">the server-wide switch</a>.
+            </span>
+            <span th:if="${run.theContradictoryClientCanSendNothing()}">
+                And the last two rows are the same client, which registered two things that cannot
+                both be satisfied: there is nothing it can send that this server will act on.
+            </span>
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-client-required/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>This is the same defence, at a different blast radius.</strong> The server switch
+            is a decision about every client, including ones registered years ago by people who have
+            left. The client setting is a decision about one client, taken by whoever registers it,
+            and a deployment that can enumerate its clients usually turns the lock this way — one at
+            a time, as each client learns to send request objects.
+        </p>
+        <p class="hint">
+            <strong>The registration endpoint had to be taught this.</strong> Spring Authorization
+            Server's registration converters have a field for every metadata name they know and drop
+            the rest, so <code>require_signed_request_object</code> arrived at the endpoint and went
+            nowhere. Both converters are replaced here: one to keep the value on the registration,
+            the other to echo it back in the response. Without the second half a caller cannot tell a
+            server that understood it from one that ignored it.
+        </p>
+        <p class="hint">
+            <strong>Two registrations that cannot both be satisfied.</strong> The second client asked
+            for <code>require_signed_request_object</code> and registered
+            <a th:href="@{/jar-none}"><code>request_object_signing_alg: none</code></a> — so its
+            unsigned objects are refused by the defence, and its signed ones are refused for not
+            being the algorithm it registered. Nothing it sends can work. Neither rule is wrong; the
+            registration is, and a server that silently picked one of them to ignore would be hiding
+            that from whoever has to debug it.
+        </p>
+        <p class="hint">
+            <strong>Two things the registration asked for and did not get.</strong> These clients
+            asked for <code>token_endpoint_auth_method: none</code> and came back
+            <code>client_secret_basic</code> with a generated secret:
+            <code>OidcClientRegistrationRegisteredClientConverter</code> handles
+            <code>client_secret_post</code>, <code>client_secret_jwt</code> and
+            <code>private_key_jwt</code>, and everything else — <code>none</code> included — falls to
+            an else branch. They also asked for no scopes, because
+            <a th:href="@{/dynamic-registration}">this server refuses a registration that asks for
+            authority</a> beyond the initial access token's. Neither changes what this page is
+            about, and both are the sort of thing worth noticing before building on a registration
+            response you did not read.
+        </p>
+        <p class="hint">
+            <strong>The middle refusal is not the defence.</strong> The locked client's unsigned
+            object is refused for the algorithm it did not register, not for
+            <code>require_signed_request_object</code> — it never reaches that check. Two rules can
+            refuse the same request, and which one spoke is the difference between "sign this" and
+            "sign this differently".
+        </p>
+    </div>
+</main>
+</body>
+</html>

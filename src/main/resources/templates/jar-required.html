@@ -128,9 +128,10 @@
         <p class="hint">
             <strong>The last row needs no server switch.</strong> Its client registered
             <code>require_signed_request_object</code> for itself, so its ordinary request is refused
-            in both columns. Client metadata locks one door; server metadata locks all of them. A
-            deployment that can enumerate its clients can do this one at a time and leave the rest of
-            the world alone, which is usually how a lock like this actually gets turned.
+            in both columns. Client metadata
+            <a th:href="@{/jar-client-required}">locks one door</a>; server metadata locks all of
+            them. A deployment that can enumerate its clients can do this one at a time and leave the
+            rest of the world alone, which is usually how a lock like this actually gets turned.
         </p>
         <p class="hint">
             <strong>Only a GET is judged.</strong> The consent screen submits a POST back to the same
