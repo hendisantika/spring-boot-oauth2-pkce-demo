@@ -8,6 +8,7 @@ import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.IntrospectionJwtResponseHandler;
+import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
 import id.my.hendisantika.oauth2pkcedemo.security.LogoutTokenFactory;
@@ -219,6 +220,14 @@ public class AuthorizationServerConfig {
                 .addFilterAfter(
                         new PromptNoneFilter(authorizationServerSettings.getAuthorizationEndpoint(),
                                 registeredClientRepository, properties.issuerUri()),
+                        SecurityContextHolderFilter.class)
+                // JARM: wraps the response so the redirect the endpoint sends can be repackaged as
+                // one signed JWT. Anchored here too, which puts it outside the authorization
+                // endpoint filter and therefore able to see what that filter writes.
+                .addFilterAfter(
+                        new JarmResponseFilter(authorizationServerSettings.getAuthorizationEndpoint(),
+                                registeredClientRepository, new NimbusJwtEncoder(jwkSource),
+                                properties.issuerUri()),
                         SecurityContextHolderFilter.class)
                 // Expands a signed request object before anything reads the request parameters, so
                 // acr_values and everything else are taken from the JWT rather than the query string.
