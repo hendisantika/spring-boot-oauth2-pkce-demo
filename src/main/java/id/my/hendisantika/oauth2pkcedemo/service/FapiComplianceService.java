@@ -71,6 +71,8 @@ public class FapiComplianceService {
     private final PushedAuthorizationPolicy pushedAuthorizationPolicy;
     /** Whether a fetched request_uri has to have been registered, read live for the same reason. */
     private final RequestUriPolicy requestUriPolicy;
+    /** The class that writes the discovery documents, so the rows can read what is really in them. */
+    private final ServerMetadataCustomizer serverMetadataCustomizer;
 
     /**
      * What the profile asks of the authorization server itself, checked against how this one is
@@ -78,6 +80,9 @@ public class FapiComplianceService {
      */
     public List<FapiCheck> serverChecks() {
         List<FapiCheck> checks = new ArrayList<>();
+        // Read once, from the code that writes the documents rather than from the constants behind
+        // it, so the three advertised lists below are compared against what is really published.
+        Map<String, Object> published = this.serverMetadataCustomizer.publishedClaims();
 
         checks.add(FapiCheck.of(settings.getPushedAuthorizationRequestEndpoint() != null,
                 "Pushed authorization requests are available", "FAPI 2.0 §5.3.1, RFC 9126",
@@ -156,9 +161,12 @@ public class FapiComplianceService {
                 .filter(algorithm -> !ACCEPTED_SIGNING_ALGS.contains(algorithm))
                 .sorted()
                 .toList();
-        checks.add(FapiCheck.of(offending.isEmpty(),
+        checks.add(advertisedList(published,
+                ServerMetadataCustomizer.REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED,
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS,
                 "Advertised request object signing algorithms are PS256 or ES256",
                 "FAPI 1.0 Advanced \u00a78.6, FAPI 2.0 \u00a75.4.1",
+                offending.isEmpty(),
                 ServerMetadataCustomizer.REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED + " is "
                         + JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream()
                         .sorted().toList()
@@ -175,9 +183,12 @@ public class FapiComplianceService {
         // needed here is the refusal, so RSA1_5 never had to be in the supported set.
         boolean advertisesForbidden = JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS
                 .contains(FORBIDDEN_ENCRYPTION_ALG);
-        checks.add(FapiCheck.of(!advertisesForbidden,
+        checks.add(advertisedList(published,
+                ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ALG_VALUES_SUPPORTED,
+                JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS,
                 "Advertised request object encryption algorithms exclude RSA1_5",
                 "FAPI 1.0 Advanced \u00a78.6.1; not carried into FAPI 2.0",
+                !advertisesForbidden,
                 ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ALG_VALUES_SUPPORTED + " is "
                         + JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_ALGS.stream()
                         .sorted().toList()
@@ -193,9 +204,12 @@ public class FapiComplianceService {
         // same borrowed chain the per-client enc row uses: RFC 8725 §3.1, which FAPI 2.0 §5.4.1
         // requires adherence to, asks for a supported set that nothing outside it may be used with.
         Set<String> methods = JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS;
-        checks.add(FapiCheck.of(!methods.isEmpty(),
+        checks.add(advertisedList(published,
+                ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ENC_VALUES_SUPPORTED,
+                methods,
                 "The request object enc set is closed and advertised",
                 "RFC 8725 \u00a73.1, required by FAPI 2.0 \u00a75.4.1",
+                !methods.isEmpty(),
                 ServerMetadataCustomizer.REQUEST_OBJECT_ENCRYPTION_ENC_VALUES_SUPPORTED + " is "
                         + methods.stream().sorted().toList() + ". No FAPI profile names a content "
                         + "encryption method, so what applies is RFC 8725's \"supported set of "
@@ -212,6 +226,24 @@ public class FapiComplianceService {
                         + "; only the mTLS listener on 8443 uses TLS"));
 
         return checks;
+    }
+
+    /**
+     * Judges one advertised algorithm list. Before the profile has any say, the list has to agree
+     * with the set this server actually enforces: a profile verdict on an advertised value means
+     * nothing if the advertised value is not what the code does.
+     *
+     * @param published    what {@link ServerMetadataCustomizer} really puts in both documents
+     * @param enforced     the set the request object filter actually applies
+     * @param meetsProfile the profile's verdict, used only once the two agree
+     */
+    private static FapiCheck advertisedList(Map<String, Object> published, String name,
+                                            Set<String> enforced, String requirement,
+                                            String reference, boolean meetsProfile, String observed) {
+        String disagreement = ServerMetadataCustomizer.disagreement(published, name, enforced);
+        return disagreement != null
+                ? FapiCheck.fail(requirement, reference, disagreement)
+                : FapiCheck.of(meetsProfile, requirement, reference, observed);
     }
 
     /** How many clients named a URL this server would be willing to go and fetch a request from. */
