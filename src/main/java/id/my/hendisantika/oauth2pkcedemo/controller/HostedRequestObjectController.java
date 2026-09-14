@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -35,6 +36,12 @@ public class HostedRequestObjectController {
 
     /** Registered by a different client, so that one client cannot reach it. */
     public static final String OTHER_CLIENT_URI = "/hosted/other-client.jwt";
+
+    /**
+     * For a client that did not exist when this application started. A client hosting its own
+     * request object knows its own client id; this stands in for that by being told.
+     */
+    public static final String FOR_CLIENT_URI = "/hosted/for-client.jwt";
 
     /** The media type RFC 9101 section 10.8 gives a request object. */
     public static final String MEDIA_TYPE = "application/oauth-authz-req+jwt";
@@ -66,6 +73,23 @@ public class HostedRequestObjectController {
     @GetMapping(value = OTHER_CLIENT_URI, produces = MEDIA_TYPE)
     public ResponseEntity<String> otherClient() {
         return served(signed(properties.confidentialClient(), Map.of()));
+    }
+
+    /**
+     * @param clientId whose request object this is. The redirect URI is the one a dynamically
+     *                 registered client gets, since that is who asks for this.
+     */
+    @GetMapping(value = FOR_CLIENT_URI, produces = MEDIA_TYPE)
+    public ResponseEntity<String> forClient(@RequestParam(OAuth2ParameterNames.CLIENT_ID) String clientId) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        parameters.put(OAuth2ParameterNames.RESPONSE_TYPE, "code");
+        parameters.put(OAuth2ParameterNames.CLIENT_ID, clientId);
+        parameters.put(OAuth2ParameterNames.REDIRECT_URI,
+                properties.issuerUri() + "/login/oauth2/code/adhoc");
+        parameters.put(OAuth2ParameterNames.STATE, "hosted-for-client");
+        parameters.put("code_challenge", CODE_CHALLENGE);
+        parameters.put("code_challenge_method", "S256");
+        return served(signer.sign(clientId, properties.issuerUri(), parameters));
     }
 
     private static ResponseEntity<String> served(String requestObject) {

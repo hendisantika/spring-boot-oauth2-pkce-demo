@@ -8,8 +8,11 @@ import org.springframework.security.oauth2.server.authorization.oidc.converter.O
 import org.springframework.security.oauth2.server.authorization.oidc.converter.RegisteredClientOidcClientRegistrationConverter;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Created by IntelliJ IDEA.
@@ -32,6 +35,13 @@ public final class RequestObjectClientRegistrationConverters {
     /** RFC 9126 section 6, which is client metadata for the same reason and dropped the same way. */
     public static final String REQUIRE_PAR = "require_pushed_authorization_requests";
 
+    /**
+     * OpenID Connect Dynamic Client Registration section 2: "Array of request_uri values that are
+     * pre-registered by the RP for use at the OP." The only one of these that is a list, which is
+     * why it is joined on the way in and split on the way out.
+     */
+    public static final String REQUEST_URIS = "request_uris";
+
     private RequestObjectClientRegistrationConverters() {
     }
 
@@ -51,7 +61,9 @@ public final class RequestObjectClientRegistrationConverters {
             Object requireSigned = registration.getClaim(REQUIRE_SIGNED_REQUEST_OBJECT);
             Object signingAlg = registration.getClaim(REQUEST_OBJECT_SIGNING_ALG);
             Object requirePar = registration.getClaim(REQUIRE_PAR);
-            if (requireSigned == null && signingAlg == null && requirePar == null) {
+            Object requestUris = registration.getClaim(REQUEST_URIS);
+            if (requireSigned == null && signingAlg == null && requirePar == null
+                    && requestUris == null) {
                 return client;
             }
 
@@ -68,6 +80,10 @@ public final class RequestObjectClientRegistrationConverters {
             if (requirePar != null) {
                 settings.setting(PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING,
                         Boolean.parseBoolean(String.valueOf(requirePar)));
+            }
+            if (requestUris instanceof Collection<?> urls) {
+                settings.setting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING,
+                        urls.stream().map(String::valueOf).collect(Collectors.joining(" ")));
             }
             log.debug("Registering [{}] with {}={}, {}={}", client.getClientId(),
                     REQUIRE_SIGNED_REQUEST_OBJECT, requireSigned, REQUEST_OBJECT_SIGNING_ALG,
@@ -95,6 +111,13 @@ public final class RequestObjectClientRegistrationConverters {
             copy(client, JwtSecuredAuthorizationRequestFilter.SIGNING_ALG_SETTING,
                     REQUEST_OBJECT_SIGNING_ALG, claims);
             copy(client, PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING, REQUIRE_PAR, claims);
+            // Back out as the array it arrived as: a caller that sent a list and read back a string
+            // would be right to wonder what the server had done with it.
+            Object registeredUris = client.getClientSettings()
+                    .getSetting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING);
+            if (registeredUris != null && !String.valueOf(registeredUris).isBlank()) {
+                claims.put(REQUEST_URIS, List.of(String.valueOf(registeredUris).split("\\s+")));
+            }
             return OidcClientRegistration.withClaims(claims).build();
         };
     }

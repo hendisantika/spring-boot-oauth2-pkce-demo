@@ -253,10 +253,12 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      */
     private String fetchRequestObject(String requestUri, String clientId) {
         if (!requestUri.regionMatches(true, 0, "https", 0, 5) && !hostedHere(requestUri)) {
-            // Section 5.2: the request_uri "MUST be an https URI" where the client hosts it. This
-            // demo has no TLS on its issuer - the FAPI page fails a requirement over it - so a URL on
-            // this server's own origin is allowed through http and nothing else is. A deployment
-            // deletes the second half of this condition.
+            // RFC 9101 section 5.2 says the request_uri "MUST be an https URI" where the client
+            // hosts it. OpenID Connect Registration section 2 qualifies the same rule: these URLs
+            // "MUST use the https scheme unless the target Request Object is signed in a way that is
+            // verifiable by the OP", which every object fetched here is. This demo serves no TLS, so
+            // a URL on its own origin is allowed through http under that clause - and nothing else
+            // is, signed or not, because the two specs do not agree and the narrower one is free.
             throw new IllegalArgumentException("A fetched request_uri must be https");
         }
         if (this.requestUriPolicy.requireRegistration() && !registeredRequestUris(clientId)
@@ -269,8 +271,8 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     }
 
     /**
-     * Whether the URL is on this application's own origin. Only the demo's lack of TLS makes this
-     * worth having: it is not a rule from anywhere.
+     * Whether the URL is on this application's own origin, which is the only place http is allowed
+     * to reach - and only because the objects it serves are signed and verified here.
      */
     private boolean hostedHere(String requestUri) {
         return requestUri.startsWith(this.issuerUri + "/");

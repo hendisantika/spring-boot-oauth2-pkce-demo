@@ -135,10 +135,12 @@
             open <code>Accept</code> and judging what arrives) and one returns an object carrying its own
             <code>request_uri</code>, which §4 forbids and clause (d) is about — a server that
             followed it would be fetching recursively on a stranger's say-so. The fetch also refuses
-            anything that is not <code>https</code> — except, in this demo only, a URL on this
-            server's own origin, because <a th:href="@{/fapi}">nothing here is served over TLS</a> —
-            caps the response, times out after two seconds and does not follow redirects, since a URL
-            that can bounce elsewhere is a URL the list no longer describes.
+            anything that is not <code>https</code> — except a URL on this server's own origin, since
+            <a th:href="@{/fapi}">nothing here is served over TLS</a> and
+            <a th:href="@{/request-uris}">OpenID Connect Registration §2</a> allows http where the
+            request object is "signed in a way that is verifiable by the OP", which these are — caps
+            the response, times out after two seconds and does not follow redirects, since a URL that
+            can bounce elsewhere is a URL the list no longer describes.
         </p>
         <p class="hint">
             <strong>Nothing about verification changes.</strong> What comes back over that GET is
