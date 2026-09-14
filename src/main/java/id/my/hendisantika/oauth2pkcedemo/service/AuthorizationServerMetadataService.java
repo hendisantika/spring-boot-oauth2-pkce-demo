@@ -86,8 +86,15 @@ public class AuthorizationServerMetadataService {
      * Pages that show a published value doing something, keyed by the field they are about. A
      * document says what a server claims; these say what it does about the claim.
      */
-    private static final Map<String, String> DEMONSTRATED_BY = Map.of(
-            "require_pushed_authorization_requests", "/par-server-required");
+    private static final Map<String, String> DEMONSTRATED_BY = Map.ofEntries(
+            Map.entry("require_pushed_authorization_requests", "/par-server-required"),
+            Map.entry("require_signed_request_object", "/jar-required"),
+            Map.entry("request_object_signing_alg_values_supported", "/jar-alg-values"),
+            Map.entry("request_object_encryption_alg_values_supported", "/jar-enc-alg-values"),
+            Map.entry("request_object_encryption_enc_values_supported", "/jar-enc-method-values"),
+            Map.entry("request_parameter_supported", "/jar"),
+            Map.entry("request_uri_parameter_supported", "/request-uri-metadata"),
+            Map.entry("require_request_uri_registration", "/request-uri-registration"));
 
     private final RestClient restClient;
     private final DemoProperties properties;
