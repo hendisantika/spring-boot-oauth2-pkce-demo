@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Requiring request objects')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Locking the door the other requests come through</h1>
+    <p class="lead">
+        RFC 9101 §10.5 is titled "Downgrade Attack", and its first sentence is the whole problem:
+        unless the protocol is locked down to use JAR, <em>an attacker may simply use an RFC 6749
+        request instead and bypass all the protection this specification provides</em>. Signing
+        request objects does nothing if the server still answers the same question asked in a query
+        string. <code>require_signed_request_object</code> is the lock, and as
+        <strong>server</strong> metadata it applies to every client at once.
+    </p>
+
+    <div class="alert" th:if="${jarRequiredError}" th:text="${jarRequiredError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Four requests are sent twice: once with the server-wide switch off, once with it on. The
+            switch is global while the run lasts and is put back afterwards — a deployment sets this
+            once in configuration rather than moving it under traffic.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:38%">Right now</th>
+                <td><code>require_signed_request_object</code> is
+                    <code th:text="${currently}">-</code></td>
+            </tr>
+            <tr>
+                <th>An ordinary client</th>
+                <td><code th:text="${ordinaryClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered <code>none</code></th>
+                <td><code th:text="${noneClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered the client-side switch</th>
+                <td><code th:text="${strictClientId}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-required}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send four requests, twice</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The same four requests, both ways</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:26%">Sent</th>
+                <th style="width:20%">Client</th>
+                <th style="width:27%">Switch off</th>
+                <th>Switch on</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td><strong>What the documents said</strong>
+                    <span class="hint" style="display:block">
+                        <code>/.well-known/oauth-authorization-server</code>, read at the moment each
+                        column ran.
+                    </span></td>
+                <td><span class="hint">every client</span></td>
+                <td><code th:text="'require_signed_request_object: ' + ${run.publishedWhenOff}">-</code></td>
+                <td><code th:text="'require_signed_request_object: ' + ${run.publishedWhenOn}">-</code></td>
+            </tr>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.clientId}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${attempt.clientRequiresSigned}">+ require_signed</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcomeWhenOff}"
+                          th:style="${attempt.acceptedWhenOff} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcomeWhenOn}"
+                          th:style="${attempt.acceptedWhenOn} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:text="${run.changedWithTheSwitch()} + ' of the four requests changed answer.'">-</span>
+            <span th:if="${run.everySignedRowSurvivedBothSettings()}">
+                The signed request object was accepted under both, which is the shape of the thing:
+                the switch removes ways of asking rather than adding checks to the one that remains.
+            </span>
+        </p>
+        <p class="hint" th:if="${run.metadataFollowedTheSwitch()}">
+            And the published document tracked the switch rather than describing a value fixed at
+            startup — which is what makes it metadata about this server rather than a note in a
+            README.
+        </p>
+        <p class="hint" th:if="${run.restoredAfterwards}">
+            The switch is back where it was.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-required/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The first row is the attack.</strong> An ordinary OAuth 2.0 authorization
+            request, exactly as every page here that is not about JAR sends one — and while the
+            switch is off it works perfectly, which is the point §10.5 is making. A client can sign
+            its request objects beautifully and gain nothing, because nobody made it use one. The
+            defence is not a better signature; it is refusing to answer the unsigned question at all.
+        </p>
+        <p class="hint">
+            <strong>Two different refusals, from the same section.</strong> The switch refuses a
+            request with <em>no</em> request object and a request object with
+            <a th:href="@{/jar-none}"><code>alg: none</code></a>, and RFC 9101 §10.5 spells out both
+            in consecutive sentences. They are the same hole: something that arrives carrying no
+            signature and is acted on anyway.
+        </p>
+        <p class="hint">
+            <strong>The last row needs no server switch.</strong> Its client registered
+            <code>require_signed_request_object</code> for itself, so its ordinary request is refused
+            in both columns. Client metadata locks one door; server metadata locks all of them. A
+            deployment that can enumerate its clients can do this one at a time and leave the rest of
+            the world alone, which is usually how a lock like this actually gets turned.
+        </p>
+        <p class="hint">
+            <strong>Only a GET is judged.</strong> The consent screen submits a POST back to the same
+            endpoint to continue an authorization request that was already made and already checked.
+            Treating that as a fresh request with a missing request object would refuse the user's
+            own approval, so the check is on the authorization request rather than on the endpoint.
+        </p>
+        <p class="hint">
+            <strong>What this page does is not what a deployment should do.</strong> Moving a
+            server-wide security setting at runtime, from a web page, is a demonstration and nothing
+            else — it is global for every client while the run lasts, and it is put back in a
+            <code>finally</code> block. A real deployment sets it in configuration, once, and
+            publishes it in <a th:href="@{/metadata}">the documents</a> so clients can see it.
+        </p>
+    </div>
+</main>
+</body>
+</html>

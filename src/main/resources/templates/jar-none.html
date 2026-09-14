@@ -143,8 +143,9 @@
             <code>none</code> and <code>require_signed_request_object</code> together, which is a
             registration that contradicts itself. RFC 9101 §10.5 is a downgrade defence, and a
             downgrade defence that could be talked out of it by the thing it defends against would
-            not be one — so it outranks the algorithm, and the same is true of the server-wide switch
-            in the row above.
+            not be one — so it outranks the algorithm. The same is true of
+            <a th:href="@{/jar-required}">the server-wide switch</a>, which is this setting aimed at
+            every client at once.
         </p>
         <p class="hint">
             <strong>Both switches are now published.</strong>
