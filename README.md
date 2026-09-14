@@ -2460,23 +2460,24 @@ Discovery `request`/`request_uri` switches, `require_request_uri_registration`, 
 asserts that every field citing RFC 8414 §2 is one RFC 8414 actually defines, so the next addition
 cannot slip through the same way.
 
-Eight rows carry a link as well as a citation — the request object and `request_uri` family, and both
-halves of the PAR requirement:
-
-| Row | Links to |
-|---|---|
-| `request_parameter_supported` | [the JAR page](#jwt-secured-authorization-requests-jar) |
-| `request_object_signing_alg_values_supported` | [`/jar-alg-values`](#request_object_signing_alg_values_supported) |
-| `request_object_encryption_alg_values_supported` | [`/jar-enc-alg-values`](#request_object_encryption_alg_values_supported) |
-| `request_object_encryption_enc_values_supported` | [`/jar-enc-method-values`](#request_object_encryption_enc_values_supported) |
-| `require_signed_request_object` | [`/jar-required`](#require_signed_request_object) |
-| `request_uri_parameter_supported` | [`/request-uri-metadata`](#request_uri_parameter_supported) |
-| `require_request_uri_registration` | [`/request-uri-registration`](#require_request_uri_registration) |
-| `require_pushed_authorization_requests` | [`/par-server-required`](#require_pushed_authorization_requests-as-server-metadata) |
+Eighteen rows carry a link as well as a citation, pointing at the page that shows the value doing
+something — `request_parameter_supported` at [JAR](#jwt-secured-authorization-requests-jar), the three
+algorithm lists at their own pages, `require_signed_request_object` and
+`require_pushed_authorization_requests` at the two switch pages, and the rest at the feature each
+names: `/par`, `/device`, `/dynamic-registration`, `/rar`, `/mixup`, `/mtls`, `/dpop`,
+`/session-management`, `/introspect` (twice — it covers introspection and revocation) and the two
+`request_uri` pages.
 
 A document says what a server claims; those pages say what it does about the claim. A test walks every
-linked path and asserts the page answers, so a cross-link cannot quietly become a dead end — and rows
-whose values this demo has no page for carry no link rather than a guess.
+linked path and asserts this application serves it — 200, or a redirect to sign in for the pages that
+need a session, which is what the rest of the demo does with them too — so a cross-link cannot quietly
+become a dead end.
+
+The rows left unlinked are the ones no single page owns: the endpoints themselves, `issuer`,
+`scopes_supported`, the response types, the auth-method lists, and `code_challenge_methods_supported`,
+whose subject is the whole demo. Nor is anything linked that the OpenID document has and the OAuth one
+does not — `end_session_endpoint` and `userinfo_endpoint` among them — because this table is built
+from the OAuth document, so such a link would have no row to sit on.
 
 Notes:
 
