@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Request object content encryption')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>The other half of the pair</h1>
+    <p class="lead">
+        <a th:href="@{/jar-enc-alg}"><code>request_object_encryption_alg</code></a> decides how the
+        content encryption key reaches the server. <code>request_object_encryption_enc</code> decides
+        what that key then does to the request object. They are registered separately and chosen
+        separately, and this one comes with a default the spec writes down itself: if an algorithm is
+        registered and a method is not, the method is <code>A128CBC-HS256</code>.
+    </p>
+
+    <div class="alert" th:if="${jarEncMethodError}" th:text="${jarEncMethodError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Four clients, one server key, one request object. Everything below is wrapped with
+            <code>RSA-OAEP-256</code> — only the content encryption changes.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:46%">Registered no method, so A128CBC-HS256</th>
+                <td><code th:text="${defaultClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered A256GCM</th>
+                <td><code th:text="${gcmClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Registered <span th:text="${unsupportedEnc}">-</span></th>
+                <td><code th:text="${unsupportedClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        A real JWA method this server does not offer.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Registered a method and no algorithm</th>
+                <td><code th:text="${encOnlyClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        Which the registration spec does not allow: when
+                        <code>request_object_encryption_enc</code> is included,
+                        <code>request_object_encryption_alg</code> must be too.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-enc-method}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send six request objects</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Six request objects</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:16%">Sent</th>
+                <th style="width:20%">Client</th>
+                <th style="width:14%">Registered</th>
+                <th style="width:16%">Header said</th>
+                <th style="width:13%">Shape</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td><strong th:text="${attempt.label}">-</strong></td>
+                <td><code th:text="${attempt.clientId}">-</code></td>
+                <td><code th:text="${attempt.registeredEnc}">-</code></td>
+                <td>
+                    <code style="white-space:nowrap" th:text="${attempt.sentEnc}">-</code>
+                    <span class="hint" style="display:block"
+                          th:unless="${attempt.matchesRegistration()}">not what it registered</span>
+                </td>
+                <td>
+                    <span class="hint" style="display:block">
+                        iv <span th:text="${attempt.ivBytes()}">-</span>, tag
+                        <span th:text="${attempt.tagBytes()}">-</span> bytes
+                    </span>
+                    <span class="hint" style="display:block" th:if="${attempt.overhead() > 0}">
+                        padded by <span th:text="${attempt.overhead()}">-</span>
+                    </span>
+                    <span class="hint" style="display:block" th:unless="${attempt.overhead() > 0}">
+                        no padding
+                    </span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.everyAcceptedRowMatchedItsRegistration()}">
+                Nothing whose <code>enc</code> differed from its registration was acted on.
+            </span>
+            <span th:unless="${run.everyAcceptedRowMatchedItsRegistration()}">
+                Something was acted on whose <code>enc</code> did not match its registration. Read
+                the outcomes rather than this sentence.
+            </span>
+            <span th:if="${run.onlyCbcPadded()}">
+                And the shapes tell the two families apart on their own: only the CBC rows carry more
+                ciphertext than they were given payload.
+            </span>
+        </p>
+        <p class="hint">
+            This server decrypts <code th:text="${run.supportedEncs}">-</code>, and a client that
+            registers no method is taken to have registered
+            <code th:text="${run.defaultEnc}">-</code>.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-enc-method/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The shape column is the only part of this a wire observer could check.</strong>
+            CBC encrypts in blocks and pads the payload up to a boundary, so its ciphertext is longer
+            than what went in and its IV is 16 bytes. GCM is a stream cipher with a 12-byte nonce and
+            no padding at all, so its ciphertext is exactly as long as the payload. Both carry a
+            16-byte tag, for different reasons — CBC's is a truncated HMAC computed after the fact,
+            GCM's falls out of the encryption itself. The unsupported row shows the difference: its
+            tag is 24 bytes, because a CBC method's tag is half of whichever HMAC it names, and that
+            one names SHA-384.
+        </p>
+        <p class="hint">
+            <strong>This default is the spec's, not this server's invention.</strong> Unlike
+            <a th:href="@{/jar-enc-alg}"><code>request_object_encryption_alg</code></a>, where the
+            "default" here is a deliberate tightening, the registration text says outright that a
+            registered algorithm with no method means <code>A128CBC-HS256</code>. The first row is a
+            client that registered neither and still has a method, because of that sentence.
+        </p>
+        <p class="hint">
+            <strong>An unsupported method is refused, not downgraded.</strong> The fifth row sends
+            exactly what its client registered. Falling back to something this server does offer
+            would hand the client different cryptography from the one it asked for without saying so,
+            which is the failure mode worth avoiding even when the substitute is stronger.
+        </p>
+        <p class="hint">
+            <strong>A method with no algorithm beside it is refused too.</strong> The registration
+            spec is explicit: when <code>request_object_encryption_enc</code> is included,
+            <code>request_object_encryption_alg</code> must be as well. The last row's client is
+            registered the way the spec says it cannot be, and this server treats that as a
+            registration it cannot honour rather than quietly filling in the algorithm — which is
+            what the fallback would otherwise have done.
+        </p>
+        <p class="hint">
+            <strong>Nothing about the plaintext changes.</strong> Every accepted row decrypts to the
+            same three-part signed JWT and is then checked exactly as
+            <a th:href="@{/jar}">an unencrypted one</a> is. The <code>enc</code> decides the wrapping
+            and nothing else — the same division
+            <a th:href="@{/jarm-enc-method}">JARM's two settings</a> make in the other direction.
+        </p>
+    </div>
+</main>
+</body>
+</html>

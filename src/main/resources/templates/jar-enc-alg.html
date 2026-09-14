@@ -137,7 +137,8 @@
             three-part signed JWT, which is then checked exactly as
             <a th:href="@{/jar}">an unencrypted one</a> is — type, signature, audience, expiry. The
             <code>alg</code> decides how the content encryption key travels and nothing else, and
-            <code>request_object_encryption_enc</code> would decide the other half, the way
+            <a th:href="@{/jar-enc-method}"><code>request_object_encryption_enc</code></a> decides
+            the other half, the way
             <a th:href="@{/jarm-enc-method}">JARM's two settings</a> divide the same work.
         </p>
         <p class="hint">
