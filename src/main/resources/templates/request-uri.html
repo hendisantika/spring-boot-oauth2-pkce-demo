@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('request_uri lifetime')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>A reference worth using once</h1>
+    <p class="lead">
+        RFC 9126. <a th:href="@{/par}">Pushing an authorization request</a> replaces a long query
+        string with a short reference, and the reference is the whole authorization request as far as
+        the browser is concerned. So it matters a great deal how long one lasts and how often it
+        works: a <code>request_uri</code> is short-lived and single-use, and this page spends one
+        five different ways to see which of those the server really means.
+    </p>
+
+    <div class="alert" th:if="${requestUriError}" th:text="${requestUriError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The probe signs in with its own session, pushes a request, and spends it: properly, twice
+            over, after its expiry has passed, with the expiry edited, and as somebody else.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">Client</th>
+                <td><code th:text="${clientId}">pkce-request-uri-client</code>
+                    <span class="hint" style="display:block">
+                        Confidential: the pushed request endpoint will not talk to a client that
+                        cannot authenticate.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Pushed to</th>
+                <td><code th:text="${parEndpoint}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/request-uri}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Push one and spend it five ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What a reference is made of</h2>
+        <span class="token" th:text="${run.requestUri}">-</span>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Prefix</th>
+                <td><code th:text="${prefix}">urn:ietf:params:oauth:request_uri:</code></td>
+            </tr>
+            <tr>
+                <th>Random part</th>
+                <td><code th:text="${run.randomPart}">-</code></td>
+            </tr>
+            <tr>
+                <th>Expiry</th>
+                <td><code th:text="${run.expiresAt}">-</code>
+                    <span class="hint" style="display:block">
+                        written into the value after <code th:text="${delimiter}">___</code>, and
+                        returned alongside it as
+                        <code th:text="'expires_in=' + ${run.expiresInSeconds}">expires_in=300</code>.
+                    </span></td>
+            </tr>
+        </table>
+        <p class="hint">
+            The expiry is not hidden — it is part of the reference, in milliseconds, in plain sight.
+            What matters is that it is also part of what the server looks the request up by.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five ways of spending it</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Spent</th>
+                <th style="width:19%">Answer</th>
+                <th style="width:13%">Still stored</th>
+                <th>Told to</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.outcome()}" style="white-space:nowrap"
+                          th:style="${attempt.gotCode} ? 'color:#2f6f4f;white-space:nowrap' : 'color:#b3261e;white-space:nowrap'">-</code></td>
+                <td><code th:text="${attempt.stillStored} ? 'yes' : 'no'">no</code></td>
+                <td>
+                    <span class="hint" th:if="${attempt.isAnsweredToTheClient()}">
+                        the client's redirect URI
+                    </span>
+                    <span class="hint" th:unless="${attempt.isAnsweredToTheClient()}"
+                          th:text="'the browser — ' + ${attempt.statusCode}">the browser</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            One code out of five. The two right-hand columns are the parts worth watching: a spent
+            reference does not merely stop working, it stops existing — and once it does, the refusal
+            has nowhere to go but the screen.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/request-uri/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>One-time use is a deletion, not a flag.</strong> Spring Authorization Server
+            removes the stored request the moment it is consumed — at the consent screen as well as
+            at the redirect — so the second attempt is not refused for having been used before. It is
+            refused because there is nothing there. Same answer, different reason, and the difference
+            shows in the column above.
+        </p>
+        <p class="hint">
+            <strong>A refusal that cannot reach the client lands on the user.</strong> Every failed
+            attempt here is answered with <code>400</code> and an error page, not with
+            <code>error=invalid_request</code> at the redirect URI — because the only record of where
+            to send that was the pushed request the server has just deleted or never had. A browser
+            that follows a stale bookmark shows the user a bad request; the client learns nothing and
+            simply never hears back.
+        </p>
+        <p class="hint">
+            <strong>The expiry is enforced by deleting it too.</strong> An expired reference is
+            removed before the error is returned, so a client that keeps retrying is not merely
+            refused repeatedly — the first refusal is what clears the row.
+        </p>
+        <p class="hint">
+            <strong>Editing the expiry cannot help, and the reason is elegant.</strong> The value the
+            server stores the request under is the random part <em>and</em> the expiry, joined. Move
+            the expiry a year out and the reference no longer names anything: the lookup fails before
+            the expiry is ever compared. The number is in plain sight and tamper-evident at the same
+            time, with no signature anywhere.
+        </p>
+        <p class="hint">
+            <strong>Five minutes, and nothing to configure.</strong>
+            <code>OAuth2PushedAuthorizationRequestUri.create()</code> hard-codes
+            <code>Instant.now().plusSeconds(300)</code>; there is no setting for it on the client or
+            the server. RFC 9126 section 2.2 leaves the lifetime to the server and suggests it be
+            short — five minutes is a reasonable reading, but a deployment that wanted a different one
+            would have to replace the provider.
+        </p>
+        <p class="hint">
+            <strong>The reference is not a secret, and does not need to be.</strong> The last attempt
+            presents a perfectly valid one as a different client and gets nowhere: the pushed request
+            records which client pushed it, and the authorization request has to agree. That is what
+            makes it safe for the reference to travel through a browser in the clear.
+        </p>
+        <p class="hint">
+            <strong>The expiry here was moved, not waited out.</strong> The third attempt rewrites
+            the stored request so it is keyed by an expiry a minute in the past. Waiting the real five
+            minutes would show exactly the same thing and take five minutes; what is faked is the
+            clock, not the check.
+        </p>
+    </div>
+</main>
+</body>
+</html>

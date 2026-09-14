@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
 import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
+import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
 import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MixUpController;
 import id.my.hendisantika.oauth2pkcedemo.controller.ClientJwkSetController;
@@ -69,6 +70,7 @@ public class DemoDataInitializer {
             seedMtlsRefreshClient(registeredClientRepository, properties);
             seedFreshnessClient(registeredClientRepository, properties);
             seedSilentClient(registeredClientRepository, properties);
+            seedRequestUriClient(registeredClientRepository, properties);
         };
     }
 
@@ -267,6 +269,37 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered code binding client [{}]", client.clientId());
+    }
+
+    /**
+     * The client the request_uri page drives. Confidential, because the pushed authorization request
+     * endpoint will not talk to a client that cannot authenticate, and with consent off so that one
+     * pushed request is spent by one round trip rather than by a screen.
+     */
+    void seedRequestUriClient(RegisteredClientRepository registeredClientRepository,
+                              DemoProperties properties) {
+        DemoProperties.Client client = properties.requestUriClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientSecret("{noop}" + client.clientSecret())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + RequestUriController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered request_uri client [{}]", client.clientId());
     }
 
     /**

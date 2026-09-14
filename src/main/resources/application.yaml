@@ -166,6 +166,16 @@ app:
     scopes:
       - openid
       - profile
+  # Confidential, because only a client that can authenticate may push a request. Consent is off so
+  # that one pushed request is consumed by one round trip.
+  request-uri-client:
+    registration-id: pkce-request-uri-client
+    client-id: pkce-request-uri-client
+    client-secret: request-uri-secret
+    client-name: PKCE Request URI Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password
