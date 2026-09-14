@@ -545,6 +545,10 @@ public class AuthorizationServerConfig {
         RSAKey rsaKey = new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
                 .privateKey((RSAPrivateKey) keyPair.getPrivate())
                 .keyID(UUID.randomUUID().toString())
+                // RFC 7517 section 4.2 makes "use" optional, which is why marking the signing keys
+                // matters: a client hunting for the encryption key among two RSA keys should be able
+                // to select on a marking that is present rather than on one that is absent.
+                .keyUse(KeyUse.SIGNATURE)
                 .build();
         // A second key, on a different curve, so a client that registers ES256 for its authorization
         // responses can actually be answered with one. The encoder picks by algorithm; without a key
@@ -589,6 +593,7 @@ public class AuthorizationServerConfig {
             return new ECKey.Builder(Curve.P_256, (ECPublicKey) keyPair.getPublic())
                     .privateKey(keyPair.getPrivate())
                     .keyID(UUID.randomUUID().toString())
+                    .keyUse(KeyUse.SIGNATURE)
                     .build();
         } catch (Exception ex) {
             throw new IllegalStateException("Unable to generate the EC signing key", ex);
