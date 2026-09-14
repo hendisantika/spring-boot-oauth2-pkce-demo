@@ -8,6 +8,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -119,6 +120,22 @@ public class FapiComplianceService {
                         + clientsRequiringSignedRequestObjects() + " of the "
                         + configuredClients().size() + " clients below set it for themselves"));
 
+        // No FAPI profile names this one - the checked spec is RFC 9101, and the profiles reach the
+        // same attack surface from the other side by requiring PAR, which is the row below. It is
+        // here because thirty-two of the client rows are only green while it is true.
+        checks.add(FapiCheck.of(this.requestUriPolicy.requireRegistration(),
+                "Fetched request_uris must be pre-registered",
+                "RFC 9101 \u00a710.4.1(a); no FAPI profile names it",
+                "RFC 9101 says the server should \"check that the value of the request_uri parameter "
+                        + "does not point to an unexpected location\", and a registration is what "
+                        + "makes a location expected. OpenID Connect Discovery makes the default "
+                        + "false; "
+                        + ServerMetadataCustomizer.REQUIRE_REQUEST_URI_REGISTRATION + " is "
+                        + this.requestUriPolicy.requireRegistration() + " here, and "
+                        + clientsWithRegisteredRequestUris() + " of the " + configuredClients().size()
+                        + " clients below have registered a URL. FAPI 2.0 answers the same attack by "
+                        + "requiring PAR instead, so nothing is fetched at all"));
+
         // Honest failures follow. A profile check that only ever passes is worth nothing - and this
         // one is now capable of passing, which is the only thing that makes its failing mean
         // anything: the switch exists and is off rather than being absent.
@@ -138,6 +155,20 @@ public class FapiComplianceService {
                         + "; only the mTLS listener on 8443 uses TLS"));
 
         return checks;
+    }
+
+    /** How many clients named a URL this server would be willing to go and fetch a request from. */
+    private long clientsWithRegisteredRequestUris() {
+        return configuredClients().stream()
+                .map(configured -> registeredClientRepository.findByClientId(configured.clientId()))
+                .filter(client -> client != null && hasRegisteredRequestUris(client))
+                .count();
+    }
+
+    private static boolean hasRegisteredRequestUris(RegisteredClient client) {
+        Object registered = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING);
+        return registered != null && !String.valueOf(registered).isBlank();
     }
 
     /** The same count for RFC 9126 section 6's lock. */
@@ -374,7 +405,7 @@ public class FapiComplianceService {
 
         Object registered = client.getClientSettings()
                 .getSetting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING);
-        if (registered != null && !String.valueOf(registered).isBlank()) {
+        if (hasRegisteredRequestUris(client)) {
             long count = String.valueOf(registered).trim().split("\\s+").length;
             return FapiCheck.fail(requirement, reference,
                     "Registered " + count + " request_uris. The parameters in a document fetched "
