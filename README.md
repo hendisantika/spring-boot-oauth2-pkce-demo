@@ -695,6 +695,16 @@ measured against them.
 
 ![Reading the lists](docs/images/129-jar-alg-values-reading.png)
 
+**129. request_object_encryption_alg_values_supported** — the published keys beside the list, and
+five objects that each have two of the three things needed.
+
+![The keys and the five objects](docs/images/130-jar-enc-alg-values-keys.png)
+
+**130. request_object_encryption_alg_values_supported** — why the list cannot stop a client picking
+the wrong key.
+
+![Reading the list](docs/images/131-jar-enc-alg-values-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2286,6 +2296,49 @@ Notes:
   A document that can drift from the code it describes is worse than no document. Spring Authorization
   Server advertises none of the three, having no notion of the `request` parameter at all.
 
+## `request_object_encryption_alg_values_supported`
+
+`/jar-enc-alg-values` is the encryption sibling of
+[the signing list](#request_object_signing_alg_values_supported), with one thing the signing side does
+not have: the list says which key-management algorithms this server will unwrap with, and says nothing
+about **which key to wrap to**. That is in `/oauth2/jwks`, where this server publishes three keys, two
+of them RSA. A client needs all three of: a value from the list, the algorithm
+[it registered](#request_object_encryption_alg), and the right key.
+
+| Type | Use | |
+|---|---|---|
+| RSA | `sig` | signs tokens and JARM responses |
+| EC | `sig` | signs for clients that registered ES256 |
+| RSA | `enc` | the one request objects are wrapped to |
+
+| Sent | Client | Algorithm | Wrapped to | What the server did |
+|---|---|---|---|---|
+| RSA-OAEP-256 | `pkce-demo-client` | on the list, registered | `enc` | an authorization code |
+| the same | `pkce-demo-client` | on the list, registered | **`sig`** | `could not be decrypted with this server's key` |
+| RSA-OAEP-512 | `pkce-demo-client` | on the list, **not** registered | `enc` | `encrypted with RSA-OAEP-512, and this client registered RSA-OAEP-256` |
+| RSA-OAEP-512 | `pkce-jar-oaep512-client` | on the list, registered | `enc` | an authorization code |
+| RSA1_5 | `pkce-jar-rsa15-client` | **not** on the list, registered | `enc` | `This server does not decrypt RSA1_5 request objects` |
+
+Notes:
+
+* **Rows one and two differ only in the key.** Same algorithm, same client, same registration — one
+  wrapped to the key marked `enc`, one to an RSA key marked `sig`. The second is refused with "could
+  not be decrypted", which is true and unhelpful: the server cannot tell a client that picked the
+  wrong key from an attacker that guessed. The algorithm list does not prevent this and is not meant
+  to; `use` on the published key is what does.
+* **Both RSA keys now say what they are for.** RFC 7517 §4.2 makes `use` optional, and until this page
+  only the encryption key carried it — so a client had to identify the encryption key by the *absence*
+  of a marking on the others. All three are marked now, which is the difference between selecting a
+  key and guessing one.
+* **The list is the server's, not the client's.** Rows three and four send the same advertised
+  algorithm and differ only in which client registered it — the same pairing as the signing list, one
+  specification over.
+* **Off the list is off the list.** Row five is a real JWA algorithm, registered by the client sending
+  it, refused because the server does not advertise unwrapping it.
+* **The other half of the pair is separate.** This list covers the `alg`, how the content encryption
+  key travels; [the `enc` list](#request_object_encryption_enc) covers what that key then does, and
+  the two are advertised, registered and chosen independently.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -2736,6 +2789,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestUriRegistrationController.java  /request-uri-registration
 │   ├── RegisteredRequestUriController.java  /request-uris
 │   ├── AdvertisedAlgController.java     /jar-alg-values
+│   ├── EncryptionAlgValuesController.java  /jar-enc-alg-values
 │   ├── HostedRequestObjectController.java  /hosted/**, the client's own hosting
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
@@ -2794,6 +2848,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestUriRegistrationService.java  four URLs, under both settings
 │   ├── RegisteredRequestUriService.java  registers a list, then tests it
 │   ├── AdvertisedAlgService.java        five algorithms against the lists
+│   ├── EncryptionAlgValuesService.java  five objects, three published keys
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2927,6 +2982,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RegisteredRequestUriRun.java     the list as sent, echoed and held
     ├── AdvertisedAlgAttempt.java        one algorithm, advertised and registered or not
     ├── AdvertisedAlgRun.java            the five, beside the three published lists
+    ├── EncryptionAlgValuesAttempt.java  one object, its algorithm and its key
+    ├── EncryptionAlgValuesRun.java      the five, beside the published keys
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
