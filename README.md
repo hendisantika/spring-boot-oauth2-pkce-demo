@@ -715,6 +715,15 @@ does not.
 
 ![Reading the grids](docs/images/133-jar-enc-method-values-reading.png)
 
+**134. FAPI 2.0** — the signing algorithm row: a client that registered exactly what the profile asks
+for, and is refused anyway because this server does not verify that algorithm.
+
+![ES256 passes the profile and fails the server](docs/images/134-fapi-signing-alg-es256.png)
+
+**135. FAPI 2.0** — *"shall not use none"*, in both profiles, on the two clients that registered it.
+
+![Two clients registered none](docs/images/135-fapi-signing-alg-none.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2613,7 +2622,29 @@ can turn for everybody and has not: `ClientSettings` has no
 halves here are custom, and RFC 9126 §5's server-wide value is `false` by default. The row reads that
 value live, so it passes while the switch is on.
 
-Per client, only `pkce-fapi-client` — registered specifically to the profile — meets every
+Per client, five checks. The fifth reads
+[`request_object_signing_alg`](#request_object_signing_alg), and both profiles say the same thing
+about it — FAPI 1.0 Advanced §8.6: *"For JWS, both clients and authorization servers shall use PS256
+or ES256 algorithms; should not use algorithms that use RSASSA-PKCS1-v1_5 (e.g. RS256); and shall not
+use none"*, and FAPI 2.0 §5.4.1 repeats it for every JWT it touches, adding EdDSA. A request object
+is a JWS, so this is the list it is held to:
+
+| Registered | Result | Why |
+|---|---|---|
+| `PS256` | PASS | On both lists |
+| `ES256` | PASS | On the profile's list — but **not** on [this server's](#request_object_signing_alg_values_supported), so every request object this client sends is refused. The row says so |
+| `none` | FAIL | *"shall not use none"*, in both profiles. Two clients register it, because [OpenID Connect Registration allows it](#request_object_signing_alg-none) |
+| nothing | NOT_APPLICABLE | Thirty of the thirty-four. This server would fall back to `RS256`, which the profile says should not be used — but that is this server's default rather than a client's declaration, and most of these clients never send a request object at all |
+
+The check reads the registration rather than a request, and that is the right place to look: RFC 9101
+§10.1 has this server refuse a request object signed with anything other than the algorithm agreed in
+advance, so the registration decides what can ever arrive.
+
+The `ES256` row is the one worth sitting with. The profile's list of algorithms and this server's are
+different lists, and a client can sit in the gap — doing exactly what FAPI asks and being refused
+anyway. A green row is a statement about a registration, not a promise that the flow works.
+
+Only `pkce-fapi-client`, `pkce-mtls-client` and `pkce-mtls-refresh-client` meet every client
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
 as a public client with no authentication, or a shared secret.
 
