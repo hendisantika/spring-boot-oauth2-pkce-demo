@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Requiring pushed authorization requests')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>One way in, and it is not the browser</h1>
+    <p class="lead">
+        <a th:href="@{/par}">Pushing the authorization request</a> sends the parameters to the server
+        over an authenticated back channel and hands the browser a reference. That is worth nothing
+        while the same client can also put the parameters in a query string, which is why RFC 9126 §6
+        defines <code>require_pushed_authorization_requests</code>: <em>"whether the only means of
+        initiating an authorization request the client is allowed to use is PAR"</em>. It is the same
+        shape of lock as <a th:href="@{/jar-client-required}">the one JAR defines</a>, for a different
+        door.
+    </p>
+
+    <div class="alert" th:if="${parRequiredError}" th:text="${parRequiredError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Five authorization requests: one from a client that registered nothing, then four ways of
+            starting a request for the client that may only push one.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:38%">Registered the lock</th>
+                <td><code th:text="${requiredClientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>The control client</th>
+                <td><code th:text="${ordinaryClientId}">-</code>
+                    <span class="hint" style="display:block">
+                        The same kind of confidential client, without the registration.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/par-required}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send five requests</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five requests</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:22%">Sent</th>
+                <th style="width:19%">Client</th>
+                <th style="width:17%">Carried</th>
+                <th style="width:19%">Refused by</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.clientId}">-</code>
+                    <span class="hint" style="display:block"
+                          th:if="${attempt.clientRequiresPar}">+ require_par</span>
+                </td>
+                <td><span class="hint" th:text="${attempt.carried}">-</span></td>
+                <td>
+                    <span class="hint" th:if="${attempt.refusedBy != null}"
+                          th:text="${attempt.refusedBy}">-</span>
+                    <span class="hint" th:if="${attempt.refusedBy == null}">—</span>
+                </td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            <span th:if="${run.onlyThePushedRequestWasActedOn()}">
+                Of the four requests to the locked-down client, the only one acted on is the one that
+                went through the pushed endpoint.
+            </span>
+            <span th:if="${run.bothCheckersRefusedSomething()}">
+                And two different checks did the refusing, which is worth keeping straight.
+            </span>
+        </p>
+        <p class="hint">
+            RFC 9126 §5's server-wide <code>require_pushed_authorization_requests</code> is published
+            as <code th:text="${run.publishedServerWide}">-</code>.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/par-required/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The first two rows are the same request.</strong> Same parameters, same query
+            string, same kind of confidential client — one is acted on and one is not, and the only
+            difference is a boolean on a registration. That is the whole of what this setting does,
+            and it is the piece <a th:href="@{/par}">the PAR page</a> cannot show, because a demo that
+            pushes voluntarily proves nothing about a client that would rather not.
+        </p>
+        <p class="hint">
+            <strong>Two checks, in order, and the page says which one spoke.</strong> The check the
+            registration turns on asks only whether a <code>request_uri</code> is present — it is a check about how the
+            request was <em>started</em>. Whether that reference is one this server issued, is still
+            alive, and belongs to this client is the authorization server's own check, and the
+            invented-reference row is refused by that one rather than by this. Two rules can refuse
+            the same request, and knowing which is the difference between "push it" and "push it
+            again".
+        </p>
+        <p class="hint">
+            <strong>A signed request object is not a pushed one.</strong> The last row carries a
+            perfectly good <a th:href="@{/jar}">JAR request object</a> and is refused anyway. JAR
+            stops the request being changed in the browser; PAR stops it going through the browser at
+            all. They compose — FAPI asks for both — but neither substitutes for the other, and a
+            client that registered this lock has not satisfied it by signing.
+        </p>
+        <p class="hint">
+            <strong>The server-wide half exists in the RFC and not here.</strong> RFC 9126 defines
+            <code>require_pushed_authorization_requests</code> twice: §6 as client metadata, which is
+            this page, and §5 as server metadata meaning the server "accepts authorization request
+            data only via PAR". This server publishes the §5 value as <code>false</code> in
+            <a th:href="@{/metadata}">both documents</a> — accurate, and there is no switch here to
+            make it true. <a th:href="@{/fapi}">FAPI 2.0 §5.3.1</a> asks for exactly that server-wide
+            rejection, which is why that row on the profile page still fails.
+        </p>
+        <p class="hint">
+            <strong>Spring Authorization Server has no setting for this either.</strong> It travels
+            as <code>settings.client.require-pushed-authorization-requests</code>, read by a filter
+            that runs before the authorization endpoint — and, like the request object settings
+            beside it, it is carried through
+            <a th:href="@{/dynamic-registration}">the registration endpoint</a> so a client can
+            register for it the way RFC 9126 §6 describes.
+        </p>
+    </div>
+</main>
+</body>
+</html>
