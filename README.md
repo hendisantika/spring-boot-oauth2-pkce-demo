@@ -705,6 +705,16 @@ the wrong key.
 
 ![Reading the list](docs/images/131-jar-enc-alg-values-reading.png)
 
+**131. request_object_encryption_enc_values_supported** — every advertised pair, twice over, and the
+single cell each client may occupy.
+
+![Two grids](docs/images/132-jar-enc-method-values-grids.png)
+
+**132. request_object_encryption_enc_values_supported** — why two lists multiply and a registration
+does not.
+
+![Reading the grids](docs/images/133-jar-enc-method-values-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2339,6 +2349,48 @@ Notes:
   key travels; [the `enc` list](#request_object_encryption_enc) covers what that key then does, and
   the two are advertised, registered and chosen independently.
 
+## `request_object_encryption_enc_values_supported`
+
+`/jar-enc-method-values` is the last of the three lists RFC 9101 §4 names. It is advertised separately
+from [the algorithm list](#request_object_encryption_alg_values_supported), and a client picks one
+value from each — so the two together offer **every pair**, while a client's registration names one.
+The page sends all four combinations from two differently registered clients, as a grid each:
+
+`pkce-demo-client` — registered neither half:
+
+| alg ↓ / enc → | A128CBC-HS256 | A256GCM |
+|---|---|---|
+| RSA-OAEP-256 | **accepted** | wrong enc |
+| RSA-OAEP-512 | wrong alg | wrong alg |
+
+`pkce-jar-gcm-client` — registered `RSA-OAEP-256` and `A256GCM`:
+
+| alg ↓ / enc → | A128CBC-HS256 | A256GCM |
+|---|---|---|
+| RSA-OAEP-256 | wrong enc | **accepted** |
+| RSA-OAEP-512 | wrong alg | wrong alg |
+
+And one the lists leave out: `A192CBC-HS384`, from the client that registered it —
+`This server does not decrypt A192CBC-HS384 content`.
+
+Notes:
+
+* **The grids are the page.** Four advertised pairs, one usable cell each. A client reading discovery
+  and choosing freely from both lists has three ways out of four to be wrong, and the wrongness is not
+  about cryptography — every cell is a well-formed JWE this server could open.
+* **One client registered no method at all.** OIDC Registration §2 defaults the method to
+  `A128CBC-HS256` when an *algorithm* is registered — which `pkce-demo-client` did not do either, so
+  both halves of its pair come from this server reading silence as the defaults rather than as
+  permission. Its accepted cell is the top left, and nothing about that is visible in the lists.
+* **The refusals say which half was wrong.** *wrong alg* was refused before the content encryption
+  mattered; *wrong enc* got past the algorithm and failed on the method. Two checks in sequence, and a
+  client debugging from one `invalid_request_object` would not know which of its two registrations to
+  look at.
+* **Off the list is a third kind of no.** The last row is registered by the client sending it, so it
+  is not a mismatch — it is refused because the method is on neither list.
+* **That completes RFC 9101 §4's three lists.** All published, all derived from the constants the
+  filter enforces, and all three either absent or wrong a few rounds ago.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -2790,6 +2842,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RegisteredRequestUriController.java  /request-uris
 │   ├── AdvertisedAlgController.java     /jar-alg-values
 │   ├── EncryptionAlgValuesController.java  /jar-enc-alg-values
+│   ├── EncryptionMethodValuesController.java  /jar-enc-method-values
 │   ├── HostedRequestObjectController.java  /hosted/**, the client's own hosting
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
@@ -2849,6 +2902,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RegisteredRequestUriService.java  registers a list, then tests it
 │   ├── AdvertisedAlgService.java        five algorithms against the lists
 │   ├── EncryptionAlgValuesService.java  five objects, three published keys
+│   ├── EncryptionMethodValuesService.java  every advertised pair, twice
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2984,6 +3038,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── AdvertisedAlgRun.java            the five, beside the three published lists
     ├── EncryptionAlgValuesAttempt.java  one object, its algorithm and its key
     ├── EncryptionAlgValuesRun.java      the five, beside the published keys
+    ├── EncryptionMethodCell.java        one pair, and what became of it
+    ├── EncryptionMethodGrid.java        one client's four pairs
+    ├── EncryptionMethodValuesRun.java   both grids, and the pair off the list
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
