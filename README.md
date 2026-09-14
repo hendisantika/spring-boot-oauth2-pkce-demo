@@ -724,6 +724,15 @@ for, and is refused anyway because this server does not verify that algorithm.
 
 ![Two clients registered none](docs/images/135-fapi-signing-alg-none.png)
 
+**136. FAPI 2.0** — the one algorithm §8.6.1 names, on the client that registered it.
+
+![RSA1_5 fails the profile and this server](docs/images/136-fapi-encryption-rsa15.png)
+
+**137. FAPI 2.0** — a registration the spec does not allow: a content encryption method with nothing
+to wrap its key with.
+
+![An incomplete encryption registration](docs/images/137-fapi-encryption-incomplete.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -2643,6 +2652,31 @@ advance, so the registration decides what can ever arrive.
 The `ES256` row is the one worth sitting with. The profile's list of algorithms and this server's are
 different lists, and a client can sit in the gap — doing exactly what FAPI asks and being refused
 anyway. A green row is a statement about a registration, not a promise that the flow works.
+
+The sixth check reads [`request_object_encryption_alg`](#request_object_encryption_alg), and it is a
+different shape of requirement. FAPI 1.0 Advanced §8.6.1 is one sentence long — *"For JWE, both
+clients and authorization servers shall not use the RSA1_5 algorithm"* — so it forbids a single
+algorithm and names none to choose from. FAPI 2.0 carries no JWE requirement at all; its comparison
+table gives the reason, that it keeps ID tokens out of the front channel and so *"no encryption
+required"* there, and it dropped the request object in favour of PAR.
+
+| Registered | Result | Why |
+|---|---|---|
+| `RSA-OAEP-256`, `RSA-OAEP-512` | PASS | Not `RSA1_5`. That is the whole test — neither is named by any profile |
+| `RSA1_5` | FAIL | The one algorithm §8.6.1 names. [This server does not decrypt it either](#request_object_encryption_alg), so the prohibition and the supported list agree and the request objects are refused before the profile is consulted |
+| `enc` with no `alg` | NOT_APPLICABLE | The registration [the spec does not allow](#request_object_encryption_enc) — *"When `request_object_encryption_enc` is included, `request_object_encryption_alg` MUST also be provided"*. This server refuses its encrypted request objects, so no algorithm is ever agreed |
+| nothing | NOT_APPLICABLE | Twenty-nine of the thirty-four |
+
+The blank rows mean something different here than on the signing row, and the wording says so. An
+omitted `request_object_signing_alg` really does mean `RS256`; an omitted
+`request_object_encryption_alg` means *"the RP is not declaring whether it might encrypt any Request
+Objects"*. Encryption is opt-in per request — `decryptIfEncrypted` engages only when a five-part JWE
+actually arrives — and the algorithm this server would fall back to, `RSA-OAEP-256`, is one the
+profile permits. So unlike the `RS256` fallback on the signing row, these blanks hide no exposure.
+
+`RSA1_5` is the mirror of the `ES256` row above: that client does what FAPI asks and is refused here;
+this one does what FAPI forbids and is refused here too. The two lists agreeing is the exception
+worth noticing, not the rule.
 
 Only `pkce-fapi-client`, `pkce-mtls-client` and `pkce-mtls-refresh-client` meet every client
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
