@@ -2450,6 +2450,16 @@ Only four fields are actually demanded: `issuer`, `authorization_endpoint`, `tok
 what it needed — the device flow, pushed requests, DPoP, certificate binding, rich authorization
 details — which is why the document doubles as a summary of what this demo can do.
 
+Every row names the specification that defines it, and that column has a trap in it: anything the page
+has no entry for falls back to "RFC 8414 §2", which is right for the fields RFC 8414 defines and wrong
+for every extension. A value added to the documents without an entry is therefore not uncited but
+*miscited*. Six were — the three
+[request object algorithm lists](#request_object_signing_alg_values_supported), the two OpenID Connect
+Discovery `request`/`request_uri` switches, `require_request_uri_registration`, and
+`check_session_iframe`, which had been wrong since the session management page was built. A test now
+asserts that every field citing RFC 8414 §2 is one RFC 8414 actually defines, so the next addition
+cannot slip through the same way.
+
 Notes:
 
 * **Spring Authorization Server advertises only what it knows about.** The CIBA grant, the
