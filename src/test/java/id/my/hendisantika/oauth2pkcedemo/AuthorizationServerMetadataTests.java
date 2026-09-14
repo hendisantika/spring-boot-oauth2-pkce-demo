@@ -74,6 +74,40 @@ class AuthorizationServerMetadataTests extends AbstractMySqlIntegrationTest {
     }
 
     /** RFC 8414 section 3.1, using the specification's own example. */
+    /**
+     * Every field this application adds is cited to the specification that defines it. The fallback
+     * in describe() is RFC 8414 section 2, which is right only for the fields RFC 8414 itself
+     * defines - so an extension reported that way is miscited rather than uncited, and this catches
+     * the next one added without an entry.
+     */
+    @Test
+    void everyExtensionFieldSaysWhichSpecificationDefinesIt() throws Exception {
+        // Read through MockMvc rather than over HTTP: a test that needs something listening on the
+        // issuer's port passes only when the demo happens to be running.
+        Map<String, Object> document = document("/.well-known/" 
+                + AuthorizationServerMetadataService.OAUTH_SUFFIX);
+
+        assertThat(document).isNotEmpty();
+        assertThat(metadataService.describe(document, Map.of()))
+                .filteredOn(entry -> "RFC 8414 §2".equals(entry.definedBy()))
+                .allSatisfy(entry -> assertThat(entry.name())
+                        .as("cited to RFC 8414 §2, which defines only its own fields")
+                        .isIn(RFC_8414_FIELDS));
+    }
+
+    /** RFC 8414 section 2's own list, which is what the fallback citation is true of. */
+    private static final List<String> RFC_8414_FIELDS = List.of("issuer", "authorization_endpoint",
+            "token_endpoint", "jwks_uri", "registration_endpoint", "scopes_supported",
+            "response_types_supported", "response_modes_supported", "grant_types_supported",
+            "token_endpoint_auth_methods_supported",
+            "token_endpoint_auth_signing_alg_values_supported", "service_documentation",
+            "ui_locales_supported", "op_policy_uri", "op_tos_uri", "revocation_endpoint",
+            "revocation_endpoint_auth_methods_supported",
+            "revocation_endpoint_auth_signing_alg_values_supported", "introspection_endpoint",
+            "introspection_endpoint_auth_methods_supported",
+            "introspection_endpoint_auth_signing_alg_values_supported",
+            "code_challenge_methods_supported");
+
     @Test
     void theWellKnownStringGoesBeforeThePathNotAfterIt() {
         assertThat(AuthorizationServerMetadataService.wellKnownUri("https://example.com/issuer1",
