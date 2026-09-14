@@ -74,11 +74,32 @@
             authentication, a shared secret, tokens that are not sender-constrained.
         </p>
         <p class="hint">
-            The server-side failures are real gaps rather than configuration choices. Spring
-            Authorization Server emits no <code>iss</code> in the authorization response (RFC 9207),
-            and has no per-client way to require pushed requests, so a client can always fall back to
-            an ordinary authorization request. Both would need implementing before this server could
-            be certified.
+            <strong>The algorithm row reads the registration, not the request.</strong> FAPI 1.0
+            Advanced §8.6 and FAPI 2.0 §5.4.1 say the same thing about JWS —
+            <em>"shall use PS256 or ES256 … and shall not use none"</em> — and a
+            <a th:href="@{/jar}">request object</a> is a JWS. What a client registered as its
+            <a th:href="@{/jar-alg}"><code>request_object_signing_alg</code></a> is the whole of what
+            can ever arrive, because RFC 9101 §10.1 has this server refuse a request object signed
+            with anything else. Most clients here registered nothing and are marked not applicable:
+            this server would fall back to <code>RS256</code>, which the profile says should not be
+            used, but that is this server's default rather than a client's declaration.
+        </p>
+        <p class="hint">
+            <strong>One client passes that row and still cannot use it.</strong> The profile's list
+            and <a th:href="@{/jar-alg-values}">this server's list</a> are different lists.
+            <code>ES256</code> is on the profile's and not on this server's, so the client that
+            registered it is doing exactly what FAPI asks and has every request object refused
+            anyway. A green row is a statement about the registration, not a promise that the flow
+            works.
+        </p>
+        <p class="hint">
+            The server-side failure that remains is a real gap rather than a configuration choice:
+            RFC 9126 §5's <a th:href="@{/par-server-required}">server-wide
+            <code>require_pushed_authorization_requests</code></a> is off, so a client can fall back
+            to an ordinary authorization request, and FAPI 2.0 §5.3.1 asks the server to reject those
+            from everyone. The <code>iss</code> row and the per-client PAR lock were gaps here too
+            until they were implemented — the point of a checker that fails is that its rows can
+            change.
         </p>
         <p class="hint">
             A profile check that only ever passes tells you nothing. This one is worth reading
