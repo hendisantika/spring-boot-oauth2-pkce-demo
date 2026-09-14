@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -118,12 +119,74 @@ class JarmTests extends AbstractMySqlIntegrationTest {
 
     /** Only the modes this implements are acted on; anything else is left to the server. */
     @Test
-    void onlyTheQueryJwtModesAreRecognised() {
-        assertThat(JarmResponseFilter.QUERY_JWT_MODES).containsExactlyInAnyOrder("jwt", "query.jwt");
-        assertThat(JarmResponseFilter.wantsJwtResponse(requestWithMode("jwt"))).isTrue();
-        assertThat(JarmResponseFilter.wantsJwtResponse(requestWithMode("query.jwt"))).isTrue();
+    void onlyTheJwtModesAreRecognised() {
+        assertThat(JarmResponseFilter.JWT_MODES)
+                .containsExactlyInAnyOrder("jwt", "query.jwt", "fragment.jwt", "form_post.jwt");
+        for (String mode : JarmResponseFilter.JWT_MODES) {
+            assertThat(JarmResponseFilter.wantsJwtResponse(requestWithMode(mode))).as(mode).isTrue();
+        }
+        // The same names without the suffix are ordinary response modes, and nothing here reads them.
         assertThat(JarmResponseFilter.wantsJwtResponse(requestWithMode("form_post"))).isFalse();
+        assertThat(JarmResponseFilter.wantsJwtResponse(requestWithMode("fragment"))).isFalse();
         assertThat(JarmResponseFilter.wantsJwtResponse(requestWithMode(null))).isFalse();
+    }
+
+    /**
+     * The fragment is the one part of a URL a browser keeps to itself, so the response never reaches
+     * the client's server in a request line - or its access log.
+     */
+    @Test
+    void theFragmentModeDeliversTheSameJwtAfterTheHash() throws Exception {
+        String location = authorize(JarmResponseFilter.FRAGMENT_JWT, "openid profile");
+
+        assertThat(location).contains("#response=").doesNotContain("?response=");
+        String response = URLDecoder.decode(
+                location.substring(location.indexOf("#response=") + "#response=".length()),
+                StandardCharsets.UTF_8);
+        assertThat(jwtDecoder.decode(response).getClaimAsString("code")).isNotBlank();
+    }
+
+    /** No URL carries it at all: a page that submits itself, and the client reads its own body. */
+    @Test
+    void theFormPostModeAnswersWithAPageThatSubmitsItself() throws Exception {
+        MvcResult result = mockMvc().perform(get("/oauth2/authorize")
+                        .queryParam("response_type", "code")
+                        .queryParam("client_id", properties.jarmClient().clientId())
+                        .queryParam("scope", "openid profile")
+                        .queryParam("redirect_uri", properties.issuerUri() + JarmController.CALLBACK_URI)
+                        .queryParam("state", "a-state")
+                        .queryParam("code_challenge", CODE_CHALLENGE)
+                        .queryParam("code_challenge_method", "S256")
+                        .queryParam(JarmResponseFilter.RESPONSE_MODE, JarmResponseFilter.FORM_POST_JWT)
+                        .with(user("hendi")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String body = result.getResponse().getContentAsString();
+        assertThat(result.getResponse().getRedirectedUrl()).isNull();
+        assertThat(body)
+                .contains("method=\"post\"")
+                .contains("action=\"" + properties.issuerUri() + JarmController.CALLBACK_URI + "\"")
+                .contains("onload=")
+                // Without script, the user is left something to press rather than a blank page.
+                .contains("<noscript>");
+
+        Matcher field = Pattern.compile("name=\"response\"\\s+value=\"([^\"]+)\"").matcher(body);
+        assertThat(field.find()).isTrue();
+        assertThat(jwtDecoder.decode(field.group(1)).getClaimAsString("code")).isNotBlank();
+    }
+
+    /** And the client's own endpoint receives it in the body, which is the whole point. */
+    @Test
+    void theFormPostLandsInTheClientsRequestBody() throws Exception {
+        MvcResult result = mockMvc().perform(post(JarmController.CALLBACK_URI)
+                        .param("response", "a-signed-response"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString())
+                .contains("the request body")
+                .contains("a-signed-response");
     }
 
     /** A mode nothing here implements is ignored entirely, which is the point of the last row. */
