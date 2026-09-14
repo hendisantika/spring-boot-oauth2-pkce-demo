@@ -80,6 +80,8 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jar-gcm-client` | none (public) | required | no | code | no |
 | `pkce-jar-unsupported-enc-client` | none (public) | required | no | code | no |
 | `pkce-jar-enc-only-client` | none (public) | required | no | code | no |
+| `pkce-jar-none-client` | none (public) | required | no | code | no |
+| `pkce-jar-none-strict-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -605,6 +607,15 @@ GCM apart from outside.
 cannot exist.
 
 ![Reading the methods](docs/images/111-jar-enc-method-reading.png)
+
+**111. Unsigned request objects** — six request objects, five of them carrying no signature, and the
+three reasons the refused ones were refused.
+
+![Six request objects](docs/images/112-jar-none-six-objects.png)
+
+**112. Unsigned request objects** — what is left doing the work once the signature is gone.
+
+![Reading the unsigned objects](docs/images/113-jar-none-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -1682,9 +1693,11 @@ Notes:
 * **It cuts both ways.** The fourth row is the PS256 client sending RS256 — the algorithm the *other*
   client registered, and the one most servers would take without comment. A registration that only
   ever ruled things in would not be a constraint.
-* **`alg: none` never reaches the algorithm check.** An unsigned JWT parses as a `PlainJWT`, never as
-  a `SignedJWT`, so the last row is refused for not being a signed JWT at all — before there is a
-  header to compare. Both refusals are correct; only one is about the registration.
+* **`none` is a value in the agreement, not the absence of one.** The last row is refused by the same
+  comparison as the rows above it rather than by anything special about being unsigned — and a client
+  that registers `none` is [a separate matter](#request_object_signing_alg-none). (This bullet
+  previously said an unsigned object never reached the algorithm check, which was true of the
+  implementation before `none` was supported.)
 * **Spring Authorization Server has no setting for this,** and no notion of the `request` parameter
   either. The algorithm travels as a custom client setting,
   `settings.client.request-object-signing-alg`, read by `JwtSecuredAuthorizationRequestFilter` — the
@@ -1779,6 +1792,57 @@ Notes:
   registration it cannot honour rather than quietly filling the algorithm in from the default.
 * **Nothing about the plaintext changes.** Every accepted row decrypts to the same three-part signed
   JWT, then checked exactly as an unencrypted one is. `enc` decides the wrapping and nothing else.
+
+## `request_object_signing_alg`: `none`
+
+`/jar-none` is what happens when the registered algorithm is `none` and the request object is a JWT
+with an empty signature. Reading the specifications in order is an odd experience:
+
+| Where | What it says |
+|---|---|
+| RFC 9101 §4 | the claims are "signed or signed and encrypted" |
+| RFC 9101 §6.1 | decrypting one yields "a signed Request Object" |
+| RFC 9101 §10.5 | defines `require_signed_request_object`, whose job is to refuse `alg: none` |
+| OIDC Registration | "The value `none` MAY be used." |
+
+The first two read as though unsigned request objects do not exist; the third is a security
+consideration about switching them off, which is only worth writing if they are otherwise on. This
+server follows the fourth and implements the third. Six objects, five of them unsigned:
+
+| Sent | Client | Registered | Header said | What the server did |
+|---|---|---|---|---|
+| unsigned, as it registered | `pkce-jar-none-client` | `none` | `none` | an authorization code |
+| signed, by a client that registered `none` | `pkce-jar-none-client` | `none` | `RS256` | `signed with RS256, and this client registered none` |
+| unsigned, by a client that registered RS256 | `pkce-demo-client` | `RS256` | `none` | `signed with none, and this client registered RS256` |
+| unsigned, with the defence registered | `pkce-jar-none-strict-client` | `none` + `require_signed` | `none` | `This client registered require_signed_request_object` |
+| unsigned, encrypted to this server | `pkce-jar-none-client` | `none` | `none` inside a JWE | an authorization code |
+| unsigned, naming another client | `pkce-jar-none-client` | `none` | `none` | `names client pkce-demo-client, and the request names pkce-jar-none-client` |
+
+Notes:
+
+* **Accepting `none` is not the same as accepting anything.** The second row is a properly signed
+  RS256 object from the client that registered `none`, and it is refused: the registration is an
+  agreement about what will arrive, and a better object than the one agreed is still not the one
+  agreed. The third row is the same rule pointing the other way.
+* **What is left doing the work.** Strip the signature and a request object still buys the two things
+  it was reached for beside integrity — the parameters travel as one unit the server reads instead of
+  the query string, and [pushing it](#pushed-authorization-requests) keeps it off the browser
+  entirely. What it stops buying is any answer to "who wrote this". That is why RFC 9101 §6.3's rule
+  — the `client_id` in the request and the one in the object MUST be identical — is the last row, and
+  why this round implemented it: with a signature it is a formality, because the object could only
+  have come from the client whose key verified it; without one it is the only thing tying the object
+  to the client the request names. It applies to signed objects too, and a test pins that.
+* **The encrypted row is the one worth staring at.** It is confidential, it is accepted, and it proves
+  nothing about who sent it: this server publishes its encryption key, so anyone can produce a JWE
+  addressed to it. A JWE around an `alg: none` object looks like security and is not.
+* **The defence outranks the algorithm.** The fourth client registered `none` and
+  `require_signed_request_object` together, which is a registration that contradicts itself. A
+  downgrade defence that could be talked out of it by the thing it defends against would not be one.
+  The server-wide switch works the same way and is `false` here, so the page has something to show.
+* **Both switches are now published.** `request_object_signing_alg_values_supported` and
+  `require_signed_request_object` appear in both discovery documents, cited on
+  [the metadata page](#authorization-server-metadata-rfc-8414) as RFC 9101 §4 and §10.5. Spring
+  Authorization Server advertises neither, having no notion of the `request` parameter at all.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2204,6 +2268,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectSigningAlgController.java  /jar-alg
 │   ├── RequestObjectEncryptionAlgController.java  /jar-enc-alg
 │   ├── RequestObjectEncryptionMethodController.java  /jar-enc-method
+│   ├── UnsignedRequestObjectController.java  /jar-none
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2252,6 +2317,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestObjectSigningAlgService.java  the same request signed five ways
 │   ├── RequestObjectEncryptionAlgService.java  the same request wrapped six ways
 │   ├── RequestObjectEncryptionMethodService.java  the same request encrypted six ways
+│   ├── UnsignedRequestObjectService.java  six request objects, five unsigned
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2358,6 +2424,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RequestEncryptionAlgRun.java     the six request objects
     ├── RequestEncryptionMethodAttempt.java  one object, its registration and its shape
     ├── RequestEncryptionMethodRun.java  the six request objects, and what padded
+    ├── UnsignedRequestAttempt.java      one object with no signature to check
+    ├── UnsignedRequestRun.java          the six, and which were acted on
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
