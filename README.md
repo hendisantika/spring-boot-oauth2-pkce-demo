@@ -66,6 +66,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-freshness-client` | none (public) | required | no | code | no |
 | `pkce-silent-client` | none (public) | required | no | code | no |
 | `pkce-request-uri-client` | `client_secret_basic` | required | **yes** | code | no |
+| `pkce-rar-client` | `client_secret_basic` | required | **yes** | code | no |
 
 ## What the flow looks like
 
@@ -485,6 +486,15 @@ expiry.
 server is holding nothing.
 
 ![Five ways of spending it](docs/images/88-request-uri-five-ways.png)
+
+**88. RAR enforcement** — what the token says was granted: which payment, of how much, to whom.
+
+![The granted authorization detail](docs/images/89-rar-granted-detail.png)
+
+**89. RAR enforcement** — five payment instructions held against that grant. Two accepted, and they
+are the same payment.
+
+![Five instructions](docs/images/90-rar-five-instructions.png)
 
 ## Refresh tokens and public clients
 
@@ -946,6 +956,9 @@ this practical at all.
 Not implemented: echoing `authorization_details` in the token *response* body, which the RFC also
 calls for. The claim in the token covers the demonstration.
 
+What happens when a resource server actually holds an operation against that grant is
+[its own page](#enforcing-authorization_details).
+
 ## Backchannel authentication (CIBA)
 
 `/ciba` demonstrates OpenID Connect CIBA. The client names the user it wants to authenticate and
@@ -1194,6 +1207,53 @@ Notes:
   nothing.
 * **The expiry was moved, not waited out.** The third row rewrites the stored request so it is keyed
   by an expiry a minute in the past. What is faked is the clock, not the check.
+
+## Enforcing `authorization_details`
+
+`/rar-enforcement` is the other half of [rich authorization requests](#rich-authorization-requests).
+There a user approves a particular payment rather than a category, and the token comes back carrying
+what they agreed to. That is worth something only if somebody checks it.
+
+`/payments` is a resource server that reads `authorization_details` off the token and holds the
+instruction against it. The probe gets two tokens for the same user — one carrying the granted detail
+below, one carrying none — and instructs five payments:
+
+```json
+{"type":"payment_initiation","actions":["initiate"],
+ "instructedAmount":{"currency":"EUR","amount":"25.00"},
+ "creditorName":"Merchant Ltd","creditorAccount":{"iban":"DE02100100109307118603"}}
+```
+
+| Instructed | With | Answer |
+|---|---|---|
+| 25.00 EUR to the approved account | the approved token | `200` |
+| 500.00 EUR to the approved account | the approved token | `403` — the grant covers 25.00 |
+| 25.00 EUR to a different account | the approved token | `403` — a different creditor |
+| 25.00 EUR to the approved account | a token with no `authorization_details` | `403` — nothing was approved |
+| 25.00 EUR to the approved account, again | the approved token | `200` |
+
+Notes:
+
+* **A grant is not a voucher.** The last row is the first row again, and it is accepted again. RFC
+  9396 describes what was *authorized*, not how many times it may happen, and nothing in the token
+  could record that it had been spent. A resource server that means "one payment" has to keep that
+  count itself.
+* **There is no error code for this.** RFC 9396 registers none, so the refusal uses RFC 6750 §3.1's
+  `insufficient_scope` with a description naming what exceeded the grant. It is the closest thing
+  that exists and it is not quite right — the scope was never the problem. Compare
+  [the step-up challenge](#step-up-challenge-rfc-9470), where RFC 9470 did define an error the client
+  can act on.
+* **The check cannot live in a filter.** Whether the token permits the operation depends on the
+  amount and the account in the request body, which no `SecurityFilterChain` rule can see. The chain
+  answers only "is this token valid"; the endpoint does the rest, which is where RFC 9396 leaves it.
+* **An ordinary token is refused, not waved through.** The fourth row carries a valid token for the
+  same user and the same scopes and asks for the payment that *was* approved on the other token. It
+  fails because a missing `authorization_details` is treated as nothing granted rather than as
+  nothing to check — the opposite reading is the mistake this page exists to name.
+* **Spring Authorization Server contributes the carriage, not the meaning.** It has no RFC 9396
+  support: the demo's validator refuses unknown types at the pushed request endpoint, a token
+  customizer copies the approved array onto the token, and the resource server reads that claim back.
+  Nothing in the server knows an amount from an account number.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1604,6 +1664,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── FreshnessController.java         /freshness
 │   ├── SilentAuthController.java        /silent-auth
 │   ├── RequestUriController.java        /request-uri
+│   ├── RarEnforcementController.java    /rar-enforcement
+│   ├── PaymentApiController.java        /payments — the operation the grant was about
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
 │   ├── MixUpController.java             /mixup and its own callback
 │   ├── MixUpAttackerController.java     /mixup/attacker/**, the rogue authorization server
@@ -1638,6 +1700,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── FreshnessService.java            a probe session that asks max_age three ways
 │   ├── SilentAuthService.java           a probe session that asks prompt=none five ways
 │   ├── RequestUriService.java           pushes one request and spends it five ways
+│   ├── RarEnforcementService.java       two tokens, five payment instructions
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1713,6 +1776,11 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── SilentAuthRun.java               the five questions of one probe
     ├── RequestUriAttempt.java           one way of spending a pushed reference
     ├── RequestUriRun.java               the reference, its expiry, and the five attempts
+    ├── PaymentAuthorizer.java           holds an instruction against authorization_details
+    ├── PaymentInstruction.java          the amount, currency and account asked for
+    ├── AuthorizationDetailsDecision.java  allowed or refused, and why
+    ├── RarEnforcementAttempt.java       one instruction and the answer it got
+    ├── RarEnforcementRun.java           the granted detail and the five instructions
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
