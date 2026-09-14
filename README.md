@@ -2648,6 +2648,23 @@ between the two rows is not in the rules but in what each demonstration needed. 
 break the profile to teach its lesson and the other had to keep it — so the client that registered
 `RSA1_5` fails its row while the server passes this one.
 
+**All three rows check the document against the code before the profile gets a say.** Each reads its
+list back from `ServerMetadataCustomizer.publishedClaims()` — the same `apply()` call that writes
+both discovery documents — and compares it with the set the request object filter actually applies.
+A disagreement fails the row immediately, without consulting its citation, because a profile verdict
+on an advertised value means nothing if the advertised value is not what the code does:
+
+| Disagreement | Consequence |
+|---|---|
+| The list is absent from the documents | A client can only learn the set by being refused |
+| It advertises **less** than is accepted | A working option is hidden; clients never try it |
+| It advertises **more** than is accepted | The worse one: clients plan against something that will be refused |
+
+Ordering is not disagreement — both sides are sorted before comparing. All three currently agree, so
+the rows fall through to their profile verdicts, and `ServerMetadataCustomizer` is where the
+comparison lives: that class decides what the documents say, and *"does the document match the
+code"* is a question about the document.
+
 The third of the trio completes the set. RFC 9101 §4 names all three metadata values together, and
 [`request_object_encryption_enc_values_supported`](#request_object_encryption_enc_values_supported)
 is `[A128CBC-HS256, A256GCM]`. It is the one **no FAPI profile has an opinion about** — none of the
