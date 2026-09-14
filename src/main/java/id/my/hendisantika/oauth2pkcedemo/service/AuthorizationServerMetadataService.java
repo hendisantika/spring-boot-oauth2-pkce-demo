@@ -55,7 +55,12 @@ public class AuthorizationServerMetadataService {
             Map.entry("introspection_endpoint_auth_methods_supported", "OPTIONAL"),
             Map.entry("code_challenge_methods_supported", "OPTIONAL"));
 
-    /** The document is assembled from a decade of specifications, each registering its own fields. */
+    /**
+     * The document is assembled from a decade of specifications, each registering its own fields, and
+     * this says which. Anything missing here is reported as RFC 8414 section 2, which is right for
+     * the fields that specification defines and wrong for every extension - so a value added to the
+     * documents without an entry here is not merely uncited, it is miscited.
+     */
     private static final Map<String, String> DEFINED_BY = Map.ofEntries(
             Map.entry("device_authorization_endpoint", "RFC 8628 §4"),
             Map.entry("pushed_authorization_request_endpoint", "RFC 9126 §5"),
@@ -64,11 +69,17 @@ public class AuthorizationServerMetadataService {
             Map.entry("authorization_response_iss_parameter_supported", "RFC 9207 §3"),
             Map.entry("authorization_details_types_supported", "RFC 9396 §10"),
             Map.entry("request_object_signing_alg_values_supported", "RFC 9101 §4"),
+            Map.entry("request_object_encryption_alg_values_supported", "RFC 9101 §4"),
+            Map.entry("request_object_encryption_enc_values_supported", "RFC 9101 §4"),
             Map.entry("require_signed_request_object", "RFC 9101 §10.5"),
             Map.entry("require_pushed_authorization_requests", "RFC 9126 §5"),
-            Map.entry("userinfo_endpoint", "OpenID Connect Discovery"),
-            Map.entry("subject_types_supported", "OpenID Connect Discovery"),
-            Map.entry("id_token_signing_alg_values_supported", "OpenID Connect Discovery"),
+            Map.entry("request_parameter_supported", "OpenID Connect Discovery §3"),
+            Map.entry("request_uri_parameter_supported", "OpenID Connect Discovery §3"),
+            Map.entry("require_request_uri_registration", "OpenID Connect Discovery §3"),
+            Map.entry("userinfo_endpoint", "OpenID Connect Discovery §3"),
+            Map.entry("subject_types_supported", "OpenID Connect Discovery §3"),
+            Map.entry("id_token_signing_alg_values_supported", "OpenID Connect Discovery §3"),
+            Map.entry("check_session_iframe", "OpenID Connect Session Management §3.3"),
             Map.entry("end_session_endpoint", "OpenID Connect RP-Initiated Logout"));
 
     private final RestClient restClient;
