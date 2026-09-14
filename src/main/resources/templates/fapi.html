@@ -85,12 +85,35 @@
             used, but that is this server's default rather than a client's declaration.
         </p>
         <p class="hint">
+            <strong>The encryption row is a different shape.</strong> FAPI 1.0 Advanced §8.6.1 is one
+            sentence long — <em>"For JWE, both clients and authorization servers shall not use the
+            RSA1_5 algorithm"</em> — so it forbids a single algorithm and lists none to choose from.
+            Everything that is not <code>RSA1_5</code> passes, which is why
+            <a th:href="@{/jar-enc-alg}"><code>RSA-OAEP-256</code> and <code>RSA-OAEP-512</code></a>
+            both sit green without being named by any profile. FAPI 2.0 carries no JWE requirement at
+            all: it keeps ID tokens out of the front channel and dropped the request object, so its
+            own comparison table says no encryption is required there.
+        </p>
+        <p class="hint">
+            <strong>Registering nothing here means nothing, not a default.</strong> The registration
+            spec is explicit — an omitted <code>request_object_encryption_alg</code> means
+            <em>"the RP is not declaring whether it might encrypt any Request Objects"</em>, where an
+            omitted <a th:href="@{/jar-alg}">signing algorithm</a> really does mean
+            <code>RS256</code>. Encryption here is opt-in per request, and the algorithm this server
+            would fall back to is one the profile permits, so the blank rows hide nothing. The client
+            that registered a <a th:href="@{/jar-enc-method}">content encryption method</a> and no
+            algorithm to wrap its key with gets its own wording: that registration is one the spec
+            does not allow, and this server refuses its encrypted request objects outright.
+        </p>
+        <p class="hint">
             <strong>One client passes that row and still cannot use it.</strong> The profile's list
             and <a th:href="@{/jar-alg-values}">this server's list</a> are different lists.
             <code>ES256</code> is on the profile's and not on this server's, so the client that
             registered it is doing exactly what FAPI asks and has every request object refused
             anyway. A green row is a statement about the registration, not a promise that the flow
-            works.
+            works. The <code>RSA1_5</code> row is the mirror of it: that client fails the profile and
+            is refused here too, so for once the profile's prohibition and this server's supported
+            list agree.
         </p>
         <p class="hint">
             The server-side failure that remains is a real gap rather than a configuration choice:
