@@ -18,9 +18,9 @@
     <div class="card" th:if="${run == null}">
         <h2>Run it</h2>
         <p class="hint">
-            The same authorization is asked for five ways: in the clear, signed, signed after a
-            failure, with the signed answer tampered with, and asking for a delivery mode nothing
-            here implements.
+            The same authorization is asked for seven ways: in the clear, signed, signed after a
+            failure, with the signed answer tampered with, signed and delivered after the hash,
+            signed and posted by a form, and asking for a mode this server does not read.
         </p>
         <table style="margin-top:14px">
             <tr>
@@ -33,12 +33,12 @@
             </tr>
         </table>
         <form th:action="@{/jarm}" method="post" style="margin-top:18px">
-            <button class="btn" type="submit">Ask five ways</button>
+            <button class="btn" type="submit">Ask seven ways</button>
         </form>
     </div>
 
     <div class="card" th:if="${run != null}">
-        <h2>Five answers</h2>
+        <h2>Seven answers</h2>
         <table>
             <thead>
             <tr>
@@ -76,7 +76,9 @@
         </table>
         <p class="hint" style="margin-top:14px">
             The first and last rows are the same thing: parameters in the clear. One asked for that;
-            the other asked for a signed response and was not told it would not get one.
+            the other asked for a mode this server does not read and was not told so. The three in
+            between carry the identical JWT and differ only in where it travels — the query string,
+            the fragment, or a request body.
         </p>
         <p style="margin-top:12px">
             <a class="btn secondary" th:href="@{/jarm/reset}">Clear</a>
@@ -137,11 +139,20 @@
             and FAPI asks for exactly that pair.
         </p>
         <p class="hint">
-            <strong>Two delivery modes are missing, and only the delivery.</strong> JARM also defines
-            <code>fragment.jwt</code> and <code>form_post.jwt</code>, which differ in how the JWT
-            reaches the client rather than in what it contains. This implements
-            <code>jwt</code> and <code>query.jwt</code> — the pair that means "on the query string",
-            which is the only one the authorization code flow needs.
+            <strong>Three deliveries, one JWT.</strong> The signed response is identical in every
+            mode; what differs is where it travels. <code>query.jwt</code> (and plain
+            <code>jwt</code>, which means the same for this flow) puts it on the query string, where
+            it reaches the client's server in the request line — and therefore its access log.
+            <code>fragment.jwt</code> puts it after the <code>#</code>, which a browser never sends
+            to the server at all: the response stays in the page, for script there to read.
+            <code>form_post.jwt</code> puts it in no URL whatsoever — the authorization server
+            answers with a page that submits itself, and the client reads its own request body.
+        </p>
+        <p class="hint">
+            <strong>Length is the practical reason for the last one.</strong> A signed response is
+            roughly a kilobyte, and URLs have limits that vary by browser and by every proxy in
+            between. A form post has no such ceiling, which is why it is the mode FAPI reaches for
+            when the response object grows.
         </p>
     </div>
 </main>

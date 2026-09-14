@@ -52,6 +52,9 @@ public class JarmService {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Pattern CSRF = Pattern.compile("name=\"_csrf\"\\s+value=\"([^\"]+)\"");
 
+    /** Where the self-submitting page says the response is going, shown beside what it carries. */
+    private static final String FORM_ACTION = "form action";
+
     private final DemoProperties properties;
     private final JwtDecoder jwtDecoder;
 
@@ -81,10 +84,19 @@ public class JarmService {
                 "The scope is not one the client registered, so the answer is an error - carried "
                         + "exactly like a code would be."));
         attempts.add(tampered(signed));
-        attempts.add(probe.authorize("Asked for a mode nothing here implements", "form_post",
+        attempts.add(probe.authorize("Delivered after the hash", JarmResponseFilter.FRAGMENT_JWT,
                 "openid profile",
-                "form_post is a real JARM delivery mode and this demo has not implemented it. "
-                        + "Nothing says so: the answer comes back in the clear."));
+                "The same JWT in the fragment, which a browser never sends to the server the URI "
+                        + "points at - so the response stays out of that server's logs."));
+        attempts.add(probe.authorize("Delivered in a form the browser posts",
+                JarmResponseFilter.FORM_POST_JWT, "openid profile",
+                "No URL carries it at all: the authorization server answers with a page that "
+                        + "submits itself, and the client reads its own request body."));
+        attempts.add(probe.authorize("Asked for a mode nothing here implements", "fragment",
+                "openid profile",
+                "fragment without the .jwt is an ordinary response mode, and nothing here reads "
+                        + "it. The answer comes back on the query string as if it had not been asked "
+                        + "for."));
 
         log.debug("JARM run finished; {} of {} answers were signed",
                 attempts.stream().filter(JarmAttempt::signed).count(), attempts.size());
@@ -139,6 +151,10 @@ public class JarmService {
         return json.append('}').toString();
     }
 
+    /** Either a redirect somewhere, or a page to read. A JARM answer can be either. */
+    private record Answer(String location, String body) {
+    }
+
     /** A browser with a session, asking for authorization and reading whatever comes back. */
     private final class Probe {
 
@@ -181,31 +197,84 @@ public class JarmService {
                     .queryParam(JarmResponseFilter.RESPONSE_MODE, responseMode)
                     .build().encode(StandardCharsets.UTF_8).toUriString();
 
-            String location = restClient.get()
+            Answer answer = restClient.get()
                     .uri(URI.create(uri))
                     .header(HttpHeaders.ACCEPT, MediaType.TEXT_HTML_VALUE)
                     .exchange((request, response) -> {
                         URI next = response.getHeaders().getLocation();
-                        return next == null ? null : URI.create(base).resolve(next).toString();
+                        return new Answer(next == null ? null : URI.create(base).resolve(next).toString(),
+                                next == null ? response.bodyTo(String.class) : null);
                     }, false);
 
-            Map<String, String> parameters = location == null ? Map.of() : parametersOf(location);
+            String location = answer.location();
+            Map<String, String> parameters = location != null
+                    ? parametersOf(location)
+                    : formPostParameters(answer.body());
             String jwt = parameters.get(JarmResponseFilter.RESPONSE);
             if (jwt == null) {
                 // Abbreviated only for the page: a code is long and says nothing by being complete.
                 return new JarmAttempt(label, responseMode, forDisplay(parameters), false, null,
                         Map.of(), null, note);
             }
+            Map<String, String> shown = new LinkedHashMap<>();
+            if (parameters.containsKey(FORM_ACTION)) {
+                shown.put(FORM_ACTION, parameters.get(FORM_ACTION));
+                // Submitting it is the last step a browser would take on its own, and the only way
+                // to say where the response ended up rather than where it was told to go.
+                shown.put("the client received", submit(parameters.get(FORM_ACTION), jwt));
+            }
+            shown.put(JarmResponseFilter.RESPONSE, abbreviate(jwt));
+
             try {
                 Jwt decoded = jwtDecoder.decode(jwt);
-                return new JarmAttempt(label, responseMode, Map.of("response", abbreviate(jwt)), true,
-                        true, new TreeMap<>(decoded.getClaims()), jwt, note);
+                return new JarmAttempt(label, responseMode, shown, true, true,
+                        new TreeMap<>(decoded.getClaims()), jwt, note);
             } catch (Exception ex) {
                 log.debug("The signed authorization response did not verify: {}", ex.getMessage());
-                return new JarmAttempt(label, responseMode, Map.of("response", abbreviate(jwt)), true,
-                        false, Map.of(), jwt, note);
+                return new JarmAttempt(label, responseMode, shown, true, false, Map.of(), jwt, note);
             }
         }
+
+        /** Posts the form the way the browser would, and reports what came back. */
+        @SuppressWarnings("unchecked")
+        private String submit(String action, String jwt) {
+            MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+            form.add(JarmResponseFilter.RESPONSE, jwt);
+            try {
+                Map<String, Object> received = restClient.post()
+                        .uri(URI.create(action))
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .body(form)
+                        .retrieve()
+                        .body(Map.class);
+                return received == null
+                        ? "nothing"
+                        : received.get("delivered_in") + ", " + received.get("characters")
+                        + " characters";
+            } catch (Exception ex) {
+                return "the post was refused: " + ex.getMessage();
+            }
+        }
+    }
+
+    /**
+     * A form_post.jwt answer is not a redirect at all: it is a page whose only job is to submit
+     * itself. Reading the hidden field out of it is what a browser does a moment later.
+     */
+    private static Map<String, String> formPostParameters(String body) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        if (body == null) {
+            return parameters;
+        }
+        Matcher action = Pattern.compile("action=\"([^\"]+)\"").matcher(body);
+        if (action.find()) {
+            parameters.put(FORM_ACTION, action.group(1));
+        }
+        Matcher field = Pattern.compile("name=\"([^\"]+)\"\\s+value=\"([^\"]+)\"").matcher(body);
+        while (field.find()) {
+            parameters.put(field.group(1), field.group(2).replace("&quot;", "\"").replace("&amp;", "&"));
+        }
+        return parameters;
     }
 
     /** Long values shortened, because the page is about their presence rather than their content. */
@@ -215,9 +284,11 @@ public class JarmService {
         return shortened;
     }
 
+    /** The parameters, whether they came before the {@code #} or after it. */
     private static Map<String, String> parametersOf(String location) {
         Map<String, String> parameters = new LinkedHashMap<>();
-        int query = location.indexOf('?');
+        int fragment = location.indexOf('#');
+        int query = fragment >= 0 ? fragment : location.indexOf('?');
         if (query < 0) {
             return parameters;
         }
