@@ -752,7 +752,7 @@ absent value means in each.
 ![The reading notes](docs/images/141-fapi-reading-this.png)
 
 **142. FAPI 2.0** — the whole server table: six passes, the row no profile asks for, the one the
-profile stopped asking for, and the two gaps.
+profile stopped asking for, and the three gaps — one of them kept deliberately.
 
 ![The server table](docs/images/142-fapi-server-request-uri-registration.png)
 
@@ -2626,12 +2626,19 @@ Notes:
 nothing — it takes the mechanisms on the other pages and says which combination is mandatory: pushed
 requests, PKCE, sender-constrained tokens, and client authentication that involves no shared secret.
 
-**This demo is not FAPI 2.0 compliant, and the page says so.** Two server requirements fail:
+**This demo is not FAPI 2.0 compliant, and the page says so.** Three server requirements fail:
 
 | Requirement | Why it fails |
 |---|---|
 | The server requires pushed authorization requests | The profile wants every client rejected, not the willing ones. Both halves of RFC 9126's lock are implemented — [per client](#require_pushed_authorization_requests) and [server-wide](#require_pushed_authorization_requests-as-server-metadata) — and the server-wide one is off, so the row fails as configured rather than for want of a mechanism. It passes while that switch is on |
+| Advertised request object signing algorithms are PS256 or ES256 | [`request_object_signing_alg_values_supported`](#request_object_signing_alg_values_supported) is `[PS256, RS256, none]`. §8.6 binds *"both clients and authorization servers"*, and FAPI 2.0 §5.4.1 says not to *"use or accept"* `none` — and a supported list is precisely a statement about what is accepted. **A gap kept on purpose**: the pages demonstrating `none` and `RS256` need a server that accepts them |
 | All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
+
+The second one is the server half of the per-client signing row further down. A client here can
+register `PS256`, pass its own row, and still be talking to a server that accepts `none` from
+somebody else — which is why §8.6 binds both sides and why checking only the clients would have
+been half a check. The row reads `SUPPORTED_SIGNING_ALGS`, the same constant the discovery document
+is built from, so what it reports cannot drift from what is published.
 
 A third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
 [the mix-up page](#mix-up-attack-defence-iss) implements it. The check asks the bean that actually
