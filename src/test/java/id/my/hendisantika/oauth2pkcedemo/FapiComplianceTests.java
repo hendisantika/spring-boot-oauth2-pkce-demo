@@ -4,6 +4,7 @@ import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import id.my.hendisantika.oauth2pkcedemo.service.FapiComplianceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +50,9 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
     @Autowired
     private RequestObjectPolicy requestObjectPolicy;
+
+    @Autowired
+    private RequestUriPolicy requestUriPolicy;
 
     private MockMvc mockMvc() {
         return MockMvcBuilders.webAppContextSetup(webApplicationContext).apply(springSecurity()).build();
@@ -156,7 +160,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(7));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(8));
     }
 
     /**
@@ -310,6 +314,60 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                     assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
                     assertThat(check.observed()).contains("Neither half");
                 });
+    }
+
+    /**
+     * The mechanism FAPI 1.0 Advanced blessed and FAPI 2.0 designed out, so the row cites both and
+     * fails the two clients that registered URLs to be fetched from.
+     */
+    @Test
+    void thePreRegisteredRequestUriRowFailsTheClientsThatRegisteredOne() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(requestUriCheckFor(checks, properties.fetchedRequestClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.reference()).contains("FAPI 2.0").contains("FAPI 1.0 Advanced");
+                    assertThat(check.observed()).contains("Registered 3 request_uris");
+                });
+
+        // One URL, registered to a different client so the fetching page can show the list is per
+        // client. It fails the same row, and the count in the text has to follow the registration.
+        assertThat(requestUriCheckFor(checks, properties.confidentialClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.observed()).contains("Registered 1 request_uris");
+                });
+    }
+
+    /**
+     * Registering none of them only means something while an unregistered URL cannot be used
+     * instead, so the row reads the switch rather than assuming where it is left.
+     */
+    @Test
+    void theRowForAClientWithNoRequestUrisFollowsTheRegistrationSwitch() {
+        assertThat(requestUriPolicy.requireRegistration()).isTrue();
+        assertThat(requestUriCheckFor(fapiComplianceService.clientChecks(), properties.client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    assertThat(check.observed()).contains("require_request_uri_registration is true");
+                });
+
+        boolean previous = requestUriPolicy.requireRegistration(false);
+        try {
+            assertThat(requestUriCheckFor(fapiComplianceService.clientChecks(), properties.client()))
+                    .satisfies(check -> {
+                        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                        assertThat(check.observed()).contains("could still name any https URL");
+                    });
+        } finally {
+            requestUriPolicy.requireRegistration(previous);
+        }
+    }
+
+    private FapiCheck requestUriCheckFor(Map<String, List<FapiCheck>> checks,
+                                         DemoProperties.Client configured) {
+        return rowFor(checks, configured, "pre-registered request_uri");
     }
 
     private FapiCheck encMethodCheckFor(Map<String, List<FapiCheck>> checks,
