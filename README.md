@@ -84,6 +84,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jar-none-strict-client` | none (public) | required | no | code | no |
 | `pkce-par-required-client` | `client_secret_basic` | required | **required** | code | no |
 | `pkce-fetched-request-client` | `client_secret_basic` | required | no | code | no |
+| `pkce-jar-es-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -684,6 +685,15 @@ four URLs measured against it.
 **126. request_uris** — why the fragment counts, and why an empty list is a list.
 
 ![Reading the list](docs/images/127-request-uris-reading.png)
+
+**127. request_object_signing_alg_values_supported** — the three lists, and five request objects
+measured against them.
+
+![Five request objects](docs/images/128-jar-alg-values-five-objects.png)
+
+**128. request_object_signing_alg_values_supported** — why being on the list is not permission.
+
+![Reading the lists](docs/images/129-jar-alg-values-reading.png)
 
 ## Refresh tokens and public clients
 
@@ -2232,6 +2242,50 @@ Notes:
   signature, audience, expiry, and for naming the client that asked. The list settles where the
   server is willing to go and nothing about what it finds there.
 
+## `request_object_signing_alg_values_supported`
+
+`/jar-alg-values` is the server's half of a pair. RFC 9101 §4: the client "can inform the
+authorization server of the algorithms that it supports" through
+[`request_object_signing_alg`](#request_object_signing_alg), and "likewise, the authorization server
+can inform the client" through `request_object_signing_alg_values_supported`. Two lists pointing in
+opposite directions, and an algorithm has to be on both.
+
+The three lists RFC 9101 §4 names together, as published:
+
+| Metadata | Value |
+|---|---|
+| `request_object_signing_alg_values_supported` | `[PS256, RS256, none]` |
+| `request_object_encryption_alg_values_supported` | `[RSA-OAEP-256, RSA-OAEP-512]` |
+| `request_object_encryption_enc_values_supported` | `[A128CBC-HS256, A256GCM]` |
+
+And five request objects measured against them:
+
+| Sent | Client | Registered | Advertised | What the server did |
+|---|---|---|---|---|
+| RS256 | `pkce-demo-client` | RS256 | on the list | an authorization code |
+| PS256 | `pkce-demo-client` | RS256 | on the list | `signed with PS256, and this client registered RS256` |
+| PS256 | `pkce-jar-ps-client` | PS256 | on the list | an authorization code |
+| `none` | `pkce-jar-none-client` | none | on the list | an authorization code |
+| ES256 | `pkce-jar-es-client` | ES256 | **not** on the list | `This server does not check ES256 signatures on request objects` |
+
+Notes:
+
+* **The list is a capability, not a permission.** Row two sends PS256 — on the list — from a client
+  that registered RS256, and is refused. Discovery says what the server is able to check; the client's
+  own registration says what it agreed to send. Reading the first as the second is an easy mistake,
+  because the metadata is the more visible of the two.
+* **Neither condition alone is enough.** Row three sends the same PS256 from the client that
+  registered it and is acted on. Row five sends ES256 from a client that registered ES256 and
+  publishes a key on the right curve — correctly signed, and refused because the server does not
+  advertise checking it. Two rows, two directions, one rule.
+* **The other two lists were missing.** RFC 9101 §4 names the encryption algorithm and method lists
+  alongside the signing one. Both were implemented here — [algorithms](#request_object_encryption_alg)
+  and [methods](#request_object_encryption_enc) — and neither was published until this page, leaving a
+  client to discover them by being refused, which is what discovery documents exist to prevent.
+* **Every value is derived from the constants the filter enforces,** not from a list kept beside them.
+  A document that can drift from the code it describes is worse than no document. Spring Authorization
+  Server advertises none of the three, having no notion of the `request` parameter at all.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -2681,6 +2735,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestUriMetadataController.java  /request-uri-metadata
 │   ├── RequestUriRegistrationController.java  /request-uri-registration
 │   ├── RegisteredRequestUriController.java  /request-uris
+│   ├── AdvertisedAlgController.java     /jar-alg-values
 │   ├── HostedRequestObjectController.java  /hosted/**, the client's own hosting
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
@@ -2738,6 +2793,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestUriMetadataService.java   four ways to point at one object
 │   ├── RequestUriRegistrationService.java  four URLs, under both settings
 │   ├── RegisteredRequestUriService.java  registers a list, then tests it
+│   ├── AdvertisedAlgService.java        five algorithms against the lists
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2769,7 +2825,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── Ciba*.java                       the CIBA grant, added to the token endpoint
     ├── AuthenticationContextLevel.java  factors in, acr and amr out
     ├── StepUpRequiredFilter.java        enforces acr_values at the authorization endpoint
-    ├── JarRequestSigner.java            signs RFC 9101 request objects, by name or not at all
+    ├── JarRequestSigner.java            signs RFC 9101 request objects, by name, on a
+    │                                    curve, or not at all
     ├── JwtSecuredAuthorizationRequestFilter.java  unwraps and verifies one against the
     │                                        algorithms its client registered, and uses only
     │                                        what it carries
@@ -2868,6 +2925,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── RequestUriRegistrationRun.java   the four, and what the documents said
     ├── RegisteredRequestUriAttempt.java  one URL, and whether it was on the list
     ├── RegisteredRequestUriRun.java     the list as sent, echoed and held
+    ├── AdvertisedAlgAttempt.java        one algorithm, advertised and registered or not
+    ├── AdvertisedAlgRun.java            the five, beside the three published lists
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
