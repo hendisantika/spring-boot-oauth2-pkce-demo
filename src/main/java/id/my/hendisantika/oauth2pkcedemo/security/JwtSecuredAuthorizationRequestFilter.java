@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
 import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.JWEObject;
+import com.nimbusds.jose.crypto.RSADecrypter;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jwt.JWTClaimsSet;
@@ -50,6 +52,9 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
     private final RequestMatcher authorizationEndpointMatcher;
     private final Supplier<JWKSet> clientKeys;
+
+    /** The private half of the key this server publishes for clients to encrypt requests to. */
+    private final RSAKey decryptionKey;
     private final String issuerUri;
 
     /**
@@ -60,7 +65,9 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      *                   server is already listening.
      */
     public JwtSecuredAuthorizationRequestFilter(String authorizationEndpointUri,
-                                                Supplier<JWKSet> clientKeys, String issuerUri) {
+                                                Supplier<JWKSet> clientKeys, String issuerUri,
+                                                RSAKey decryptionKey) {
+        this.decryptionKey = decryptionKey;
         this.authorizationEndpointMatcher =
                 PathPatternRequestMatcher.withDefaults().matcher(authorizationEndpointUri);
         // Verified with Nimbus directly rather than NimbusJwtDecoder: that decoder pins the JWT type
@@ -86,7 +93,7 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
         JWTClaimsSet claims;
         try {
-            claims = verify(requestObject);
+            claims = verify(decryptIfEncrypted(requestObject));
         } catch (IllegalArgumentException ex) {
             log.debug("Rejecting request object: {}", ex.getMessage());
             writeError(response, "invalid_request_object", ex.getMessage());
@@ -96,6 +103,30 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         Map<String, String[]> parameters = parametersFrom(claims);
         log.debug("Accepted a request object from [{}] carrying {}", claims.getIssuer(), parameters.keySet());
         filterChain.doFilter(new RequestObjectParameters(request, parameters), response);
+    }
+
+    /**
+     * RFC 9101 section 6.2: a request object may be signed and then encrypted to the authorization
+     * server, in which case what arrives is a JWE with the signed object inside. Everything after
+     * this point is the same either way - the signature still has to be checked, because encryption
+     * says only that nobody else read the request, not who wrote it.
+     *
+     * @return the signed request object, whether it arrived wrapped or not
+     */
+    private String decryptIfEncrypted(String requestObject) {
+        if (requestObject.split("\\.").length != 5) {
+            return requestObject;
+        }
+        try {
+            JWEObject encrypted = JWEObject.parse(requestObject);
+            encrypted.decrypt(new RSADecrypter(this.decryptionKey));
+            log.debug("Decrypted a request object encrypted with {} / {}",
+                    encrypted.getHeader().getAlgorithm(), encrypted.getHeader().getEncryptionMethod());
+            return encrypted.getPayload().toString();
+        } catch (Exception ex) {
+            throw new IllegalArgumentException(
+                    "The request object could not be decrypted with this server's key");
+        }
     }
 
     /**

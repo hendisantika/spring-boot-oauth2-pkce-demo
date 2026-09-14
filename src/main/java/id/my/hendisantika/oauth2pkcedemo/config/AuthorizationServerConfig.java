@@ -1,9 +1,11 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
 import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
@@ -252,7 +254,7 @@ public class AuthorizationServerConfig {
                         new JwtSecuredAuthorizationRequestFilter(
                                 authorizationServerSettings.getAuthorizationEndpoint(),
                                 () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
-                                properties.issuerUri()),
+                                properties.issuerUri(), REQUEST_DECRYPTION_KEY),
                         StepUpRequiredFilter.class)
                 // RFC 9449 section 10. Runs ahead of the token endpoint so that a request which
                 // cannot prove possession of the key the code was bound to is turned away before
@@ -477,7 +479,35 @@ public class AuthorizationServerConfig {
         // A second key, on a different curve, so a client that registers ES256 for its authorization
         // responses can actually be answered with one. The encoder picks by algorithm; without a key
         // that can carry it, the setting would be a promise the server could not keep.
-        return new ImmutableJWKSet<>(new JWKSet(List.of(rsaKey, generateEcKey())));
+        //
+        // And a third, marked for encryption, so a client can encrypt a request object to this
+        // server. Signing keys are not reused for that: the use tells a client which is which, and
+        // one key doing both jobs is a habit worth not demonstrating.
+        return new ImmutableJWKSet<>(
+                new JWKSet(List.of(rsaKey, generateEcKey(), REQUEST_DECRYPTION_KEY)));
+    }
+
+    /**
+     * The key clients encrypt request objects to. Generated once and held, because the filter that
+     * decrypts needs the private half and the published set needs the public one.
+     */
+    private static final RSAKey REQUEST_DECRYPTION_KEY = generateRequestDecryptionKey();
+
+    private static RSAKey generateRequestDecryptionKey() {
+        try {
+            return new RSAKeyGenerator(2048)
+                    .keyUse(KeyUse.ENCRYPTION)
+                    .keyID(UUID.randomUUID().toString())
+                    .generate();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to generate the request decryption key", ex);
+        }
+    }
+
+    /** The private half, for the one filter that has to undo what a client encrypted. */
+    @Bean
+    public RSAKey requestDecryptionKey() {
+        return REQUEST_DECRYPTION_KEY;
     }
 
     /** P-256, the curve ES256 names. */

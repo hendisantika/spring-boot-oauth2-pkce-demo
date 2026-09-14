@@ -3,6 +3,7 @@ package id.my.hendisantika.oauth2pkcedemo;
 import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKMatcher;
 import com.nimbusds.jose.jwk.JWKSelector;
+import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.JWTParser;
@@ -123,8 +124,11 @@ class JarmAlgorithmTests extends AbstractMySqlIntegrationTest {
     void theServerPublishesAKeyForEachAlgorithmItOffers() throws Exception {
         List<JWK> keys = jwkSource.get(new JWKSelector(new JWKMatcher.Builder().build()), null);
 
-        assertThat(keys).hasSize(2);
-        assertThat(keys).extracting(jwk -> jwk.getKeyType().getValue())
+        // The signing keys: one per algorithm offered. The set also holds an encryption key, which
+        // request objects are encrypted to and which nothing signs with.
+        assertThat(keys).filteredOn(jwk -> KeyUse.ENCRYPTION != jwk.getKeyUse())
+                .hasSize(2)
+                .extracting(jwk -> jwk.getKeyType().getValue())
                 .containsExactlyInAnyOrder("RSA", "EC");
         assertThat(JarmResponseFilter.SUPPORTED_ALGORITHMS).containsExactlyInAnyOrder("RS256", "ES256");
     }

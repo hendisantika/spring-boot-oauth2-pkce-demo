@@ -1,6 +1,12 @@
 package id.my.hendisantika.oauth2pkcedemo.security;
 
 import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.EncryptionMethod;
+import com.nimbusds.jose.JWEAlgorithm;
+import com.nimbusds.jose.JWEHeader;
+import com.nimbusds.jose.JWEObject;
+import com.nimbusds.jose.Payload;
+import com.nimbusds.jose.crypto.RSAEncrypter;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -82,6 +88,36 @@ public final class JarRequestSigner {
     }
 
     /** Signed with a key the authorization server has never seen, for the failing case. */
+    /**
+     * RFC 9101 section 6.2: signed first, then encrypted to the authorization server. The order is
+     * the same as JARM's and for the same reason - the signature has to be over what the server will
+     * read, not over a blob it cannot see inside.
+     *
+     * @param serverKey the encryption key the authorization server publishes
+     */
+    public String signAndEncrypt(String clientId, String issuerUri, Map<String, String> parameters,
+                                 RSAKey serverKey) {
+        String signed = sign(clientId, issuerUri, parameters);
+        return encrypt(signed, serverKey);
+    }
+
+    /** Wraps an already-signed request object for one recipient and nobody else. */
+    public String encrypt(String signedRequestObject, RSAKey serverKey) {
+        try {
+            JWEObject encrypted = new JWEObject(
+                    new JWEHeader.Builder(JWEAlgorithm.RSA_OAEP_256, EncryptionMethod.A128CBC_HS256)
+                            .keyID(serverKey.getKeyID())
+                            // So the server knows a JWT is inside rather than arbitrary bytes.
+                            .contentType("JWT")
+                            .build(),
+                    new Payload(signedRequestObject));
+            encrypted.encrypt(new RSAEncrypter(serverKey));
+            return encrypted.serialize();
+        } catch (JOSEException ex) {
+            throw new IllegalStateException("Unable to encrypt the request object", ex);
+        }
+    }
+
     public String signWithAnotherKey(String clientId, String issuerUri, Map<String, String> parameters) {
         return generate().sign(clientId, issuerUri, parameters);
     }
