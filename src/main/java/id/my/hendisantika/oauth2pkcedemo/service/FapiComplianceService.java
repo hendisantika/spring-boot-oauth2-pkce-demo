@@ -41,6 +41,15 @@ public class FapiComplianceService {
             ClientAuthenticationMethod.TLS_CLIENT_AUTH,
             ClientAuthenticationMethod.SELF_SIGNED_TLS_CLIENT_AUTH);
 
+    /**
+     * The JWS algorithms both FAPI profiles name. FAPI 1.0 Advanced section 8.6 says clients and
+     * authorization servers "shall use PS256 or ES256 algorithms; should not use algorithms that use
+     * RSASSA-PKCS1-v1_5 (e.g. RS256); and shall not use none", and FAPI 2.0 section 5.4.1 says the
+     * same of every JWT it touches, adding EdDSA. A request object is a JWS, so this is the list it
+     * is held to.
+     */
+    private static final Set<String> ACCEPTED_SIGNING_ALGS = Set.of("PS256", "ES256", "EdDSA");
+
     private final RegisteredClientRepository registeredClientRepository;
     private final AuthorizationServerSettings settings;
     /** The handler that actually sends authorization responses, so the check below is about it. */
@@ -180,6 +189,53 @@ public class FapiComplianceService {
                 properties.jarNoneStrictClient(), properties.parRequiredClient(), properties.fetchedRequestClient(), properties.jarEsClient());
     }
 
+    /**
+     * What the client registered as its request object signing algorithm, judged against the list
+     * both profiles give. Only the registration is visible from here, and that is the right thing to
+     * look at: RFC 9101 section 10.1 has this server refuse a request object signed with anything
+     * other than the algorithm agreed in advance, so the registration decides what can ever arrive.
+     */
+    private static FapiCheck requestObjectAlgorithmCheck(RegisteredClient client) {
+        String requirement = "Request objects are signed with PS256 or ES256";
+        String reference = "FAPI 1.0 Advanced \u00a78.6, FAPI 2.0 \u00a75.4.1";
+
+        // Read as an Object for the same reason isSet does.
+        Object registered = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.SIGNING_ALG_SETTING);
+        if (registered == null) {
+            // Nothing to judge. This server would verify a request object from such a client as
+            // RS256, but that default is its own choice rather than anything the client declared,
+            // and most of these clients never send a request object at all.
+            return FapiCheck.notApplicable(requirement, reference,
+                    "No request_object_signing_alg registered. This server falls back to "
+                            + JwtSecuredAuthorizationRequestFilter.DEFAULT_SIGNING_ALG
+                            + ", which the profile says should not be used - but that is this "
+                            + "server's default rather than a client's declaration");
+        }
+
+        String algorithm = String.valueOf(registered);
+        if (JwtSecuredAuthorizationRequestFilter.NO_SIGNATURE.equals(algorithm)) {
+            return FapiCheck.fail(requirement, reference,
+                    "Registered none, which both profiles say shall not be used. This server accepts "
+                            + "it because OpenID Connect Registration allows it, and refuses it once "
+                            + "either half of require_signed_request_object is on");
+        }
+        if (!ACCEPTED_SIGNING_ALGS.contains(algorithm)) {
+            return FapiCheck.fail(requirement, reference,
+                    "Registered " + algorithm + ", which is not one of PS256, ES256 or EdDSA");
+        }
+        if (!JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.contains(algorithm)) {
+            // An honest split worth showing rather than rounding off: the profile's list and this
+            // server's list are different lists, and a registration can sit in one and not the
+            // other. Such a client passes this row and still cannot get a request object verified.
+            return FapiCheck.pass(requirement, reference,
+                    "Registered " + algorithm + ", which the profile asks for - but this server does "
+                            + "not verify " + algorithm + " signatures on request objects, so every "
+                            + "one it sends is refused");
+        }
+        return FapiCheck.pass(requirement, reference, "Registered " + algorithm);
+    }
+
     private static List<FapiCheck> checksFor(RegisteredClient client) {
         List<FapiCheck> checks = new ArrayList<>();
 
@@ -206,6 +262,8 @@ public class FapiComplianceService {
                         : "Not certificate-bound. DPoP would also satisfy this, but it is chosen per "
                         + "request rather than recorded on the registration, so it cannot be "
                         + "confirmed from here"));
+
+        checks.add(requestObjectAlgorithmCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
             checks.add(FapiCheck.of(!client.getTokenSettings().isReuseRefreshTokens(),
