@@ -2460,6 +2460,12 @@ Discovery `request`/`request_uri` switches, `require_request_uri_registration`, 
 asserts that every field citing RFC 8414 §2 is one RFC 8414 actually defines, so the next addition
 cannot slip through the same way.
 
+One row carries a link as well as a citation: `require_pushed_authorization_requests` points at
+[the page that turns it on](#require_pushed_authorization_requests-as-server-metadata), where the
+published value can be watched changing. A document says what a server claims; that page says what it
+does about the claim. A second test walks every linked path and asserts the page answers, so a
+cross-link cannot quietly become a dead end.
+
 Notes:
 
 * **Spring Authorization Server advertises only what it knows about.** The CIBA grant, the
