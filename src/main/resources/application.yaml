@@ -317,6 +317,15 @@ app:
     scopes:
       - openid
       - profile
+  # Hosts its request objects and registers the URLs, per OpenID Connect Registration's request_uris.
+  fetched-request-client:
+    registration-id: pkce-fetched-request-client
+    client-id: pkce-fetched-request-client
+    client-secret: fetched-request-secret
+    client-name: PKCE Hosted Request Object Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

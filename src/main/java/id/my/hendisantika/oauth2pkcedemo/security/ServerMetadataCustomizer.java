@@ -55,13 +55,13 @@ public final class ServerMetadataCustomizer {
 
     /**
      * OpenID Connect Discovery section 3: the {@code request_uri} parameter, meaning a URL the
-     * server fetches the request object from. This one does not, so the value is false - and
+     * server fetches the request object from. This one does, from the URLs a client registered - and
      * <a href="https://www.rfc-editor.org/rfc/rfc9126#section-5">RFC 9126 section 5</a> says a
-     * request_uri obtained from the pushed endpoint is usable "regardless" of it.
+     * request_uri obtained from the pushed endpoint is usable regardless of this value either way.
      */
     public static final String REQUEST_URI_PARAMETER_SUPPORTED = "request_uri_parameter_supported";
 
-    /** OpenID Connect Discovery section 3, and moot where nothing is fetched by reference. */
+    /** OpenID Connect Discovery section 3: which URLs may be fetched, rather than whether any may. */
     public static final String REQUIRE_REQUEST_URI_REGISTRATION = "require_request_uri_registration";
 
     private final AuthorizationServerSettings settings;
@@ -70,14 +70,17 @@ public final class ServerMetadataCustomizer {
     /** Read on every request rather than captured, so the published values are the live ones. */
     private final RequestObjectPolicy requestObjectPolicy;
     private final PushedAuthorizationPolicy pushedAuthorizationPolicy;
+    private final RequestUriPolicy requestUriPolicy;
 
     public ServerMetadataCustomizer(AuthorizationServerSettings settings, DemoProperties properties,
                                     RequestObjectPolicy requestObjectPolicy,
-                                    PushedAuthorizationPolicy pushedAuthorizationPolicy) {
+                                    PushedAuthorizationPolicy pushedAuthorizationPolicy,
+                                    RequestUriPolicy requestUriPolicy) {
         this.settings = settings;
         this.properties = properties;
         this.requestObjectPolicy = requestObjectPolicy;
         this.pushedAuthorizationPolicy = pushedAuthorizationPolicy;
+        this.requestUriPolicy = requestUriPolicy;
     }
 
     /** RFC 8414, {@code /.well-known/oauth-authorization-server}. */
@@ -128,8 +131,8 @@ public final class ServerMetadataCustomizer {
         // default to request_parameter_supported=false and request_uri_parameter_supported=true,
         // which describes this server backwards on both counts.
         claim.accept(REQUEST_PARAMETER_SUPPORTED, true);
-        claim.accept(REQUEST_URI_PARAMETER_SUPPORTED, false);
-        claim.accept(REQUIRE_REQUEST_URI_REGISTRATION, false);
+        claim.accept(REQUEST_URI_PARAMETER_SUPPORTED, true);
+        claim.accept(REQUIRE_REQUEST_URI_REGISTRATION, this.requestUriPolicy.requireRegistration());
         // The lists are edited rather than appended to: the OIDC document already declares openid,
         // and a document that names a value twice is describing itself carelessly.
         grantTypes.accept(values ->

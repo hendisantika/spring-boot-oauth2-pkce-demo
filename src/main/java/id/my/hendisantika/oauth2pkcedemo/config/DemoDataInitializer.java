@@ -7,6 +7,7 @@ import id.my.hendisantika.oauth2pkcedemo.controller.JarmClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarmController;
 import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.controller.HostedRequestObjectController;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
@@ -88,6 +89,8 @@ public class DemoDataInitializer {
             seedRequestEncryptionClients(registeredClientRepository, properties);
             seedUnsignedRequestObjectClients(registeredClientRepository, properties);
             seedParRequiredClient(registeredClientRepository, properties);
+            seedFetchedRequestClient(registeredClientRepository, properties);
+            registerOtherClientRequestUri(registeredClientRepository, properties);
             seedJarmEncryptionMethod(registeredClientRepository, properties,
                     properties.jarmGcmClient(), "A256GCM");
             seedJarmEncryptionMethod(registeredClientRepository, properties,
@@ -588,6 +591,65 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered PAR-required client [{}]", client.clientId());
+    }
+
+    /**
+     * RFC 9101 section 5.2 with OpenID Connect Registration's {@code request_uris}: the three URLs
+     * this client may be pointed at, and no others. The list is the answer to section 10.4.1 clause
+     * (a) - it is what makes a location expected.
+     */
+    void seedFetchedRequestClient(RegisteredClientRepository registeredClientRepository,
+                                  DemoProperties properties) {
+        DemoProperties.Client client = properties.fetchedRequestClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        String registered = String.join(" ",
+                properties.issuerUri() + HostedRequestObjectController.HOSTED_URI,
+                properties.issuerUri() + HostedRequestObjectController.WRONG_TYPE_URI,
+                properties.issuerUri() + HostedRequestObjectController.RECURSIVE_URI);
+
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientSecret("{noop}" + client.clientSecret())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .setting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING, registered)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered [{}] with three request_uris", client.clientId());
+    }
+
+    /**
+     * One URL registered to a different client, so the page can show that the list is per client
+     * rather than a list of URLs this server is willing to visit.
+     */
+    void registerOtherClientRequestUri(RegisteredClientRepository registeredClientRepository,
+                                       DemoProperties properties) {
+        RegisteredClient client = registeredClientRepository
+                .findByClientId(properties.confidentialClient().clientId());
+        if (client == null || client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING) != null) {
+            return;
+        }
+        ClientSettings settings = ClientSettings
+                .withSettings(new java.util.LinkedHashMap<>(client.getClientSettings().getSettings()))
+                .setting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING,
+                        properties.issuerUri() + HostedRequestObjectController.OTHER_CLIENT_URI)
+                .build();
+        registeredClientRepository.save(
+                RegisteredClient.from(client).clientSettings(settings).build());
+        log.info("Registered one request_uri for [{}]", client.getClientId());
     }
 
     /**

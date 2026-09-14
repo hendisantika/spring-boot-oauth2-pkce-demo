@@ -28,6 +28,8 @@ import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectClientRegistratio
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestUriFetcher;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcClientRegistrationAuthenticationProvider;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
 import id.my.hendisantika.oauth2pkcedemo.security.MaxAgeRequiredFilter;
@@ -144,6 +146,8 @@ public class AuthorizationServerConfig {
             ServerMetadataCustomizer serverMetadataCustomizer,
             RequestObjectPolicy requestObjectPolicy,
             PushedAuthorizationPolicy pushedAuthorizationPolicy,
+            RequestUriPolicy requestUriPolicy,
+            RequestUriFetcher requestUriFetcher,
             DemoProperties properties) throws Exception {
         // A generator of its own rather than a shared bean. Supplying an OAuth2TokenGenerator bean
         // replaces the one Spring Authorization Server assembles internally, and that one carries
@@ -276,7 +280,8 @@ public class AuthorizationServerConfig {
                                 authorizationServerSettings.getAuthorizationEndpoint(),
                                 () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
                                 properties.issuerUri(), REQUEST_DECRYPTION_KEY,
-                                registeredClientRepository, requestObjectPolicy),
+                                registeredClientRepository, requestObjectPolicy,
+                                requestUriPolicy, requestUriFetcher),
                         StepUpRequiredFilter.class)
                 // RFC 9126 section 6. Runs beside the request object filter and for the same
                 // reason: a client that may only start an authorization request one way is not
@@ -338,9 +343,10 @@ public class AuthorizationServerConfig {
     public ServerMetadataCustomizer serverMetadataCustomizer(AuthorizationServerSettings settings,
                                                              DemoProperties properties,
                                                              RequestObjectPolicy requestObjectPolicy,
-                                                             PushedAuthorizationPolicy pushedAuthorizationPolicy) {
+                                                             PushedAuthorizationPolicy pushedAuthorizationPolicy,
+                                                             RequestUriPolicy requestUriPolicy) {
         return new ServerMetadataCustomizer(settings, properties, requestObjectPolicy,
-                pushedAuthorizationPolicy);
+                pushedAuthorizationPolicy, requestUriPolicy);
     }
 
     /**
@@ -355,6 +361,18 @@ public class AuthorizationServerConfig {
     public PushedAuthorizationPolicy pushedAuthorizationPolicy() {
         return new PushedAuthorizationPolicy(
                 PushedAuthorizationPolicy.REQUIRE_PUSHED_REQUESTS_DEFAULT);
+    }
+
+    /** OpenID Connect Discovery's require_request_uri_registration, in one place. */
+    @Bean
+    public RequestUriPolicy requestUriPolicy() {
+        return new RequestUriPolicy(RequestUriPolicy.REQUIRE_REGISTRATION_DEFAULT);
+    }
+
+    /** RFC 9101 section 5.2.3's GET, with section 10.4.1's precautions built in. */
+    @Bean
+    public RequestUriFetcher requestUriFetcher() {
+        return new RequestUriFetcher();
     }
 
     @Bean

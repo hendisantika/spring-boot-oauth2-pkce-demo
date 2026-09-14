@@ -54,14 +54,17 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     /** RFC 9101 section 10.8. */
     public static final String REQUEST_OBJECT_TYPE = "oauth-authz-req+jwt";
 
+    /** RFC 9101 section 7, neither of which Spring Security's OAuth2ErrorCodes defines. */
+    public static final String INVALID_REQUEST_OBJECT = "invalid_request_object";
+
+    public static final String INVALID_REQUEST_URI = "invalid_request_uri";
+
     /**
-     * RFC 9101 section 5.2 passes a request object by reference: the client hands over a URL and the
-     * authorization server fetches it. This server does not implement that, which is what it
-     * publishes as {@code request_uri_parameter_supported: false}.
+     * OpenID Connect Dynamic Client Registration: the {@code request_uri} values a client may use,
+     * which is how RFC 9101 section 10.4.1 clause (a) - "does not point to an unexpected location" -
+     * is answered. Spring Authorization Server has no setting for it either.
      */
-    public static final String REQUEST_URI_NOT_FETCHED =
-            "This server does not fetch request objects by reference; "
-                    + ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED + " is false";
+    public static final String REQUEST_URIS_SETTING = "settings.client.request-uris";
 
     /**
      * RFC 9101 section 10.1: the algorithm a client says it will sign request objects with. Spring
@@ -132,6 +135,12 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     /** Where the registered signing algorithm is read from. */
     private final RegisteredClientRepository registeredClients;
 
+    /** OpenID Connect Discovery's require_request_uri_registration, read live. */
+    private final RequestUriPolicy requestUriPolicy;
+
+    /** RFC 9101 section 5.2.3's GET, with section 10.4.1's precautions around it. */
+    private final RequestUriFetcher requestUriFetcher;
+
     /**
      * RFC 9101 section 10.5, as server metadata: when true, no client may send an unsigned request
      * object however it is registered, and no client may send an authorization request without one
@@ -153,10 +162,14 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
                                                 Supplier<JWKSet> clientKeys, String issuerUri,
                                                 RSAKey decryptionKey,
                                                 RegisteredClientRepository registeredClients,
-                                                RequestObjectPolicy policy) {
+                                                RequestObjectPolicy policy,
+                                                RequestUriPolicy requestUriPolicy,
+                                                RequestUriFetcher requestUriFetcher) {
         this.decryptionKey = decryptionKey;
         this.registeredClients = registeredClients;
         this.policy = policy;
+        this.requestUriPolicy = requestUriPolicy;
+        this.requestUriFetcher = requestUriFetcher;
         this.authorizationEndpointMatcher =
                 PathPatternRequestMatcher.withDefaults().matcher(authorizationEndpointUri);
         // Verified with Nimbus directly rather than NimbusJwtDecoder: that decoder pins the JWT type
@@ -180,19 +193,22 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
             return;
         }
 
+        String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
         String requestUri = request.getParameter(OAuth2ParameterNames.REQUEST_URI);
         if (StringUtils.hasText(requestUri) && requestUri.regionMatches(true, 0, "http", 0, 4)) {
             // A request_uri that is a URL to fetch, rather than a reference the pushed endpoint
-            // handed out. Both arrive in the same parameter and mean entirely different things, and
-            // without this the client gets the authorization server's failed lookup of a reference
-            // it never asked for. The test is the scheme rather than the shape of the other kind:
-            // RFC 9126 section 4 leaves the format of a pushed request_uri to the server.
-            log.debug("Rejecting a request_uri this server would have to fetch: {}", requestUri);
-            writeError(response, OAuth2ErrorCodes.INVALID_REQUEST, REQUEST_URI_NOT_FETCHED);
-            return;
+            // handed out. Both arrive in the same parameter and mean entirely different things; the
+            // test is the scheme rather than the shape of the other kind, because RFC 9126 section 4
+            // leaves the format of a pushed request_uri to the server.
+            try {
+                requestObject = fetchRequestObject(requestUri, clientId);
+            } catch (IllegalArgumentException ex) {
+                log.debug("Rejecting a fetched request_uri: {}", ex.getMessage());
+                writeError(response, INVALID_REQUEST_URI, ex.getMessage());
+                return;
+            }
         }
 
-        String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
         if (!StringUtils.hasText(requestObject)) {
             // RFC 9101 section 10.5's first sentence, which is the downgrade the section is named
             // after: a request that is not a JWT-secured one at all bypasses everything this filter
@@ -211,13 +227,60 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
             claims = verify(decryptIfEncrypted(requestObject, clientId), clientId);
         } catch (IllegalArgumentException ex) {
             log.debug("Rejecting request object: {}", ex.getMessage());
-            writeError(response, "invalid_request_object", ex.getMessage());
+            writeError(response, INVALID_REQUEST_OBJECT, ex.getMessage());
             return;
         }
 
         Map<String, String[]> parameters = parametersFrom(claims);
+        if (parameters.containsKey(REQUEST) || parameters.containsKey(OAuth2ParameterNames.REQUEST_URI)) {
+            // RFC 9101 section 4: "request and request_uri parameters MUST NOT be included in
+            // Request Objects", which is also section 10.4.1 clause (d) - a server that followed one
+            // would be performing the recursive GET that clause is about.
+            log.debug("Rejecting a request object that carries another request reference");
+            writeError(response, INVALID_REQUEST_OBJECT,
+                    "A request object may not carry request or request_uri");
+            return;
+        }
         log.debug("Accepted a request object from [{}] carrying {}", claims.getIssuer(), parameters.keySet());
         filterChain.doFilter(new RequestObjectParameters(request, parameters), response);
+    }
+
+    /**
+     * RFC 9101 section 5.2: retrieve the request object from the URL the client named, having first
+     * decided that the URL is one this client said it would use.
+     *
+     * @return the request object, to be verified exactly as one passed by value is
+     */
+    private String fetchRequestObject(String requestUri, String clientId) {
+        if (!requestUri.regionMatches(true, 0, "https", 0, 5) && !hostedHere(requestUri)) {
+            // Section 5.2: the request_uri "MUST be an https URI" where the client hosts it. This
+            // demo has no TLS on its issuer - the FAPI page fails a requirement over it - so a URL on
+            // this server's own origin is allowed through http and nothing else is. A deployment
+            // deletes the second half of this condition.
+            throw new IllegalArgumentException("A fetched request_uri must be https");
+        }
+        if (this.requestUriPolicy.requireRegistration() && !registeredRequestUris(clientId)
+                .contains(requestUri)) {
+            throw new IllegalArgumentException("This request_uri is not registered for this client, "
+                    + "and " + ServerMetadataCustomizer.REQUIRE_REQUEST_URI_REGISTRATION
+                    + " is true");
+        }
+        return this.requestUriFetcher.fetch(requestUri);
+    }
+
+    /**
+     * Whether the URL is on this application's own origin. Only the demo's lack of TLS makes this
+     * worth having: it is not a rule from anywhere.
+     */
+    private boolean hostedHere(String requestUri) {
+        return requestUri.startsWith(this.issuerUri + "/");
+    }
+
+    /** What this client registered as {@code request_uris}, and nothing any other client did. */
+    private List<String> registeredRequestUris(String clientId) {
+        String configured = registeredSetting(clientId, REQUEST_URIS_SETTING);
+        return configured == null || configured.isBlank() ? List.of()
+                : List.of(configured.split("\\s+"));
     }
 
     /**
