@@ -505,6 +505,15 @@ are the same payment.
 
 ![Five calls](docs/images/92-dpop-nonce-five-calls.png)
 
+**92. Signed introspection** — the same question four ways: unsigned JSON, and three signed answers
+each addressed to whoever asked.
+
+![Four answers](docs/images/93-introspection-four-answers.png)
+
+**93. Signed introspection** — the JWT, and the RFC 7662 object inside it.
+
+![The signed response](docs/images/94-introspection-signed-response.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -752,6 +761,9 @@ which tokens are real. Revoking then introspecting is what actually proves the r
 
 Revoking an access token stops that one token; revoking a refresh token invalidates the authorization
 it came from, taking the access token with it.
+
+What that answer is worth as *evidence* — signed, typed and addressed to the caller — is
+[its own page](#signed-introspection-responses-rfc-9701).
 
 ## Pushed authorization requests
 
@@ -1310,6 +1322,45 @@ Notes:
 * **The [DPoP page](#sender-constrained-tokens-dpop) is left alone** — its resource server accepts a
   proof on its own, which is the ordinary arrangement and the one worth seeing first.
 
+## Signed introspection responses (RFC 9701)
+
+`/introspection-jwt` asks what [introspection](#introspection-and-revocation) is worth as evidence. An
+RFC 7662 response is a bare JSON object: true of nothing in particular, addressed to nobody, signed by
+no one. A resource server that wants to cache that answer, hand it on, or prove later what the
+authorization server said needs more — so RFC 9701 lets the same response come back as a signed JWT.
+
+One access token, asked about four ways:
+
+| Asked | Came back as | Signature | Addressed to |
+|---|---|---|---|
+| `Accept: application/json` | `application/json` | none | nobody — `active: true` |
+| `Accept: application/token-introspection+jwt` | the JWT form | verifies | `pkce-exchange-client` |
+| the same token, by another client | the JWT form | verifies | `pkce-relay-client` |
+| a token that was never issued | the JWT form | verifies | `pkce-exchange-client` — `active: false` |
+
+Notes:
+
+* **Spring Authorization Server has no RFC 9701 support.** Neither the media type nor the
+  `token_introspection` claim appears anywhere in it, and the endpoint writes JSON unconditionally.
+  What it does give is the hook — `introspectionResponseHandler` on the endpoint configurer.
+* **Nothing changes for a client that does not ask.** The handler reads `Accept` and otherwise
+  delegates to the same `OAuth2TokenIntrospectionHttpMessageConverter` the server would have used, so
+  the introspection page and every existing caller get byte-for-byte what they always did.
+* **The audience is the point, not the signature.** A signature says the authorization server wrote
+  it; `aud` says who it wrote it *for*. Rows two and three are the same question about the same token
+  and the answers are not interchangeable.
+* **The `typ` header is not decoration, and the demo proves it by accident.** RFC 9701 types the JWT
+  `token-introspection+jwt` so nothing checking only a signature can mistake it for an access token —
+  and this server's own `JwtDecoder` bean *refuses* these responses, because Spring Security's
+  default validator chain insists on `typ: JWT`. Verifying them needs a second decoder that expects
+  the right type; a laxer first one would have been the wrong fix. A test pins the refusal.
+* **Two conversions are load-bearing.** The introspection claims hold `Instant`s and collections;
+  RFC 7662 wants numeric dates and one space-delimited `scope` string. Handing the Java types to the
+  signer fails outright — its serialiser cannot see inside `java.time`.
+* **Encryption is the half this does not do.** RFC 9701 also allows the response to be encrypted to
+  the client, which matters because it carries scopes and a subject. Signing is the useful half here,
+  where the transport is already private and the point is provenance.
+
 ## JWT-secured authorization requests (JAR)
 
 `/jar` demonstrates RFC 9101. The authorization request travels as a JWT the client signed, so the
@@ -1721,6 +1772,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestUriController.java        /request-uri
 │   ├── RarEnforcementController.java    /rar-enforcement
 │   ├── DpopNonceController.java         /dpop-nonce
+│   ├── IntrospectionJwtController.java  /introspection-jwt
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
@@ -1759,6 +1811,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequestUriService.java           pushes one request and spends it five ways
 │   ├── RarEnforcementService.java       two tokens, five payment instructions
 │   ├── DpopNonceService.java            a bound token, then five calls with five proofs
+│   ├── IntrospectionJwtService.java     one token, introspected four ways
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -1843,6 +1896,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── DpopNonceRequiredFilter.java     the use_dpop_nonce challenge Spring does not write
     ├── DpopNonceAttempt.java            one call, its nonce, and the answer
     ├── DpopNonceRun.java                the key, the token, and the five calls
+    ├── IntrospectionJwtResponseHandler.java  signs the introspection response when asked
+    ├── IntrospectionResponseAttempt.java  one answer, signed or not
+    ├── IntrospectionJwtRun.java         the four answers
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
