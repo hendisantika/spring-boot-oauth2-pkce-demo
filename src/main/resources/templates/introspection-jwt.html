@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Signed introspection')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>An answer worth keeping</h1>
+    <p class="lead">
+        RFC 9701. <a th:href="@{/introspect}">Introspection</a> ordinarily answers with a bare JSON
+        object: true of nothing in particular, addressed to nobody, signed by no one. A resource
+        server that wants to cache that answer, hand it on, or prove later what the authorization
+        server actually said needs more than that — so the same response can come back as a signed
+        JWT instead, naming its issuer and its audience.
+    </p>
+
+    <div class="alert" th:if="${introspectionError}" th:text="${introspectionError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            One access token is minted and then asked about four ways: as JSON, as a signed JWT, as a
+            signed JWT for a different caller, and — still signed — about a token that was never
+            issued.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Endpoint</th>
+                <td><code th:text="${endpoint}">-</code></td>
+            </tr>
+            <tr>
+                <th>Asked by</th>
+                <td><code th:text="${clientId}">pkce-exchange-client</code>
+                    <span class="hint" style="display:block">
+                        and once by <code th:text="${otherClientId}">pkce-relay-client</code>, to see
+                        who the answer is addressed to.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>Asked for with</th>
+                <td><code th:text="'Accept: ' + ${mediaType}">-</code></td>
+            </tr>
+        </table>
+        <form th:action="@{/introspection-jwt}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Ask four ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Four answers</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Asked</th>
+                <th style="width:22%">Came back as</th>
+                <th style="width:12%">Signature</th>
+                <th>Addressed to</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block"
+                          th:text="'Accept: ' + ${attempt.askedFor}">-</span>
+                </td>
+                <td><code th:text="${attempt.contentType}">-</code></td>
+                <td>
+                    <code th:if="${attempt.signed}"
+                          th:text="${attempt.signatureVerifies} ? 'verifies' : 'does not verify'"
+                          th:style="${attempt.signatureVerifies} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code>
+                    <span class="hint" th:unless="${attempt.signed}">none</span>
+                </td>
+                <td>
+                    <code th:if="${attempt.audience != null}" th:text="${attempt.audience}">-</code>
+                    <span class="hint" th:unless="${attempt.audience != null}">nobody</span>
+                    <span class="hint" style="display:block"
+                          th:text="${attempt.isActive()} ? 'active: true' : 'active: false'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px" th:if="${run.everySignatureVerified()}">
+            Every signed answer verifies against the keys the server publishes — including the last
+            one. A signed <code>active: false</code> is a statement too: it says this server was asked
+            and denied knowing the token, which a bare <code>{"active":false}</code> cannot.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>The same answer, twice over</h2>
+        <div th:each="attempt : ${run.attempts}" th:if="${attempt.signed and attempt.audience != null}">
+            <p class="hint">
+                Addressed to <code th:text="${attempt.audience}">-</code>, issued by
+                <code th:text="${attempt.issuer}">-</code>, with
+                <code th:text="'typ: ' + ${attempt.type}">-</code>:
+            </p>
+            <span class="token" th:text="${attempt.token}">-</span>
+            <table style="margin-top:14px">
+                <tr th:each="claim : ${attempt.introspection}">
+                    <th style="width:26%" th:text="${claim.key}">active</th>
+                    <td><code th:text="${claim.value}">-</code></td>
+                </tr>
+            </table>
+        </div>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/introspection-jwt/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Spring Authorization Server has no RFC 9701 support.</strong> Neither
+            <code>application/token-introspection+jwt</code> nor the
+            <code>token_introspection</code> claim appears anywhere in it, and
+            <code>OAuth2TokenIntrospectionEndpointFilter</code> writes the JSON form unconditionally.
+            What it does give is the hook: <code>introspectionResponseHandler</code> on the endpoint
+            configurer, which is where this page's handler sits.
+        </p>
+        <p class="hint">
+            <strong>Nothing changes for a client that does not ask.</strong> The handler looks at
+            <code>Accept</code> and delegates to the same
+            <code>OAuth2TokenIntrospectionHttpMessageConverter</code> the server would have used, so
+            the <a th:href="@{/introspect}">introspection page</a> and every existing caller get
+            byte-for-byte what they always did. The first row above is that path.
+        </p>
+        <p class="hint">
+            <strong>The audience is the point, not the signature.</strong> A signature says the
+            authorization server wrote it; the <code>aud</code> says who it wrote it <em>for</em>.
+            Rows two and three are the same question about the same token, and the answers are not
+            interchangeable — one resource server cannot hand its introspection result to another and
+            have it mean anything, which is exactly what you want of a cached answer.
+        </p>
+        <p class="hint">
+            <strong>The <code>typ</code> header is not decoration, and this page proves it.</strong>
+            RFC 9701 gives the JWT its own type — <code>token-introspection+jwt</code>, the media type
+            without its prefix — so that something checking only a signature and an issuer cannot be
+            handed an introspection response and take it for an access token. The demonstration is
+            accidental: this server's own <code>JwtDecoder</code> bean <em>refuses</em> these
+            responses, because Spring Security's default validator chain insists on
+            <code>typ: JWT</code>. Verifying them here needs a second decoder that expects the right
+            type. A laxer first one would have been the wrong fix.
+        </p>
+        <p class="hint">
+            <strong>Encryption is the half this does not do.</strong> RFC 9701 also allows the
+            response to be encrypted to the client
+            (<code>introspection_encrypted_response_alg</code>), which matters because an
+            introspection response carries scopes, a subject and often more. Signing without
+            encrypting is the useful half here, where the transport is already private and the point
+            is provenance.
+        </p>
+        <p class="hint">
+            <strong>What a resource server gains.</strong> It can keep the answer for as long as the
+            token lives rather than asking again on every call, and it can show what it was told.
+            Without that, a cached introspection result is a private note a resource server made to
+            itself, indistinguishable from one it invented.
+        </p>
+    </div>
+</main>
+</body>
+</html>

@@ -15,6 +15,7 @@
         <a th:href="@{/tokens}" sec:authorize="isAuthenticated()">Tokens</a>
         <a th:href="@{/refresh}" sec:authorize="isAuthenticated()">Refresh</a>
         <a th:href="@{/introspect}" sec:authorize="isAuthenticated()">Introspect</a>
+        <a th:href="@{/introspection-jwt}">Signed introspection</a>
         <a th:href="@{/stepup}" sec:authorize="isAuthenticated()">Step-up</a>
         <a th:href="@{/stepup-challenge}" sec:authorize="isAuthenticated()">Step-up challenge</a>
         <a th:href="@{/freshness}" sec:authorize="isAuthenticated()">Freshness</a>
