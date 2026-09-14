@@ -240,6 +240,44 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(client.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
     }
 
+    /**
+     * The third advertised list. No FAPI profile names a content encryption method, so the row
+     * borrows the same chain the per-client enc row does and says so.
+     */
+    @Test
+    void theAdvertisedEncSetRowNamesItsBorrowedChain() {
+        assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("request object enc set is closed and advertised");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+            assertThat(check.reference()).contains("RFC 8725").contains("FAPI 2.0");
+            assertThat(check.observed())
+                    .contains("request_object_encryption_enc_values_supported")
+                    .contains(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS
+                            .stream().sorted().toList().toString())
+                    .contains("No FAPI profile names a content encryption method");
+        });
+    }
+
+    /**
+     * The row claims the set is closed and points below for the proof rather than asserting it, so
+     * the client it points at had better still be failing for that reason.
+     */
+    @Test
+    void theClosedSetClaimIsBackedByAClientThatFailsForBeingOutsideIt() {
+        FapiCheck server = fapiComplianceService.serverChecks().stream()
+                .filter(c -> c.requirement().contains("enc set is closed"))
+                .findFirst()
+                .orElseThrow();
+        FapiCheck client = encMethodCheckFor(fapiComplianceService.clientChecks(),
+                properties.jarUnsupportedEncClient());
+
+        assertThat(server.observed()).contains("A192CBC-HS384");
+        assertThat(client.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+        assertThat(client.observed()).contains("A192CBC-HS384");
+        assertThat(JwtSecuredAuthorizationRequestFilter.SUPPORTED_ENCRYPTION_METHODS)
+                .doesNotContain("A192CBC-HS384");
+    }
+
     @Test
     void theMechanismsTheProfileMandatesAreAllPresent() {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
