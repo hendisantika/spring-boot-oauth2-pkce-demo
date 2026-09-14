@@ -71,6 +71,7 @@ Seeded into MySQL on first start, passwords BCrypt-hashed:
 | `pkce-jarm-client` | none (public) | required | no | code | no |
 | `pkce-jarm-ec-client` | none (public) | required | no | code | no |
 | `pkce-jarm-none-client` | none (public) | required | no | code | no |
+| `pkce-jarm-encrypted-client` | none (public) | required | no | code | no |
 
 ## What the flow looks like
 
@@ -538,6 +539,15 @@ server does not read.
 **98. JARM algorithms** — the two keys the server publishes, and the `kid` that tells them apart.
 
 ![The published keys](docs/images/99-jarm-alg-keys.png)
+
+**99. JARM encryption** — the same answer signed, and signed then encrypted: three parts against
+five.
+
+![A JWS and a JWE](docs/images/100-jarm-enc-jws-vs-jwe.png)
+
+**100. JARM encryption** — what stays readable, and what is inside once the client decrypts it.
+
+![The JWE header](docs/images/101-jarm-enc-header.png)
 
 ## Refresh tokens and public clients
 
@@ -1470,6 +1480,46 @@ Notes:
 * **Spring Authorization Server has no setting for this,** because it has no JARM. `ClientSettings`
   carries arbitrary named settings, so the value lives there and the filter reads it — which is how a
   deployment would extend a registration ahead of the library.
+* **Hiding the answer is a separate setting**, and the other half of the same registration:
+  [`authorization_encrypted_response_alg`](#authorization_encrypted_response_alg).
+
+## `authorization_encrypted_response_alg`
+
+`/jarm-enc` is the other half of the JARM registration. Signing settles who wrote the answer;
+[the algorithm page](#authorization_signed_response_alg) is about that. It does nothing at all about
+who can *read* it — a signed JWT is base64, not ciphertext. A client that minds registers
+`authorization_encrypted_response_alg` as well, and the signed response becomes the payload of a JWE.
+
+| Client | What it was handed | Readable without a key |
+|---|---|---|
+| `pkce-jarm-client` | 3 parts — a JWS | `code`, `state`, `iss`, `aud` |
+| `pkce-jarm-encrypted-client` | 5 parts — a JWE | nothing |
+
+Decrypting with the client's private key reveals the signed response unchanged, and its signature
+still verifies against the server's published keys.
+
+Notes:
+
+* **Signed, then encrypted — the order is not a preference.** JARM nests the signed JWT inside the
+  JWE, so the signature is over the response the client will actually read. Encrypting first and
+  signing the ciphertext would prove only that somebody signed an opaque blob.
+* **The key is the client's, which reverses who publishes what.** Everywhere else here the
+  authorization server publishes and clients verify; encryption runs the other way, so the client
+  publishes at `/jarm-client-jwks.json` and the registration's `jwkSetUrl` points there. A test pins
+  that only the public half is published.
+* **What it is actually for.** The response travels over TLS either way, so this is not about the
+  wire. It is about everywhere a URL goes afterwards: browser history, a `Referer` header, the
+  client's own access log, every proxy in between.
+* **The method has a default.** The registration names only `alg`, and `enc` comes out
+  `A128CBC-HS256` — JARM's default, visible in the JWE header. The header stays readable by design:
+  it says which key and which algorithms undo the encryption, and `cty: JWT` (RFC 7519 §5.2) says
+  there is another JWT inside.
+* **A client that asks for this and publishes nothing is refused,** exactly as one asking for a
+  signing algorithm the server cannot produce is. There is no key to encrypt to, and answering in the
+  clear instead would defeat the setting.
+* **The demo's client and server share a process,** so this one key set is read from the bean rather
+  than fetched from a port the application would be calling itself on. Every other JWKS URL still goes
+  over the network, as a real one always would.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -1888,6 +1938,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── IntrospectionJwtController.java  /introspection-jwt
 │   ├── JarmController.java              /jarm
 │   ├── JarmAlgorithmController.java     /jarm-alg
+│   ├── JarmEncryptionController.java    /jarm-enc
+│   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
 │   ├── StrongResourceController.java    /resource/transfer, the operation being protected
@@ -1929,6 +1981,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── IntrospectionJwtService.java     one token, introspected four ways
 │   ├── JarmService.java                 one authorization, asked for seven ways
 │   ├── JarmAlgorithmService.java        the same request from three registrations
+│   ├── JarmEncryptionService.java       one answer signed, one signed and encrypted
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2021,6 +2074,8 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     ├── JarmRun.java                     the seven answers
     ├── JarmAlgorithmAttempt.java        one client, its setting, and the header it got
     ├── JarmAlgorithmRun.java            the three registrations and the published keys
+    ├── JarmClientKeys.java              the client's key pair, and how it decrypts
+    ├── JarmEncryptionRun.java           the two answers, the header, and what was inside
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
