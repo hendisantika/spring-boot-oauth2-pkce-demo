@@ -82,6 +82,10 @@ public class DemoDataInitializer {
             seedJarmVariant(registeredClientRepository, properties, properties.jarmEcClient(), "ES256");
             seedJarmVariant(registeredClientRepository, properties, properties.jarmNoneClient(), "none");
             seedJarmEncryptedClient(registeredClientRepository, properties);
+            seedJarmEncryptionMethod(registeredClientRepository, properties,
+                    properties.jarmGcmClient(), "A256GCM");
+            seedJarmEncryptionMethod(registeredClientRepository, properties,
+                    properties.jarmUnsupportedEncClient(), "A192CBC-HS384");
         };
     }
 
@@ -375,6 +379,40 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered encrypted JARM client [{}]", client.clientId());
+    }
+
+    /**
+     * An encrypting JARM client that differs from the last only in the content encryption it named.
+     * {@code alg} stays RSA-OAEP-256 throughout: the two settings are chosen independently, and the
+     * page exists to show what changes when only the second one does.
+     */
+    void seedJarmEncryptionMethod(RegisteredClientRepository registeredClientRepository,
+                                  DemoProperties properties, DemoProperties.Client client,
+                                  String encryptionMethod) {
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + JarmController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .jwkSetUrl(properties.issuerUri()
+                                + JarmClientJwkSetController.JARM_CLIENT_JWK_SET_URI)
+                        .setting(JarmResponseFilter.ENCRYPTED_RESPONSE_ALG, "RSA-OAEP-256")
+                        .setting(JarmResponseFilter.ENCRYPTED_RESPONSE_ENC, encryptionMethod)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered JARM client [{}] for {}", client.clientId(), encryptionMethod);
     }
 
     /**

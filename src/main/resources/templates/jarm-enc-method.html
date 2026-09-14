@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('JARM content encryption')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Two settings, two different jobs</h1>
+    <p class="lead">
+        A JWE is encrypted twice over. <a th:href="@{/jarm-enc}"><code>alg</code></a> says how the
+        content encryption key is wrapped for the recipient; <code>authorization_encrypted_response_enc</code>
+        says what that key then encrypts the payload with. They are chosen independently, and this
+        page changes only the second — three registrations, identical but for one word.
+    </p>
+
+    <div class="alert" th:if="${encMethodError}" th:text="${encMethodError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <table style="margin-top:4px">
+            <tr>
+                <th style="width:30%">The setting</th>
+                <td><code th:text="${setting}">-</code></td>
+            </tr>
+            <tr>
+                <th>Unchanged throughout</th>
+                <td><code th:text="${algSetting}">-</code> is <code>RSA-OAEP-256</code> for all three
+                    <span class="hint" style="display:block">
+                        so any difference below is the content encryption alone.
+                    </span></td>
+            </tr>
+            <tr>
+                <th>This server offers</th>
+                <td><code th:text="${supported}">-</code>
+                    <span class="hint" style="display:block">
+                        JWA registers more; this is a list, not a limit of the format. Omitting the
+                        setting means <code th:text="${defaultMethod}">A128CBC-HS256</code>.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jarm-enc-method}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Ask as each client</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Three registrations</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Client</th>
+                <th style="width:16%">Registered as</th>
+                <th style="width:18%">enc in the header</th>
+                <th>Shape of the JWE</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td><code th:text="${attempt.clientId}">-</code></td>
+                <td>
+                    <code th:if="${attempt.registeredAs != null}" th:text="${attempt.registeredAs}">-</code>
+                    <span class="hint" th:unless="${attempt.registeredAs != null}">nothing</span>
+                </td>
+                <td>
+                    <code th:if="${attempt.headerMethod != null}" th:text="${attempt.headerMethod}"
+                          style="color:#2f6f4f">-</code>
+                    <span class="hint" th:unless="${attempt.headerMethod != null}">no JWE at all</span>
+                </td>
+                <td>
+                    <span th:if="${attempt.encrypted}" style="display:block">
+                        <span class="hint">iv</span>
+                        <code th:text="${attempt.ivBytes()} + ' bytes'">-</code>
+                        <span class="hint">, ciphertext</span>
+                        <code th:text="${attempt.ciphertextBytes()} + ' bytes'">-</code>
+                        <span class="hint">, tag</span>
+                        <code th:text="${attempt.tagBytes()} + ' bytes'">-</code>
+                    </span>
+                    <span class="hint" style="display:block" th:if="${attempt.encrypted}"
+                          th:text="'for a payload of ' + ${attempt.plaintextChars} + ' characters — '
+                                   + ${attempt.overhead()} + ' bytes of padding'">-</span>
+                    <span class="hint" style="display:block" th:unless="${attempt.encrypted}"
+                          th:text="${attempt.error} + ' — the registration names a method this server does not offer'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            The wrapped key is the same length in both encrypted rows, because <code>alg</code> never
+            changed. Everything that did change is to the right of it.
+        </p>
+        <p class="hint" th:if="${run.everyPayloadWasASignedJwt}">
+            And every one of them decrypted to a three-part signed JWT — a different code and state
+            each time, because each row is its own authorization, but the same thing underneath.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jarm-enc-method/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>CBC pads and GCM does not.</strong> <code>A128CBC-HS256</code> is AES in CBC mode
+            with a separate HMAC, and CBC works a block at a time — so the payload is padded up to a
+            multiple of sixteen bytes whether it needs it or not. <code>A256GCM</code> is a stream
+            cipher with an authentication tag, and its ciphertext is exactly as long as what went in.
+            That is the difference the measurements above are showing, and it is the only one visible
+            from outside.
+        </p>
+        <p class="hint">
+            <strong>The initialisation vector differs too.</strong> CBC takes a sixteen-byte IV, one
+            cipher block; GCM takes twelve, the size its counter construction is defined for. Neither
+            is a secret — both travel in the clear as the JWE's second-to-last segment — but a reused
+            one would be catastrophic for GCM in particular, which is why it is random per response.
+        </p>
+        <p class="hint">
+            <strong>Both are authenticated, by different routes.</strong> CBC gets its integrity from
+            the HMAC named in the second half of <code>A128CBC-HS256</code>, computed over the
+            ciphertext after encryption; GCM produces its tag as part of encrypting. Either way the
+            last segment is that tag, and either way changing a byte of ciphertext makes decryption
+            fail rather than produce rubbish.
+        </p>
+        <p class="hint">
+            <strong>The key lengths are not what they look like.</strong>
+            <code>A128CBC-HS256</code> needs a 256-bit content encryption key — half for AES-128, half
+            for the HMAC — while <code>A256GCM</code> needs 256 bits for AES alone. The number in the
+            name refers to the cipher, not to the key the <code>alg</code> has to wrap, and the
+            wrapped key is the same size here either way because RSA-OAEP-256 output is fixed by the
+            RSA modulus rather than by its contents.
+        </p>
+        <p class="hint">
+            <strong>An unsupported method is refused, not downgraded.</strong> The third registration
+            names <code>A192CBC-HS384</code> — a real JWA method this server does not offer. Falling
+            back to one it does would give the client something other than what it registered, and
+            without telling it; the answer comes back as an error in the clear instead, exactly as
+            <a th:href="@{/jarm-alg}">an unsupported signing algorithm</a> does.
+        </p>
+        <p class="hint">
+            <strong>Nothing about the plaintext changes.</strong> Every encrypted row above carries
+            the same signed JWT it would have carried unencrypted — a different code and state each
+            time, because each is a separate authorization, but the same three-part JWS with the same
+            claims and the same signature. <code>enc</code> decides the wrapping and nothing else.
+        </p>
+    </div>
+</main>
+</body>
+</html>

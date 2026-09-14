@@ -228,6 +228,22 @@ app:
     scopes:
       - openid
       - profile
+  # The same encryption with a different content cipher, so the two shapes can be compared.
+  jarm-gcm-client:
+    registration-id: pkce-jarm-gcm-client
+    client-id: pkce-jarm-gcm-client
+    client-name: PKCE JARM GCM Client
+    scopes:
+      - openid
+      - profile
+  # A real JWA method this server does not offer, to show what a registration it cannot meet does.
+  jarm-unsupported-enc-client:
+    registration-id: pkce-jarm-unsupported-enc-client
+    client-id: pkce-jarm-unsupported-enc-client
+    client-name: PKCE JARM Unsupported Enc Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password
