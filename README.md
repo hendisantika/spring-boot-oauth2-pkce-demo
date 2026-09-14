@@ -647,6 +647,15 @@ works.
 
 ![Reading the PAR lock](docs/images/119-par-required-reading.png)
 
+**119. Requiring pushed requests, server-wide** — the same four requests under both settings, with
+the published document and the profile row read at each turn.
+
+![The same four requests, both ways](docs/images/120-par-server-required-both-ways.png)
+
+**120. Requiring pushed requests, server-wide** — why this is the row the FAPI page could not pass.
+
+![Reading the server-wide lock](docs/images/121-par-server-required-reading.png)
+
 ## Refresh tokens and public clients
 
 `/refresh` runs `grant_type=refresh_token` on demand — while the current access token is still
@@ -1999,17 +2008,55 @@ Notes:
   [JAR request object](#jwt-secured-authorization-requests-jar) and is refused anyway. JAR stops the
   request being changed in the browser; PAR stops it going through the browser at all. They compose —
   FAPI asks for both — but neither substitutes for the other.
-* **Both halves are in the RFC; one is implemented here.** RFC 9126 defines
+* **Both halves are in the RFC, and both are implemented.** RFC 9126 defines
   `require_pushed_authorization_requests` twice: §6 as client metadata, which is this page, and §5 as
   server metadata meaning the server "accepts authorization request data only via PAR". The §5 value
-  is published as `false` in both documents — accurate, and there is no switch to make it true, which
-  is why [FAPI 2.0's server-wide requirement](#fapi-20-security-profile) still fails. (An earlier
-  version of that FAPI row said RFC 9126 defines no server metadata for this. It does, in §5; the row
-  now says so.)
+  is published in both documents and has [a page of its own](#require_pushed_authorization_requests-as-server-metadata).
+  (An earlier version of the FAPI row said RFC 9126 defines no server metadata for this. It does, in
+  §5.)
 * **Spring Authorization Server has no setting for it either.** It travels as
   `settings.client.require-pushed-authorization-requests`, read by `PushedAuthorizationRequiredFilter`,
   and is carried through [the registration endpoint](#dynamic-client-registration-rfc-7591) beside the
   request object settings so a client can register for it the way §6 describes.
+
+## `require_pushed_authorization_requests` as server metadata
+
+`/par-server-required` is RFC 9126 §5, the other half of
+[the per-client lock](#require_pushed_authorization_requests): *"whether the authorization server
+accepts authorization request data only via PAR"*, for every client at once. It is also the switch
+[FAPI 2.0 §5.3.1](#fapi-20-security-profile) has been asking for since this demo began. The same four
+requests, sent twice:
+
+| Sent | Client | Switch off | Switch on |
+|---|---|---|---|
+| what the documents said | every client | `require_par: false` | `require_par: true` |
+| what the profile page said | every client | `FAIL` | `PASS` |
+| an ordinary authorization request | `pkce-confidential-client` | the consent screen | `This server accepts authorization request data only via PAR` |
+| a pushed request | `pkce-confidential-client` | the consent screen | the consent screen |
+| a signed request object | `pkce-confidential-client` | the consent screen | `…only via PAR` |
+| an ordinary request, from the locked-down client | `pkce-par-required-client` | `This client registered require_pushed_authorization_requests` | `…only via PAR` |
+
+Notes:
+
+* **This is the row the FAPI page could not pass.** The profile says the server "shall reject
+  authorization requests sent without [RFC9126]" — every client, not the willing ones — and until this
+  switch existed there was nothing to turn. The profile row is read at both moments and follows it,
+  because that check asks the running configuration: it goes green by the configuration changing
+  rather than by the check being rewritten.
+* **Server metadata outranks the registration, never the other way.** The last row's client had
+  already locked its own door, so it is refused in both columns, and while the switch is on the
+  refusal is the server's. A client cannot register its way out of a server-wide rule, which is the
+  only arrangement that makes one worth having.
+* **A signed request object is still not a pushed one.** A valid
+  [JAR request object](#jwt-secured-authorization-requests-jar) is refused while the switch is on.
+  [The JAR switch](#require_signed_request_object) is the same idea for the other door; a deployment
+  that wants both turns both, which is what FAPI asks for.
+* **The pushed endpoint is unaffected, and must be.** A switch that also refused requests at
+  `/oauth2/par` would leave a client no way in at all. What it refuses is arriving at the
+  authorization endpoint any other way.
+* **What the page does is not what a deployment should do.** Moving a server-wide security setting at
+  runtime, from a web page, is a demonstration: global while the run lasts, and restored in a
+  `finally` block. A real deployment sets it in configuration, once.
 
 ## JWT-secured authorization requests (JAR)
 
@@ -2179,7 +2226,7 @@ requests, PKCE, sender-constrained tokens, and client authentication that involv
 
 | Requirement | Why it fails |
 |---|---|
-| The server requires pushed authorization requests | The profile wants every client rejected, not the willing ones. [The client-level lock](#require_pushed_authorization_requests) is implemented; RFC 9126 §5's server-wide half is published as `false` with no switch to make it true |
+| The server requires pushed authorization requests | The profile wants every client rejected, not the willing ones. Both halves of RFC 9126's lock are implemented — [per client](#require_pushed_authorization_requests) and [server-wide](#require_pushed_authorization_requests-as-server-metadata) — and the server-wide one is off, so the row fails as configured rather than for want of a mechanism. It passes while that switch is on |
 | All endpoints are served over TLS | The issuer is `http://localhost:8080`; only the mTLS listener on 8443 uses TLS |
 
 A third — `iss` on the authorization response (RFC 9207) — used to fail and now passes, because
@@ -2198,9 +2245,10 @@ server-wide value read live from `RequestObjectPolicy`, and a count of the clien
 [set it for themselves](#require_signed_request_object-as-client-metadata). Reading the two rows
 together is the point — FAPI 2.0 §5.3.1 says the server *"shall reject authorization requests sent
 without [RFC9126]"*, which is the same lock one specification along, and that is the one this server
-cannot turn for everybody: `ClientSettings` has no `require_pushed_authorization_requests` of its own
-(checked against the 7.1.1 sources), so the setting here is a custom one, and RFC 9126 §5's
-server-wide value is published as `false`.
+can turn for everybody and has not: `ClientSettings` has no
+`require_pushed_authorization_requests` of its own (checked against the 7.1.1 sources), so both
+halves here are custom, and RFC 9126 §5's server-wide value is `false` by default. The row reads that
+value live, so it passes while the switch is on.
 
 Per client, only `pkce-fapi-client` — registered specifically to the profile — meets every
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
@@ -2455,6 +2503,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequiredRequestObjectController.java  /jar-required
 │   ├── ClientRequiredRequestObjectController.java  /jar-client-required
 │   ├── ParRequiredController.java       /par-required
+│   ├── ServerParRequiredController.java  /par-server-required
 │   ├── JarmClientJwkSetController.java  /jarm-client-jwks.json — the client's own keys
 │   ├── NonceApiController.java          /nonce/me — DPoP, and a nonce in every proof
 │   ├── PaymentApiController.java        /payments — the operation the grant was about
@@ -2507,6 +2556,7 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
 │   ├── RequiredRequestObjectService.java  four requests, under both settings
 │   ├── ClientRequiredRequestObjectService.java  registers two clients, then asks them
 │   ├── ParRequiredService.java          five ways to start one request
+│   ├── ServerParRequiredService.java    four requests, under both settings
 │   ├── MixUpService.java                the client side of the mix-up: start, then decide
 │   ├── MixUpAttackerService.java        the attacker's: forward the request, take the code
 │   ├── AuthorizationServerMetadataService.java  reads the published documents back
@@ -2626,6 +2676,9 @@ src/main/java/id/my/hendisantika/oauth2pkcedemo/
     │                                    through the pushed endpoint
     ├── ParRequiredAttempt.java          one request, and which check refused it
     ├── ParRequiredRun.java              the five, and the published server-wide value
+    ├── PushedAuthorizationPolicy.java   RFC 9126 §5's server-wide switch, in one place
+    ├── ServerParRequiredAttempt.java    one request, and its fate under each setting
+    ├── ServerParRequiredRun.java        the four, the documents and the profile row
     ├── RefreshBindingAttempt.java
     ├── RefreshBindingRun.java
     ├── CodeBindingAttempt.java
