@@ -4,6 +4,7 @@ import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -99,11 +100,13 @@ public class FapiComplianceService {
         checks.add(FapiCheck.fail("The server requires pushed authorization requests",
                 "FAPI 2.0 §5.3.1",
                 "The profile says the server \"shall reject authorization requests sent without "
-                        + "[RFC9126]\", which is the same lock as require_signed_request_object one "
-                        + "specification along. ClientSettings has no "
-                        + "require_pushed_authorization_requests and RFC 9126 defines no server "
-                        + "metadata for it either, so a client may still send an ordinary "
-                        + "authorization request"));
+                        + "[RFC9126]\", which is every client rather than the willing ones. RFC 9126 "
+                        + "defines require_pushed_authorization_requests as both client metadata "
+                        + "(§6) and server metadata (§5); the client half is implemented here and "
+                        + clientsRequiringPushedRequests() + " of the " + configuredClients().size()
+                        + " clients below set it, but the server-wide half is published as false and "
+                        + "there is no switch to make it true, so a client that did not ask to be "
+                        + "locked down may still send an ordinary authorization request"));
 
         checks.add(FapiCheck.of(properties.issuerUri().startsWith("https://"),
                 "All endpoints are served over TLS", "FAPI 2.0 §5.3",
@@ -111,6 +114,15 @@ public class FapiComplianceService {
                         + "; only the mTLS listener on 8443 uses TLS"));
 
         return checks;
+    }
+
+    /** The same count for RFC 9126 section 6's lock. */
+    private long clientsRequiringPushedRequests() {
+        return configuredClients().stream()
+                .map(configured -> registeredClientRepository.findByClientId(configured.clientId()))
+                .filter(client -> client != null && isSet(client,
+                        PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING))
+                .count();
     }
 
     /**
@@ -125,11 +137,14 @@ public class FapiComplianceService {
     }
 
     private static boolean requiresSignedRequestObjects(RegisteredClient client) {
+        return isSet(client, JwtSecuredAuthorizationRequestFilter.REQUIRE_SIGNED_SETTING);
+    }
+
+    private static boolean isSet(RegisteredClient client, String setting) {
         // Read as an Object: getSetting infers its own return type, and String.valueOf would then
         // pick the char[] overload and dereference a null.
-        Object setting = client.getClientSettings()
-                .getSetting(JwtSecuredAuthorizationRequestFilter.REQUIRE_SIGNED_SETTING);
-        return setting != null && Boolean.parseBoolean(String.valueOf(setting));
+        Object value = client.getClientSettings().getSetting(setting);
+        return value != null && Boolean.parseBoolean(String.valueOf(value));
     }
 
     /** The same exercise per client, since the profile constrains clients as much as the server. */
@@ -158,7 +173,7 @@ public class FapiComplianceService {
                 properties.jarmUnsupportedEncClient(), properties.jarPsClient(), properties.jarOaep512Client(),
                 properties.jarRsa15Client(), properties.jarGcmClient(),
                 properties.jarUnsupportedEncClient(), properties.jarEncOnlyClient(), properties.jarNoneClient(),
-                properties.jarNoneStrictClient());
+                properties.jarNoneStrictClient(), properties.parRequiredClient());
     }
 
     private static List<FapiCheck> checksFor(RegisteredClient client) {

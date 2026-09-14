@@ -129,7 +129,8 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
             assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
             assertThat(check.observed())
                     .contains("shall reject authorization requests sent without")
-                    .contains("require_pushed_authorization_requests");
+                    .contains("both client metadata (§6) and server metadata (§5)")
+                    .containsPattern("\\d+ of the \\d+ clients below set it");
         });
     }
 
@@ -152,8 +153,8 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     void everyRegisteredClientIsAccountedFor() {
         Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
 
-        // Thirty-one clients, each demonstrating something; the page should hide none of them.
-        assertThat(checks).hasSize(31);
+        // Thirty-two clients, each demonstrating something; the page should hide none of them.
+        assertThat(checks).hasSize(32);
         assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(4));
     }
 

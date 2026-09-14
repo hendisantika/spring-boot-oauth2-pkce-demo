@@ -46,6 +46,10 @@ public final class ServerMetadataCustomizer {
     public static final String REQUEST_OBJECT_SIGNING_ALG_VALUES_SUPPORTED =
             "request_object_signing_alg_values_supported";
 
+    /** RFC 9126 section 5, the server-wide half of the pair whose client half is implemented. */
+    public static final String REQUIRE_PUSHED_AUTHORIZATION_REQUESTS =
+            "require_pushed_authorization_requests";
+
     private final AuthorizationServerSettings settings;
     private final DemoProperties properties;
 
@@ -99,6 +103,10 @@ public final class ServerMetadataCustomizer {
                 JwtSecuredAuthorizationRequestFilter.SUPPORTED_SIGNING_ALGS.stream().sorted().toList()));
         claim.accept(REQUIRE_SIGNED_REQUEST_OBJECT_METADATA,
                 this.requestObjectPolicy.requireSignedRequestObject());
+        // RFC 9126 section 5: "whether the authorization server accepts authorization request data
+        // only via PAR". False, and true is not reachable - the lock this server implements is the
+        // per-client one from section 6. Publishing the accurate false beats publishing nothing.
+        claim.accept(REQUIRE_PUSHED_AUTHORIZATION_REQUESTS, false);
         // The lists are edited rather than appended to: the OIDC document already declares openid,
         // and a document that names a value twice is describing itself carelessly.
         grantTypes.accept(values ->

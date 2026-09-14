@@ -7,6 +7,7 @@ import id.my.hendisantika.oauth2pkcedemo.controller.JarmClientJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.controller.JarmController;
 import id.my.hendisantika.oauth2pkcedemo.security.JarmResponseFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
 import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
@@ -86,6 +87,7 @@ public class DemoDataInitializer {
             seedJarPsClient(registeredClientRepository, properties);
             seedRequestEncryptionClients(registeredClientRepository, properties);
             seedUnsignedRequestObjectClients(registeredClientRepository, properties);
+            seedParRequiredClient(registeredClientRepository, properties);
             seedJarmEncryptionMethod(registeredClientRepository, properties,
                     properties.jarmGcmClient(), "A256GCM");
             seedJarmEncryptionMethod(registeredClientRepository, properties,
@@ -555,6 +557,37 @@ public class DemoDataInitializer {
         registeredClientRepository.save(builder.build());
         log.info("Registered [{}] for unsigned request objects, require_signed_request_object={}",
                 client.clientId(), requireSignedRequestObject);
+    }
+
+    /**
+     * RFC 9126 section 6. A confidential client, because the pushed authorization request endpoint
+     * authenticates its callers - which is most of what makes a pushed request worth requiring.
+     */
+    void seedParRequiredClient(RegisteredClientRepository registeredClientRepository,
+                               DemoProperties properties) {
+        DemoProperties.Client client = properties.parRequiredClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientSecret("{noop}" + client.clientSecret())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .setting(PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING, true)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered PAR-required client [{}]", client.clientId());
     }
 
     /**

@@ -25,6 +25,7 @@ import id.my.hendisantika.oauth2pkcedemo.controller.JarJwkSetController;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.JarRequestSigner;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectClientRegistrationConverters;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcClientRegistrationAuthenticationProvider;
 import id.my.hendisantika.oauth2pkcedemo.security.CibaAuthenticationConverter;
@@ -274,6 +275,14 @@ public class AuthorizationServerConfig {
                                 () -> parseJwkSet(jarRequestSigner.publicJwkSetJson()),
                                 properties.issuerUri(), REQUEST_DECRYPTION_KEY,
                                 registeredClientRepository, requestObjectPolicy),
+                        StepUpRequiredFilter.class)
+                // RFC 9126 section 6. Runs beside the request object filter and for the same
+                // reason: a client that may only start an authorization request one way is not
+                // protected by that rule unless something refuses the other ways.
+                .addFilterBefore(
+                        new PushedAuthorizationRequiredFilter(
+                                authorizationServerSettings.getAuthorizationEndpoint(),
+                                registeredClientRepository),
                         StepUpRequiredFilter.class)
                 // RFC 9449 section 10. Runs ahead of the token endpoint so that a request which
                 // cannot prove possession of the key the code was bound to is turned away before

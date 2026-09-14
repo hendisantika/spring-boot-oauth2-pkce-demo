@@ -308,6 +308,15 @@ app:
     scopes:
       - openid
       - profile
+  # RFC 9126 section 6: the only way this client may start an authorization request is PAR.
+  par-required-client:
+    registration-id: pkce-par-required-client
+    client-id: pkce-par-required-client
+    client-secret: par-required-secret
+    client-name: PKCE PAR-required Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password
