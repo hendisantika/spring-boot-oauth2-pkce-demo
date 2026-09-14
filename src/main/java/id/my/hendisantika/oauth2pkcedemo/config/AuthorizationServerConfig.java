@@ -7,6 +7,7 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import id.my.hendisantika.oauth2pkcedemo.repository.UserRepository;
 import id.my.hendisantika.oauth2pkcedemo.security.DeviceClientAuthenticationConverter;
+import id.my.hendisantika.oauth2pkcedemo.security.IntrospectionJwtResponseHandler;
 import id.my.hendisantika.oauth2pkcedemo.security.DpopBoundAuthorizationCodeFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.IssuerIdentifierResponseHandler;
 import id.my.hendisantika.oauth2pkcedemo.security.LogoutTokenFactory;
@@ -156,6 +157,10 @@ public class AuthorizationServerConfig {
                                 .pushedAuthorizationRequestConverter(new RichAuthorizationRequestValidator()))
                         // Lets a public client identify itself with client_id alone at the device
                         // authorization endpoint, which nothing built in covers.
+                        // RFC 9701: the same answer, signed, when the caller asks for it.
+                        .tokenIntrospectionEndpoint(endpoint -> endpoint.introspectionResponseHandler(
+                                new IntrospectionJwtResponseHandler(
+                                        new NimbusJwtEncoder(jwkSource), properties.issuerUri())))
                         .clientAuthentication(clientAuthentication -> clientAuthentication
                                 .authenticationConverter(new DeviceClientAuthenticationConverter(
                                         authorizationServerSettings.getDeviceAuthorizationEndpoint(),
