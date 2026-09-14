@@ -176,6 +176,16 @@ app:
     scopes:
       - openid
       - profile
+  # Confidential so it can push, consent off so a run is one round trip. The authorization_details
+  # it asks for are the point; the consent screen showing them is the other RAR page's business.
+  rar-client:
+    registration-id: pkce-rar-client
+    client-id: pkce-rar-client
+    client-secret: rar-secret
+    client-name: PKCE RAR Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

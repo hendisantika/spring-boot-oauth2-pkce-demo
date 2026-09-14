@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('RAR enforcement')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Holding the operation against the grant</h1>
+    <p class="lead">
+        RFC 9396. The <a th:href="@{/rar}">rich authorization request page</a> shows a user approving
+        a particular payment rather than a category, and the token coming back carrying what they
+        agreed to. That is only worth something if somebody checks it. This is the other half: a
+        resource server that reads <code>authorization_details</code> off the token and refuses the
+        payments it does not cover.
+    </p>
+
+    <div class="alert" th:if="${rarError}" th:text="${rarError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The probe gets two tokens for the same user — one carrying the detail below, one carrying
+            none — and then instructs five payments.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:26%">Client</th>
+                <td><code th:text="${clientId}">pkce-rar-client</code></td>
+            </tr>
+            <tr>
+                <th>Endpoint</th>
+                <td><code th:text="${paymentsUri}">/payments</code>
+                    <span class="hint" style="display:block">
+                        Its own resource server: a valid token, then a look at what it approves.
+                    </span></td>
+            </tr>
+        </table>
+        <p class="hint" style="margin-top:14px">Pushed with the authorization request:</p>
+        <span class="token" th:text="${authorizationDetails}">-</span>
+        <form th:action="@{/rar-enforcement}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Instruct five payments</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>What the token says was granted</h2>
+        <div th:each="detail : ${run.grantedDetails}">
+            <table>
+                <tr th:each="entry : ${detail}">
+                    <th style="width:26%" th:text="${entry.key}">type</th>
+                    <td><code th:text="${entry.value}">-</code></td>
+                </tr>
+            </table>
+        </div>
+        <p class="hint">
+            A scope could have said <code>payments</code>. This says which payment, of how much, to
+            whom — so the resource server below is doing arithmetic rather than matching a category.
+        </p>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five instructions</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:28%">Instructed</th>
+                <th style="width:22%">With</th>
+                <th style="width:10%">Answer</th>
+                <th>Why</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.instruction}">-</span>
+                </td>
+                <td><span class="hint" th:text="${attempt.tokenDescription}">-</span></td>
+                <td><code th:text="${attempt.statusCode}"
+                          th:style="${attempt.isAccepted()} ? 'color:#2f6f4f' : 'color:#b3261e'">-</code></td>
+                <td><span class="hint" th:text="${attempt.reason}">-</span></td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            Two accepted, and they are the same payment: the first instruction and the last. Nothing
+            in the grant was used up in between.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/rar-enforcement/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>A grant is not a voucher.</strong> The last row is the first row again, and it is
+            accepted again. RFC 9396 describes what was <em>authorized</em>, not how many times it may
+            happen — nothing in the specification makes a detail single-use, and nothing in the token
+            could record that it had been spent. A resource server that means "one payment" has to
+            keep that count itself, the same way it always did.
+        </p>
+        <p class="hint">
+            <strong>There is no error code for this.</strong> RFC 9396 registers none, so the refusal
+            uses RFC 6750 section 3.1's <code>insufficient_scope</code> with a description naming what
+            exceeded the grant. It is the closest thing that exists and it is not quite right: the
+            scope was never the problem. Compare the
+            <a th:href="@{/stepup-challenge}">step-up challenge</a>, where RFC 9470 did define an
+            error and a client can act on it — here the client is told only that this token will not
+            do.
+        </p>
+        <p class="hint">
+            <strong>The check cannot live in a filter.</strong> Whether the token permits the
+            operation depends on the amount and the account in the request, which no
+            <code>SecurityFilterChain</code> rule can see. So the chain answers only "is this token
+            valid", and the endpoint does the rest — which is where RFC 9396 leaves it, and why a
+            resource server that ignores the claim is indistinguishable from one that honours it
+            until somebody tries to overspend.
+        </p>
+        <p class="hint">
+            <strong>An ordinary token is refused, not accepted by default.</strong> The fourth row
+            carries a perfectly valid token for the same user and the same scopes, and asks for the
+            payment that <em>was</em> approved on the other token. It fails because this endpoint
+            treats a missing <code>authorization_details</code> as nothing granted rather than as
+            nothing to check. The opposite reading is the mistake this page exists to name.
+        </p>
+        <p class="hint">
+            <strong>What Spring Authorization Server contributes is the carriage, not the meaning.</strong>
+            It has no RFC 9396 support: the demo's validator refuses unknown types at the pushed
+            request endpoint, a token customizer copies the approved array onto the token, and
+            everything on this page reads that claim back. Nothing in the server knows an amount from
+            an account number.
+        </p>
+    </div>
+</main>
+</body>
+</html>

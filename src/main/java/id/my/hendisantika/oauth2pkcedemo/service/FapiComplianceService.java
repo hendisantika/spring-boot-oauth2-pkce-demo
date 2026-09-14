@@ -111,7 +111,7 @@ public class FapiComplianceService {
                 properties.codeBindingClient(), properties.mixUpClient(), properties.registrarClient(),
                 properties.relayClient(), properties.mtlsRefreshClient(),
                 properties.freshnessClient(), properties.silentClient(),
-                properties.requestUriClient());
+                properties.requestUriClient(), properties.rarClient());
     }
 
     private static List<FapiCheck> checksFor(RegisteredClient client) {

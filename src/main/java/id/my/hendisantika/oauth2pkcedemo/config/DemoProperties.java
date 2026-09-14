@@ -31,6 +31,7 @@ public record DemoProperties(String issuerUri,
                              Client freshnessClient,
                              Client silentClient,
                              Client requestUriClient,
+                             Client rarClient,
                              List<DemoUser> demoUsers) {
 
     /**

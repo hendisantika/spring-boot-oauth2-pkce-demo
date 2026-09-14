@@ -2,6 +2,7 @@ package id.my.hendisantika.oauth2pkcedemo.config;
 
 import id.my.hendisantika.oauth2pkcedemo.controller.AuthorizationCodeBindingController;
 import id.my.hendisantika.oauth2pkcedemo.controller.FreshnessController;
+import id.my.hendisantika.oauth2pkcedemo.controller.RarEnforcementController;
 import id.my.hendisantika.oauth2pkcedemo.controller.RequestUriController;
 import id.my.hendisantika.oauth2pkcedemo.controller.SilentAuthController;
 import id.my.hendisantika.oauth2pkcedemo.controller.MixUpController;
@@ -71,6 +72,7 @@ public class DemoDataInitializer {
             seedFreshnessClient(registeredClientRepository, properties);
             seedSilentClient(registeredClientRepository, properties);
             seedRequestUriClient(registeredClientRepository, properties);
+            seedRarClient(registeredClientRepository, properties);
         };
     }
 
@@ -269,6 +271,36 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered code binding client [{}]", client.clientId());
+    }
+
+    /**
+     * The client the RAR enforcement page drives. Confidential, because authorization_details are
+     * pushed rather than put in a URL, and with consent off so that one run is one round trip.
+     */
+    void seedRarClient(RegisteredClientRepository registeredClientRepository,
+                       DemoProperties properties) {
+        DemoProperties.Client client = properties.rarClient();
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientSecret("{noop}" + client.clientSecret())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + RarEnforcementController.CALLBACK_URI)
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered RAR client [{}]", client.clientId());
     }
 
     /**

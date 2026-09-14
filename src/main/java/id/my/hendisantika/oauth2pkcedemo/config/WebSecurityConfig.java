@@ -71,6 +71,7 @@ public class WebSecurityConfig {
                         .requestMatchers("/silent-auth", "/silent-auth/**").permitAll()
                         // Same shape: the probe brings its own session and its own client.
                         .requestMatchers("/request-uri", "/request-uri/**").permitAll()
+                        .requestMatchers("/rar-enforcement", "/rar-enforcement/**").permitAll()
                         // The client publishes its keys here, and the authorization server
                         // fetches them unauthenticated.
                         .requestMatchers("/assertion", "/client-jwks.json", "/mtls", "/mtls-jwks.json", "/rar", "/jar", "/jar-jwks.json", "/fapi").permitAll()
