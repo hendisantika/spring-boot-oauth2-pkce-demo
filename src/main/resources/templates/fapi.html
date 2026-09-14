@@ -196,6 +196,19 @@
             <code>RSA1_5</code> fails its row while the server passes this one.
         </p>
         <p class="hint">
+            <strong>The third list is there too, and it is the one no profile has an opinion
+            about.</strong>
+            <a th:href="@{/jar-enc-method-values}"><code>request_object_encryption_enc_values_supported</code></a>
+            completes the trio RFC 9101 §4 names together. None of the three FAPI profiles names a
+            content encryption method, so that row borrows the same chain the client
+            <code>enc</code> rows use — RFC 8725 §3.1's <em>"supported set of algorithms"</em> that
+            nothing outside may be used with — and says so in its citation rather than implying a
+            FAPI requirement that does not exist. It passes, and the proof that the set is really
+            closed is a row below rather than a claim above: the client that registered
+            <code>A192CBC-HS384</code> fails, because this server refuses rather than widening the
+            set to match a registration.
+        </p>
+        <p class="hint">
             <strong>That one is a gap kept on purpose.</strong> The
             <a th:href="@{/jar-none}"><code>none</code></a> and <code>RS256</code> entries exist
             because the pages demonstrating them need a server that accepts them; removing them to
