@@ -2460,11 +2460,23 @@ Discovery `request`/`request_uri` switches, `require_request_uri_registration`, 
 asserts that every field citing RFC 8414 §2 is one RFC 8414 actually defines, so the next addition
 cannot slip through the same way.
 
-One row carries a link as well as a citation: `require_pushed_authorization_requests` points at
-[the page that turns it on](#require_pushed_authorization_requests-as-server-metadata), where the
-published value can be watched changing. A document says what a server claims; that page says what it
-does about the claim. A second test walks every linked path and asserts the page answers, so a
-cross-link cannot quietly become a dead end.
+Eight rows carry a link as well as a citation — the request object and `request_uri` family, and both
+halves of the PAR requirement:
+
+| Row | Links to |
+|---|---|
+| `request_parameter_supported` | [the JAR page](#jwt-secured-authorization-requests-jar) |
+| `request_object_signing_alg_values_supported` | [`/jar-alg-values`](#request_object_signing_alg_values_supported) |
+| `request_object_encryption_alg_values_supported` | [`/jar-enc-alg-values`](#request_object_encryption_alg_values_supported) |
+| `request_object_encryption_enc_values_supported` | [`/jar-enc-method-values`](#request_object_encryption_enc_values_supported) |
+| `require_signed_request_object` | [`/jar-required`](#require_signed_request_object) |
+| `request_uri_parameter_supported` | [`/request-uri-metadata`](#request_uri_parameter_supported) |
+| `require_request_uri_registration` | [`/request-uri-registration`](#require_request_uri_registration) |
+| `require_pushed_authorization_requests` | [`/par-server-required`](#require_pushed_authorization_requests-as-server-metadata) |
+
+A document says what a server claims; those pages say what it does about the claim. A test walks every
+linked path and asserts the page answers, so a cross-link cannot quietly become a dead end — and rows
+whose values this demo has no page for carry no link rather than a guess.
 
 Notes:
 
