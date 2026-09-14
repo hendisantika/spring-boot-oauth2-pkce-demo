@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('request_object_signing_alg_values_supported')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>What the server will check, not what you may send</h1>
+    <p class="lead">
+        RFC 9101 §4 says the client "can inform the authorization server of the algorithms that it
+        supports" through <a th:href="@{/jar-alg}"><code>request_object_signing_alg</code></a>, and
+        that "likewise, the authorization server can inform the client" through
+        <code>request_object_signing_alg_values_supported</code>. Two lists, pointing in opposite
+        directions — and an algorithm has to be on both before a request object signed with it is
+        acted on. This page takes each advertised value and sends one.
+    </p>
+
+    <div class="alert" th:if="${advertisedAlgError}" th:text="${advertisedAlgError}">error</div>
+
+    <div class="card">
+        <h2>The three lists, as published</h2>
+        <p class="hint">
+            RFC 9101 §4 names all three together. Two of them were implemented here and unadvertised
+            until this page, which leaves a client to find out by being refused.
+        </p>
+        <table style="margin-top:12px">
+            <tr th:each="entry : ${published}">
+                <th style="width:46%"><code th:text="${entry.key}">-</code></th>
+                <td style="overflow-wrap:anywhere"><code th:text="${entry.value}">-</code></td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            Five request objects, each signed with one algorithm and sent by a client that registered
+            it — except once, deliberately.
+        </p>
+        <form th:action="@{/jar-alg-values}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send five request objects</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Five request objects</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:24%">Sent</th>
+                <th style="width:19%">Client</th>
+                <th style="width:11%">Registered</th>
+                <th style="width:13%">Advertised</th>
+                <th>What the server did</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere"><code th:text="${attempt.clientId}">-</code></td>
+                <td><code th:text="${attempt.registeredAlg}">-</code>
+                    <span class="hint" style="display:block"
+                          th:unless="${attempt.itsOwnAlgorithm()}">sent
+                        <span th:text="${attempt.sentAlg}">-</span></span>
+                </td>
+                <td>
+                    <code th:text="${attempt.sentAlg}">-</code>
+                    <span class="hint" style="display:block"
+                          th:text="${attempt.advertised} ? 'on the list' : 'not on the list'">-</span>
+                </td>
+                <td style="overflow-wrap:anywhere">
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px"
+           th:if="${run.acceptedExactlyWhenAdvertisedAndRegistered()}">
+            Acted on exactly where the algorithm was on the server's list <em>and</em> the one that
+            client registered — neither condition alone.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-alg-values/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>The list is a capability, not a permission.</strong> The second row sends PS256,
+            which is on the list, from a client that registered RS256 — and is refused. Discovery
+            tells a client what this server is able to check; its own registration tells it what it
+            agreed to send. Reading the first as the second is the mistake the page is built around,
+            and it is an easy one: the metadata is the more visible of the two.
+        </p>
+        <p class="hint">
+            <strong>Neither condition alone is enough.</strong> Row three sends the same PS256 that
+            was just refused, from the client that registered it, and is acted on. Row five sends
+            ES256 from a client that registered ES256 and publishes a key on the right curve — a
+            perfectly ordinary algorithm, correctly signed, refused because this server does not
+            advertise checking it. Two rows, two directions, and one rule.
+        </p>
+        <p class="hint">
+            <strong><code>none</code> is on the list.</strong> OpenID Connect Registration allows it
+            as a registered value, so a server that accepts it has to say so — and this one does, in
+            a list of algorithms it checks, for a value that means there is nothing to check.
+            <a th:href="@{/jar-none}">The unsigned page</a> is about what remains when the signature
+            goes.
+        </p>
+        <p class="hint">
+            <strong>The other two lists were missing.</strong> RFC 9101 §4 names the encryption
+            algorithm and method lists in the same breath as the signing one. Both were implemented
+            here — <a th:href="@{/jar-enc-alg}">the algorithms</a> and
+            <a th:href="@{/jar-enc-method}">the methods</a> — and neither was published until this
+            page. A client could only discover them by sending something and being told no, which is
+            what discovery documents exist to prevent.
+        </p>
+        <p class="hint">
+            <strong>Spring Authorization Server advertises none of the three,</strong> having no
+            notion of the <code>request</code> parameter at all. Every value here is added by
+            <code>ServerMetadataCustomizer</code>, and derived from the same constants the filter
+            enforces rather than from a list kept beside them — a document that can drift from the
+            code it describes is worse than no document.
+        </p>
+    </div>
+</main>
+</body>
+</html>
