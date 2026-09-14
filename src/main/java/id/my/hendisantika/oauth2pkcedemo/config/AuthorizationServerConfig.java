@@ -1,6 +1,8 @@
 package id.my.hendisantika.oauth2pkcedemo.config;
 
 import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
@@ -73,12 +75,15 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -447,7 +452,25 @@ public class AuthorizationServerConfig {
                 .privateKey((RSAPrivateKey) keyPair.getPrivate())
                 .keyID(UUID.randomUUID().toString())
                 .build();
-        return new ImmutableJWKSet<>(new JWKSet(rsaKey));
+        // A second key, on a different curve, so a client that registers ES256 for its authorization
+        // responses can actually be answered with one. The encoder picks by algorithm; without a key
+        // that can carry it, the setting would be a promise the server could not keep.
+        return new ImmutableJWKSet<>(new JWKSet(List.of(rsaKey, generateEcKey())));
+    }
+
+    /** P-256, the curve ES256 names. */
+    private static ECKey generateEcKey() {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
+            generator.initialize(new ECGenParameterSpec("secp256r1"));
+            KeyPair keyPair = generator.generateKeyPair();
+            return new ECKey.Builder(Curve.P_256, (ECPublicKey) keyPair.getPublic())
+                    .privateKey(keyPair.getPrivate())
+                    .keyID(UUID.randomUUID().toString())
+                    .build();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to generate the EC signing key", ex);
+        }
     }
 
     @Bean

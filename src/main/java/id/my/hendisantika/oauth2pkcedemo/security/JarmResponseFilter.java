@@ -60,6 +60,19 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
     public static final Set<String> JWT_MODES =
             Set.of("jwt", "query.jwt", FRAGMENT_JWT, FORM_POST_JWT);
 
+    /**
+     * The client's registered algorithm, as JARM names it. Spring Authorization Server has no
+     * setting of its own for this, so it is carried as a custom one on the registration.
+     */
+    public static final String SIGNED_RESPONSE_ALG =
+            "settings.client.authorization-signed-response-alg";
+
+    /** What this server can actually sign with, which is what it has keys for. */
+    public static final Set<String> SUPPORTED_ALGORITHMS = Set.of("RS256", "ES256");
+
+    /** JARM: omitting the setting means RS256, so a client that says nothing still gets a signature. */
+    public static final String DEFAULT_ALGORITHM = "RS256";
+
     /** Short: a response is redeemed immediately or not at all. */
     private static final Duration LIFETIME = Duration.ofMinutes(2);
 
@@ -118,8 +131,9 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        filterChain.doFilter(request, new JarmRedirect(response, redirectUri,
-                request.getParameter(OAuth2ParameterNames.CLIENT_ID), responseModeOf(request)));
+        String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
+        filterChain.doFilter(request, new JarmRedirect(response, redirectUri, clientId,
+                responseModeOf(request), algorithmFor(clientId)));
     }
 
     /** Wraps only the one thing that matters: where the authorization endpoint sends the browser. */
@@ -128,13 +142,15 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
         private final String redirectUri;
         private final String clientId;
         private final String responseMode;
+        private final String algorithm;
 
         private JarmRedirect(HttpServletResponse response, String redirectUri, String clientId,
-                             String responseMode) {
+                             String responseMode, String algorithm) {
             super(response);
             this.redirectUri = redirectUri;
             this.clientId = clientId;
             this.responseMode = responseMode;
+            this.algorithm = algorithm;
         }
 
         @Override
@@ -145,7 +161,21 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
                 return;
             }
             Map<String, String> parameters = parametersOf(location);
-            String jwt = sign(parameters, clientId);
+            if (algorithm == null) {
+                // The client asked to be answered in a way this server cannot produce. Handing it an
+                // unsigned response instead would be the quiet failure the whole mode exists to
+                // avoid, so it is told plainly - in the clear, because there is no other way left.
+                log.debug("Cannot sign an authorization response for {}", clientId);
+                super.sendRedirect(UriComponentsBuilder.fromUriString(redirectUri)
+                        .queryParam(OAuth2ParameterNames.ERROR, "invalid_request")
+                        .queryParam(OAuth2ParameterNames.ERROR_DESCRIPTION,
+                                "This server cannot sign an authorization response for this client")
+                        .queryParam(OAuth2ParameterNames.STATE,
+                                parameters.getOrDefault(OAuth2ParameterNames.STATE, ""))
+                        .build().encode(StandardCharsets.UTF_8).toUriString());
+                return;
+            }
+            String jwt = sign(parameters, clientId, algorithm);
             log.debug("Delivering a {} authorization response as a signed JWT, by {}",
                     parameters.containsKey(OAuth2ParameterNames.ERROR) ? "failed" : "successful",
                     responseMode);
@@ -194,7 +224,7 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
      * signed exactly like a successful one: a client that cannot trust an error is no better off
      * than one that cannot trust a code.
      */
-    private String sign(Map<String, String> parameters, String clientId) {
+    private String sign(Map<String, String> parameters, String clientId, String algorithm) {
         Instant now = Instant.now();
         JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
                 .issuer(issuerUri)
@@ -209,12 +239,32 @@ public final class JarmResponseFilter extends OncePerRequestFilter {
             }
         });
         return jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(SignatureAlgorithm.RS256).build(), claims.build())).getTokenValue();
+                JwsHeader.with(SignatureAlgorithm.from(algorithm)).build(), claims.build()))
+                .getTokenValue();
     }
 
     /** Only the characters that could end the attribute; the values here are a URI and a JWT. */
     private static String escape(String value) {
         return value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;");
+    }
+
+    /**
+     * JARM leaves the algorithm to the registration and defaults it to RS256 when the client says
+     * nothing. It also forbids {@code none} outright: a response mode whose entire purpose is a
+     * signature cannot be satisfied by an unsigned JWT, and a server that accepted the value would be
+     * promising something it was not doing.
+     *
+     * @return the algorithm to sign with, or {@code null} when this server cannot honour the setting
+     */
+    public String algorithmFor(String clientId) {
+        RegisteredClient client = clientId == null ? null
+                : this.registeredClientRepository.findByClientId(clientId);
+        if (client == null) {
+            return null;
+        }
+        Object configured = client.getClientSettings().getSetting(SIGNED_RESPONSE_ALG);
+        String algorithm = configured == null ? DEFAULT_ALGORITHM : String.valueOf(configured);
+        return SUPPORTED_ALGORITHMS.contains(algorithm) ? algorithm : null;
     }
 
     /** The redirect URI the client registered, which is the only place a response may be sent. */
