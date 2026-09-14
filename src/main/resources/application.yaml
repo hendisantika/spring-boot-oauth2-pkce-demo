@@ -252,6 +252,22 @@ app:
     scopes:
       - openid
       - profile
+  # Registered to encrypt its request objects with RSA-OAEP-512 rather than the server's default.
+  jar-oaep512-client:
+    registration-id: pkce-jar-oaep512-client
+    client-id: pkce-jar-oaep512-client
+    client-name: PKCE JAR RSA-OAEP-512 Client
+    scopes:
+      - openid
+      - profile
+  # Registered for RSA1_5, which is a real JWA algorithm this server does not offer.
+  jar-rsa15-client:
+    registration-id: pkce-jar-rsa15-client
+    client-id: pkce-jar-rsa15-client
+    client-name: PKCE JAR RSA1_5 Client
+    scopes:
+      - openid
+      - profile
   demo-users:
     - username: hendi
       password: password

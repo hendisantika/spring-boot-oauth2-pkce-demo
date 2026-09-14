@@ -84,6 +84,7 @@ public class DemoDataInitializer {
             seedJarmVariant(registeredClientRepository, properties, properties.jarmNoneClient(), "none");
             seedJarmEncryptedClient(registeredClientRepository, properties);
             seedJarPsClient(registeredClientRepository, properties);
+            seedRequestEncryptionClients(registeredClientRepository, properties);
             seedJarmEncryptionMethod(registeredClientRepository, properties,
                     properties.jarmGcmClient(), "A256GCM");
             seedJarmEncryptionMethod(registeredClientRepository, properties,
@@ -446,6 +447,46 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered PS256 request object client [{}]", client.clientId());
+    }
+
+    /**
+     * Two clients that registered a JWE algorithm for their request objects: one the server offers
+     * and one it does not. Neither publishes a key of its own - request objects are encrypted to the
+     * server's key, so what is registered here is only how the wrapping is done.
+     */
+    void seedRequestEncryptionClients(RegisteredClientRepository registeredClientRepository,
+                                      DemoProperties properties) {
+        seedRequestEncryptionClient(registeredClientRepository, properties,
+                properties.jarOaep512Client(), "RSA-OAEP-512");
+        seedRequestEncryptionClient(registeredClientRepository, properties,
+                properties.jarRsa15Client(), "RSA1_5");
+    }
+
+    private void seedRequestEncryptionClient(RegisteredClientRepository registeredClientRepository,
+                                             DemoProperties properties, DemoProperties.Client client,
+                                             String encryptionAlg) {
+        if (registeredClientRepository.findByClientId(client.clientId()) != null) {
+            return;
+        }
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
+                .clientId(client.clientId())
+                .clientName(client.clientName())
+                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .requireAuthorizationConsent(false)
+                        .setting(JwtSecuredAuthorizationRequestFilter.ENCRYPTION_ALG_SETTING,
+                                encryptionAlg)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofMinutes(10))
+                        .build());
+        client.scopes().forEach(builder::scope);
+
+        registeredClientRepository.save(builder.build());
+        log.info("Registered [{}] for {} request objects", client.clientId(), encryptionAlg);
     }
 
     /**

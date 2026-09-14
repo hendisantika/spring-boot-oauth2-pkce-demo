@@ -127,9 +127,18 @@ public final class JarRequestSigner {
 
     /** Wraps an already-signed request object for one recipient and nobody else. */
     public String encrypt(String signedRequestObject, RSAKey serverKey) {
+        return encrypt(signedRequestObject, serverKey, JWEAlgorithm.RSA_OAEP_256);
+    }
+
+    /**
+     * The same wrapping with a named key-management algorithm. All of these wrap the same content
+     * encryption key with the same RSA key and differ only in how - which is what makes the
+     * registered algorithm a choice a client could otherwise change from one request to the next.
+     */
+    public String encrypt(String signedRequestObject, RSAKey serverKey, JWEAlgorithm algorithm) {
         try {
             JWEObject encrypted = new JWEObject(
-                    new JWEHeader.Builder(JWEAlgorithm.RSA_OAEP_256, EncryptionMethod.A128CBC_HS256)
+                    new JWEHeader.Builder(algorithm, EncryptionMethod.A128CBC_HS256)
                             .keyID(serverKey.getKeyID())
                             // So the server knows a JWT is inside rather than arbitrary bytes.
                             .contentType("JWT")

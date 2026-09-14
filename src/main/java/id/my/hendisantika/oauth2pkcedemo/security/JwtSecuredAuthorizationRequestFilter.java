@@ -63,6 +63,19 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
     /** The algorithms this server will check a request object against. */
     public static final Set<String> SUPPORTED_SIGNING_ALGS = Set.of("RS256", "PS256");
 
+    /**
+     * OpenID Connect Dynamic Client Registration: the JWE {@code alg} a client declares it may
+     * encrypt request objects with. Spring Authorization Server has no setting for it either.
+     */
+    public static final String ENCRYPTION_ALG_SETTING = "settings.client.request-object-encryption-alg";
+
+    /** What a client is taken to have registered when it registered nothing. */
+    public static final String DEFAULT_ENCRYPTION_ALG = "RSA-OAEP-256";
+
+    /** The key-management algorithms this server will unwrap a request object with. */
+    public static final Set<String> SUPPORTED_ENCRYPTION_ALGS =
+            Set.of("RSA-OAEP-256", "RSA-OAEP-512");
+
     /** Claims that carry the JWT's own identity rather than authorization request parameters. */
     private static final List<String> JWT_CLAIMS = List.of("iss", "aud", "exp", "iat", "nbf", "jti");
 
@@ -113,10 +126,13 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
             return;
         }
 
+        String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
         JWTClaimsSet claims;
         try {
-            claims = verify(decryptIfEncrypted(requestObject),
-                    expectedAlgorithm(request.getParameter(OAuth2ParameterNames.CLIENT_ID)));
+            claims = verify(
+                    decryptIfEncrypted(requestObject,
+                            registered(clientId, ENCRYPTION_ALG_SETTING, DEFAULT_ENCRYPTION_ALG)),
+                    registered(clientId, SIGNING_ALG_SETTING, DEFAULT_SIGNING_ALG));
         } catch (IllegalArgumentException ex) {
             log.debug("Rejecting request object: {}", ex.getMessage());
             writeError(response, "invalid_request_object", ex.getMessage());
@@ -133,37 +149,64 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
      * server, in which case what arrives is a JWE with the signed object inside. Everything after
      * this point is the same either way - the signature still has to be checked, because encryption
      * says only that nobody else read the request, not who wrote it.
+     * <p>
+     * An object that arrives unencrypted is passed straight through. Registering an encryption
+     * algorithm is not a promise to always encrypt: OpenID Connect Dynamic Client Registration says
+     * in as many words that the client may still send unencrypted request objects.
      *
+     * @param expectedAlgorithm the JWE {@code alg} this client registered
      * @return the signed request object, whether it arrived wrapped or not
      */
-    private String decryptIfEncrypted(String requestObject) {
+    private String decryptIfEncrypted(String requestObject, String expectedAlgorithm) {
         if (requestObject.split("\\.").length != 5) {
             return requestObject;
         }
+
+        JWEObject encrypted;
         try {
-            JWEObject encrypted = JWEObject.parse(requestObject);
+            encrypted = JWEObject.parse(requestObject);
+        } catch (ParseException ex) {
+            throw new IllegalArgumentException("The request object is not a well-formed JWE");
+        }
+
+        String algorithm = String.valueOf(encrypted.getHeader().getAlgorithm());
+        if (!algorithm.equals(expectedAlgorithm)) {
+            // Stricter than the registration spec, which says the client may still use any other
+            // algorithm the server supports. A declaration that constrains nothing leaves the choice
+            // of key-wrapping algorithm with whoever sent the request.
+            throw new IllegalArgumentException("The request object is encrypted with " + algorithm
+                    + ", and this client registered " + expectedAlgorithm);
+        }
+        if (!SUPPORTED_ENCRYPTION_ALGS.contains(algorithm)) {
+            // A registration cannot make this server offer an algorithm it does not implement, and
+            // an algorithm left out of the supported set is left out deliberately.
+            throw new IllegalArgumentException("This server does not decrypt " + algorithm
+                    + " request objects");
+        }
+
+        try {
             encrypted.decrypt(new RSADecrypter(this.decryptionKey));
-            log.debug("Decrypted a request object encrypted with {} / {}",
-                    encrypted.getHeader().getAlgorithm(), encrypted.getHeader().getEncryptionMethod());
-            return encrypted.getPayload().toString();
         } catch (Exception ex) {
             throw new IllegalArgumentException(
                     "The request object could not be decrypted with this server's key");
         }
+        log.debug("Decrypted a request object encrypted with {} / {}",
+                encrypted.getHeader().getAlgorithm(), encrypted.getHeader().getEncryptionMethod());
+        return encrypted.getPayload().toString();
     }
 
     /**
-     * The algorithm this client registered, JARM-style: absent means the default rather than
-     * anything goes, and an unregistered client is not one whose request objects mean anything.
+     * What this client registered, JARM-style: absent means the default rather than anything goes,
+     * and an unregistered client is not one whose request objects mean anything.
      */
-    private String expectedAlgorithm(String clientId) {
+    private String registered(String clientId, String setting, String fallback) {
         RegisteredClient client = clientId == null ? null
                 : this.registeredClients.findByClientId(clientId);
         if (client == null) {
-            return DEFAULT_SIGNING_ALG;
+            return fallback;
         }
-        Object configured = client.getClientSettings().getSetting(SIGNING_ALG_SETTING);
-        return configured == null ? DEFAULT_SIGNING_ALG : String.valueOf(configured);
+        Object configured = client.getClientSettings().getSetting(setting);
+        return configured == null ? fallback : String.valueOf(configured);
     }
 
     /**
