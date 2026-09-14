@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{layout :: head('Request object encryption')}"></head>
+<body>
+<header th:replace="~{layout :: header}"></header>
+<main>
+    <h1>Hiding the question too</h1>
+    <p class="lead">
+        RFC 9101 section 6.2. <a th:href="@{/jar}">A signed request object</a> settles that the
+        request arrived as the client wrote it. It does nothing about who can read it — and the
+        request travels in the browser's URL, carrying whatever the client put in it. A
+        <code>login_hint</code> is somebody's email address; <a th:href="@{/rar}">authorization
+        details</a> are an amount and an account number. Encrypting the object to the authorization
+        server keeps those out of every log the URL passes through.
+    </p>
+
+    <div class="alert" th:if="${jarEncError}" th:text="${jarEncError}">error</div>
+
+    <div class="card" th:if="${run == null}">
+        <h2>Run it</h2>
+        <p class="hint">
+            The same authorization request is sent three ways, each carrying
+            <code th:text="${loginHint}">-</code> as a login hint.
+        </p>
+        <table style="margin-top:14px">
+            <tr>
+                <th style="width:30%">Client</th>
+                <td><code th:text="${clientId}">-</code></td>
+            </tr>
+            <tr>
+                <th>Encrypted to</th>
+                <td><code th:text="${serverKeyId}">-</code>
+                    <span class="hint" style="display:block">
+                        The authorization server's encryption key, published at
+                        <code>/oauth2/jwks</code> beside the two it signs with. This direction is the
+                        reverse of <a th:href="@{/jarm-enc}">JARM's</a>: here the server holds the
+                        private half.
+                    </span></td>
+            </tr>
+        </table>
+        <form th:action="@{/jar-enc}" method="post" style="margin-top:18px">
+            <button class="btn" type="submit">Send it three ways</button>
+        </form>
+    </div>
+
+    <div class="card" th:if="${run != null}">
+        <h2>Three request objects</h2>
+        <table>
+            <thead>
+            <tr>
+                <th style="width:30%">Sent</th>
+                <th style="width:12%">Shape</th>
+                <th style="width:22%">What the server did</th>
+                <th>Readable in the URL</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="attempt : ${run.attempts}">
+                <td>
+                    <strong th:text="${attempt.label}">-</strong>
+                    <span class="hint" style="display:block" th:text="${attempt.description}">-</span>
+                </td>
+                <td><code th:text="${attempt.shape()}">-</code></td>
+                <td>
+                    <span th:text="${attempt.outcome}"
+                          th:style="${attempt.accepted} ? 'color:#2f6f4f' : 'color:#b3261e'">-</span>
+                </td>
+                <td>
+                    <code th:if="${!attempt.readableWithoutAKey.isEmpty()}"
+                          th:text="${attempt.readableWithoutAKey}">-</code>
+                    <span class="hint" th:if="${attempt.readableWithoutAKey.isEmpty()}">nothing</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:14px">
+            The first two are the same request, and the server did the same thing with both. What
+            differs is the last column: one of them told everything in its path who was about to sign
+            in.
+        </p>
+        <p style="margin-top:12px">
+            <a class="btn secondary" th:href="@{/jar-enc/reset}">Clear</a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Reading this</h2>
+        <p class="hint">
+            <strong>Signed then encrypted, and both still checked.</strong> The server decrypts
+            first and then does exactly what it did before: the type, the signature against the
+            client's published key, the audience, the expiry. Encryption says only that nobody else
+            read the request — it says nothing about who wrote it, so the signature check is not
+            optional once a request arrives encrypted.
+        </p>
+        <p class="hint">
+            <strong>The direction is the opposite of <a th:href="@{/jarm-enc}">JARM's</a>.</strong>
+            There the server encrypts to a key the client publishes; here the client encrypts to a
+            key the server publishes. Each party encrypts to whoever is going to read it, which is
+            the only arrangement that makes sense and is also why both sides end up publishing a key
+            set.
+        </p>
+        <p class="hint">
+            <strong>The server's encryption key is not one of its signing keys.</strong> A third key
+            was added to <code>/oauth2/jwks</code> marked <code>use: enc</code>, and the two RS256
+            and ES256 keys are left alone. A client picks by that marking; a server that signed and
+            decrypted with one key would work and would still be a habit worth not demonstrating.
+        </p>
+        <p class="hint">
+            <strong>Addressed elsewhere is refused, not ignored.</strong> The third row is a
+            perfectly good request object, correctly signed, encrypted to a key this server does not
+            hold. There is nothing to do with it but say so — and it is refused before the signature
+            is ever looked at, because there is nothing to look at yet.
+        </p>
+        <p class="hint">
+            <strong><a th:href="@{/par}">Pushing the request</a> solves an overlapping problem.</strong>
+            A pushed request never travels through the browser at all, so nothing in it reaches a log
+            on the way; encryption is what protects an object that does travel that way. The two are
+            usually deployed together, and FAPI asks for exactly that: push it, and sign it, and the
+            browser carries a reference to something it cannot read either way.
+        </p>
+    </div>
+</main>
+</body>
+</html>
