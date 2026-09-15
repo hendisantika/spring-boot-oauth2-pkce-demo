@@ -7,6 +7,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequest
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestUriFetcher;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import lombok.RequiredArgsConstructor;
@@ -157,6 +158,44 @@ public class FapiComplianceService {
                                         + "§5.3.1 it would be unreachable anyway, since every "
                                         + "request that did not come through PAR is refused. That "
                                         + "row fails here, so it is reachable"))));
+
+        // §10.4.1 lists four mitigations and the row above is only clause (a). The other three are
+        // about what happens once a fetch is allowed to start, so they are one group: what came
+        // back, how long it may take, and whether it may ask for another.
+        checks.add(FapiCheck.of(
+                RequestUriFetcher.REQUEST_OBJECT_MEDIA_TYPE.toString()
+                        .equals("application/" + JwtSecuredAuthorizationRequestFilter.REQUEST_OBJECT_TYPE),
+                "A fetched request object must be the right media type", "RFC 9101 §10.4.1(b)",
+                "Clause (b) says to \"check that the media type of the response is "
+                        + "application/oauth-authz-req+jwt\", and the fetcher refuses anything else "
+                        + "- it holds out for " + RequestUriFetcher.REQUEST_OBJECT_MEDIA_TYPE
+                        + ". The request is sent with Accept: */* on purpose: asking only for that "
+                        + "type would have the host refuse to serve anything else, and the clause is "
+                        + "about judging what arrived rather than about what was asked for"));
+
+        checks.add(FapiCheck.of(!RequestUriFetcher.TIMEOUT.isZero()
+                        && !RequestUriFetcher.TIMEOUT.isNegative(),
+                "Fetching a request object is bounded in time", "RFC 9101 §10.4.1(c)",
+                "Clause (c) asks for \"a timeout for obtaining the content of request_uri\", which "
+                        + "is the half of the attack that is about a host being slow rather than "
+                        + "large. It is " + RequestUriFetcher.TIMEOUT.toSeconds() + "s here, applied "
+                        + "to reading as well as connecting - a connect timeout alone leaves the "
+                        + "clause half done, because a host that accepts the connection and then "
+                        + "dribbles the body has answered slowly rather than connected slowly. The "
+                        + "size limits sit beside it: " + RequestUriFetcher.MAXIMUM_BYTES
+                        + " bytes of body and " + RequestUriFetcher.MAXIMUM_URI_LENGTH
+                        + " characters of URL"));
+
+        checks.add(FapiCheck.of(
+                JwtSecuredAuthorizationRequestFilter.carriesAnotherRequestReference(
+                        Map.of(JwtSecuredAuthorizationRequestFilter.REQUEST, new String[] {"..."})),
+                "A fetched request object may not ask for another", "RFC 9101 §10.4.1(d)",
+                "Clause (d) says not to \"perform recursive GET on the request_uri\", and §4 says "
+                        + "the same thing from the other end: \"request and request_uri parameters "
+                        + "MUST NOT be included in Request Objects\". A request object carrying "
+                        + "either is refused, so the recursion has nowhere to start. Redirects are "
+                        + "not followed either - a fetch that can be bounced elsewhere is one the "
+                        + "registered list no longer describes"));
 
         // RFC 9126 §5's carve-out, which is the part of request_uri_parameter_supported that can
         // actually be got wrong: a server that gated all request_uri handling on it would break PAR
