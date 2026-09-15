@@ -144,15 +144,18 @@ public class FapiComplianceService {
         // Honest failures follow. A profile check that only ever passes is worth nothing - and this
         // one is now capable of passing, which is the only thing that makes its failing mean
         // anything: the switch exists and is off rather than being absent.
-        checks.add(FapiCheck.of(this.pushedAuthorizationPolicy.requirePushedRequests(),
+        checks.add(advertisedFlag(published,
+                ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
+                this.pushedAuthorizationPolicy.requirePushedRequests(),
                 "The server requires pushed authorization requests", "FAPI 2.0 §5.3.1",
+                this.pushedAuthorizationPolicy.requirePushedRequests(),
                 "The profile says the server \"shall reject authorization requests sent without "
                         + "[RFC9126]\", which is every client rather than the willing ones. RFC 9126 "
                         + "§5's server-wide require_pushed_authorization_requests is "
                         + this.pushedAuthorizationPolicy.requirePushedRequests()
-                        + " and published in both documents; §6's per-client one is set by "
-                        + clientsRequiringPushedRequests() + " of the " + configuredClients().size()
-                        + " clients below"));
+                        + ", and the documents were read back and say the same; §6's per-client one "
+                        + "is set by " + clientsRequiringPushedRequests() + " of the "
+                        + configuredClients().size() + " clients below"));
 
         // The other half of the row the clients below are judged on. FAPI 1.0 Advanced §8.6 binds
         // "both clients and authorization servers", and FAPI 2.0 §5.4.1 says "not use or accept" -
@@ -226,6 +229,19 @@ public class FapiComplianceService {
                         + "; only the mTLS listener on 8443 uses TLS"));
 
         return checks;
+    }
+
+    /**
+     * The same precedence for metadata that is a switch rather than a list: whether the documents
+     * say what the code does is settled before the profile's verdict on what the code does.
+     */
+    private static FapiCheck advertisedFlag(Map<String, Object> published, String name,
+                                            boolean enforced, String requirement, String reference,
+                                            boolean meetsProfile, String observed) {
+        String disagreement = ServerMetadataCustomizer.disagreement(published, name, enforced);
+        return disagreement != null
+                ? FapiCheck.fail(requirement, reference, disagreement)
+                : FapiCheck.of(meetsProfile, requirement, reference, observed);
     }
 
     /**
