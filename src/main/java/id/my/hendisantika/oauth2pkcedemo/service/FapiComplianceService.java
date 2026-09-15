@@ -479,6 +479,40 @@ public class FapiComplianceService {
     }
 
     /**
+     * RFC 9126 section 6's lock, which unlike section 10.5's has a profile asking for it. FAPI 2.0
+     * section 5.3.2 binds the client directly: it "shall only send client_id and request_uri request
+     * parameters to the authorization endpoint (all other authorization request parameters are sent
+     * in the pushed authorization request according to [RFC9126])".
+     * <p>
+     * A registration is the only thing visible from here, and pushing is otherwise a per-request
+     * choice - so a client that registered neither half is reported the way the sender-constrained
+     * row reports DPoP: failed, with the limit of what a registration can show stated rather than
+     * implied.
+     */
+    private FapiCheck pushedRequestRequirementCheck(RegisteredClient client) {
+        String requirement = "The client may only start requests through PAR";
+        String reference = "FAPI 2.0 \u00a75.3.2, RFC 9126 \u00a76";
+
+        if (isSet(client, PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING)) {
+            return FapiCheck.pass(requirement, reference,
+                    "Registered require_pushed_authorization_requests, so an ordinary authorization "
+                            + "request from this client is refused whatever the server-wide switch "
+                            + "says");
+        }
+        if (this.pushedAuthorizationPolicy.requirePushedRequests()) {
+            return FapiCheck.pass(requirement, reference,
+                    "Did not register require_pushed_authorization_requests, but RFC 9126 §5's "
+                            + "server-wide half is on, which refuses ordinary requests from every "
+                            + "client at once");
+        }
+        return FapiCheck.fail(requirement, reference,
+                "Neither half of require_pushed_authorization_requests is set. This client may still "
+                        + "push voluntarily - nothing stops it, and the PAR page shows a client "
+                        + "doing exactly that - but pushing is chosen per request rather than "
+                        + "recorded on the registration, so it cannot be confirmed from here");
+    }
+
+    /**
      * RFC 9101 section 10.5's lock, seen from the client side. The section is titled "Downgrade
      * Attack" and says why it exists: "Unless the protocol used by the client and the server is
      * locked down to use an OAuth JWT-Secured Authorization Request (JAR), it is possible for an
@@ -596,6 +630,7 @@ public class FapiComplianceService {
         checks.add(requestObjectEncryptionCheck(client));
         checks.add(requestObjectEncryptionMethodCheck(client));
         checks.add(unsignedRequestRefusalCheck(client));
+        checks.add(pushedRequestRequirementCheck(client));
         checks.add(preRegisteredRequestUriCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
