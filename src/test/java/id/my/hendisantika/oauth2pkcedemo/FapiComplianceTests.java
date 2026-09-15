@@ -3,6 +3,8 @@ package id.my.hendisantika.oauth2pkcedemo;
 import id.my.hendisantika.oauth2pkcedemo.config.DemoProperties;
 import id.my.hendisantika.oauth2pkcedemo.security.FapiCheck;
 import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequestFilter;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
@@ -60,6 +62,9 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     @Autowired
     private ServerMetadataCustomizer serverMetadataCustomizer;
 
+    @Autowired
+    private PushedAuthorizationPolicy pushedAuthorizationPolicy;
+
     private MockMvc mockMvc() {
         return MockMvcBuilders.webAppContextSetup(webApplicationContext).apply(springSecurity()).build();
     }
@@ -78,6 +83,10 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                 .containsExactly(ClientAuthenticationMethod.PRIVATE_KEY_JWT);
         assertThat(client.getClientSecret()).isNull();
         assertThat(client.getClientSettings().isRequireProofKey()).isTrue();
+        // FAPI 2.0 §5.3.2 binds the client to PAR, so the client built to the profile registers it.
+        assertThat(client.getClientSettings()
+                .<Object>getSetting(PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING))
+                .isEqualTo(true);
         assertThat(client.getTokenSettings().isX509CertificateBoundAccessTokens()).isTrue();
         assertThat(client.getTokenSettings().isReuseRefreshTokens()).isFalse();
 
@@ -86,12 +95,13 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     }
 
     @Test
-    void thePublicClientFailsOnAuthenticationAndSenderConstraining() {
+    void thePublicClientFailsOnAuthenticationSenderConstrainingAndPar() {
         RegisteredClient client = registeredClientRepository.findByClientId(properties.client().clientId());
         List<FapiCheck> checks = fapiComplianceService.clientChecks().get(client.getClientName());
 
-        // It exists to demonstrate a public client, which the profile forbids outright.
-        assertThat(failures(checks)).isEqualTo(2);
+        // It exists to demonstrate a public client, which the profile forbids outright - and it is
+        // bound to neither half of the PAR lock, which §5.3.2 asks of the client itself.
+        assertThat(failures(checks)).isEqualTo(3);
         assertThat(checks).anySatisfy(check -> {
             assertThat(check.requirement()).contains("private_key_jwt");
             assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
@@ -362,7 +372,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(9));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(10));
     }
 
     /**
@@ -613,6 +623,51 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         } finally {
             requestObjectPolicy.requireSignedRequestObject(previous);
         }
+    }
+
+    /**
+     * Unlike §10.5's lock, this one has a profile asking for it: FAPI 2.0 §5.3.2 binds the client to
+     * PAR directly, so a client bound to nothing is a real failure rather than a shrug.
+     */
+    @Test
+    void thePushedRequestRowFailsAClientThatIsNotBoundToPar() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(parCheckFor(checks, properties.parRequiredClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    assertThat(check.reference()).contains("FAPI 2.0 §5.3.2").contains("RFC 9126 §6");
+                });
+
+        assertThat(parCheckFor(checks, properties.client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.observed())
+                            .contains("may still push voluntarily")
+                            .contains("cannot be confirmed from here");
+                });
+    }
+
+    /** Either half binds the client, so the server-wide switch moves the unbound rows. */
+    @Test
+    void theServerWideSwitchCoversClientsThatRegisteredNothing() {
+        assertThat(pushedAuthorizationPolicy.requirePushedRequests()).isFalse();
+
+        boolean previous = pushedAuthorizationPolicy.requirePushedRequests(true);
+        try {
+            assertThat(parCheckFor(fapiComplianceService.clientChecks(), properties.client()))
+                    .satisfies(check -> {
+                        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                        assertThat(check.observed()).contains("server-wide half is on");
+                    });
+        } finally {
+            pushedAuthorizationPolicy.requirePushedRequests(previous);
+        }
+    }
+
+    private FapiCheck parCheckFor(Map<String, List<FapiCheck>> checks,
+                                  DemoProperties.Client configured) {
+        return rowFor(checks, configured, "may only start requests through PAR");
     }
 
     private FapiCheck unsignedCheckFor(Map<String, List<FapiCheck>> checks,
