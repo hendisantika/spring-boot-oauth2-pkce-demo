@@ -120,6 +120,18 @@
             does not allow, and this server refuses its encrypted request objects outright.
         </p>
         <p class="hint">
+            <strong>RFC 9126's lock has a profile asking for it, which is why that row fails.</strong>
+            FAPI 2.0 §5.3.2 binds the client directly — it <em>"shall only send
+            <code>client_id</code> and <code>request_uri</code> request parameters to the
+            authorization endpoint (all other authorization request parameters are sent in the
+            pushed authorization request)"</em> — so unlike §10.5's lock beside it, a client bound to
+            neither half is a real failure rather than a shrug. It may still
+            <a th:href="@{/par}">push voluntarily</a>, and one page here shows a client doing exactly
+            that; but pushing is chosen per request rather than recorded on a registration, so it
+            cannot be confirmed from a registration, which is the same limit the
+            sender-constrained row states about DPoP.
+        </p>
+        <p class="hint">
             <strong>RFC 9101 §10.5 is one name for two settings, and each client row says which one
             is covering it.</strong> The section defines
             <code>require_signed_request_object</code> twice — once as client metadata, once as
