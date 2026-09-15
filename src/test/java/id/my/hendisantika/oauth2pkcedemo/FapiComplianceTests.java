@@ -9,6 +9,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import id.my.hendisantika.oauth2pkcedemo.service.FapiComplianceService;
+import id.my.hendisantika.oauth2pkcedemo.service.RequestUriService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -456,6 +457,57 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(check.observed())
                 .contains("§5.3.1")
                 .contains("That row fails here, so it is reachable");
+    }
+
+    /**
+     * RFC 9126 §5's carve-out is the part of request_uri_parameter_supported that can be got wrong:
+     * a server gating all request_uri handling on it would refuse its own pushed references. The
+     * row demonstrates the scheme discrimination rather than asserting it, so the test drives the
+     * same predicate both ways.
+     */
+    @Test
+    void aPushedReferenceIsNotTreatedAsAUrlToFetch() {
+        assertThat(JwtSecuredAuthorizationRequestFilter
+                .isFetchedRequestUri(RequestUriService.PREFIX + "anything"))
+                .as("a pushed reference must not reach the fetch path")
+                .isFalse();
+        assertThat(JwtSecuredAuthorizationRequestFilter
+                .isFetchedRequestUri("https://client.example/request.jwt"))
+                .isTrue();
+        assertThat(JwtSecuredAuthorizationRequestFilter.isFetchedRequestUri(null)).isFalse();
+
+        assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+            assertThat(check.requirement()).contains("pushed request_uri ignores the fetch metadata");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+            assertThat(check.reference()).contains("RFC 9126 §5");
+            assertThat(check.observed())
+                    .contains("regardless of other authorization server metadata")
+                    .contains("request_uri_parameter_supported")
+                    .contains("require_request_uri_registration")
+                    .contains("told apart by scheme");
+        });
+    }
+
+    /**
+     * The carve-out has to hold with the registration switch in either position - that is what
+     * "regardless" means - so the row must not follow it the way the fetch row does.
+     */
+    @Test
+    void theCarveOutHoldsWhicheverWayTheRegistrationSwitchIsSet() {
+        boolean previous = requestUriPolicy.requireRegistration(false);
+        try {
+            assertThat(carveOutRow().outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+        } finally {
+            requestUriPolicy.requireRegistration(previous);
+        }
+        assertThat(carveOutRow().outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+    }
+
+    private FapiCheck carveOutRow() {
+        return fapiComplianceService.serverChecks().stream()
+                .filter(c -> c.requirement().contains("pushed request_uri ignores"))
+                .findFirst()
+                .orElseThrow();
     }
 
     @Test
