@@ -18,6 +18,7 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -141,21 +142,52 @@ class AuthorizationServerMetadataTests extends AbstractMySqlIntegrationTest {
     @Test
     void noRowLinksToAPageThatIsNotThere() throws Exception {
         assertThat(AuthorizationServerMetadataService.demonstrations()).isNotEmpty();
+        assertThat(AuthorizationServerMetadataService.counterparts()).isNotEmpty();
 
-        for (Map.Entry<String, String> linked
-                : AuthorizationServerMetadataService.demonstrations().entrySet()) {
-            var response = mockMvc().perform(get(linked.getValue())).andReturn().getResponse();
+        // Both kinds of link a row can carry: the server-side page and the client-side one.
+        Map<String, String> linked = new LinkedHashMap<>(
+                AuthorizationServerMetadataService.demonstrations());
+        AuthorizationServerMetadataService.counterparts().forEach((field, counterpart) ->
+                linked.put(field + " -> " + counterpart.name(), counterpart.demonstratedAt()));
+
+        for (Map.Entry<String, String> row : linked.entrySet()) {
+            var response = mockMvc().perform(get(row.getValue())).andReturn().getResponse();
             assertThat(response.getStatus())
-                    .as("GET %s, linked from %s", linked.getValue(), linked.getKey())
+                    .as("GET %s, linked from %s", row.getValue(), row.getKey())
                     .isIn(200, 302);
             if (response.getStatus() == 302) {
                 // Two ways this application asks: the form login, or - for a page that needs tokens
                 // rather than only a session - straight into the client's own authorization flow.
                 assertThat(response.getRedirectedUrl())
-                        .as("%s sends a signed-out visitor somewhere sensible", linked.getValue())
+                        .as("%s sends a signed-out visitor somewhere sensible", row.getValue())
                         .containsAnyOf("/login", "/oauth2/authorization/");
             }
         }
+    }
+
+    /**
+     * A counterpart must name a client parameter the discovery documents do not carry. The moment
+     * one of these is also a server field, the row is claiming a client registers something this
+     * server publishes about itself, and the pairing has stopped meaning anything.
+     */
+    @Test
+    void everyCounterpartIsAClientParameterRatherThanAServerField() throws Exception {
+        Map<String, Object> document = document("/.well-known/"
+                + AuthorizationServerMetadataService.OAUTH_SUFFIX);
+
+        assertThat(AuthorizationServerMetadataService.counterparts())
+                .allSatisfy((field, counterpart) -> {
+                    assertThat(document).containsKey(field);
+                    assertThat(counterpart.definedBy()).isNotBlank();
+                    // The two locks share a word with their server halves, which is the point of
+                    // them - so the test is that the client parameter is not itself published.
+                    if (!counterpart.name().equals(field)) {
+                        assertThat(document)
+                                .as("%s is a client parameter, not a published field",
+                                        counterpart.name())
+                                .doesNotContainKey(counterpart.name());
+                    }
+                });
     }
 
     /**
