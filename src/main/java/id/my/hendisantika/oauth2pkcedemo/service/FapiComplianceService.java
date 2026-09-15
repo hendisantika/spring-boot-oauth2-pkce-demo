@@ -253,9 +253,12 @@ public class FapiComplianceService {
                         + "[RFC9126]\", which is every client rather than the willing ones. RFC 9126 "
                         + "§5's server-wide require_pushed_authorization_requests is "
                         + this.pushedAuthorizationPolicy.requirePushedRequests()
-                        + ", and the documents were read back and say the same; §6's per-client one "
-                        + "is set by " + clientsRequiringPushedRequests() + " of the "
-                        + configuredClients().size() + " clients below")));
+                        + ", and the documents were read back and say the same. Both §5 and §6 say "
+                        + "\"if omitted, the default value is false\", so this is the state a "
+                        + "server that published nothing would be in - the difference is that a "
+                        + "client can read it here. §6's per-client one is set by "
+                        + clientsRequiringPushedRequests() + " of the " + configuredClients().size()
+                        + " clients below")));
 
         // The other half of the row the clients below are judged on. FAPI 1.0 Advanced §8.6 binds
         // "both clients and authorization servers", and FAPI 2.0 §5.4.1 says "not use or accept" -
@@ -627,10 +630,12 @@ public class FapiComplianceService {
                             + "client at once");
         }
         return FapiCheck.fail(requirement, reference,
-                "Neither half of require_pushed_authorization_requests is set. This client may still "
-                        + "push voluntarily - nothing stops it, and the PAR page shows a client "
-                        + "doing exactly that - but pushing is chosen per request rather than "
-                        + "recorded on the registration, so it cannot be confirmed from here");
+                "Neither half of require_pushed_authorization_requests is set, which RFC 9126 makes "
+                        + "the default for both - \"if omitted, the default value is false\". This "
+                        + "client may still push voluntarily - nothing stops it, and the PAR page "
+                        + "shows a client doing exactly that - but pushing is chosen per request "
+                        + "rather than recorded on the registration, so it cannot be confirmed from "
+                        + "here");
     }
 
     /**
