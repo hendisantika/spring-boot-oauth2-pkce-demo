@@ -152,6 +152,38 @@ public final class ServerMetadataCustomizer {
     }
 
     /**
+     * The boolean counterpart of {@link #disagreement(Map, String, Set)}, for the metadata that is a
+     * switch rather than a list. The same reasoning applies and one case more: a server that
+     * advertises {@code true} while enforcing nothing has published a defence it does not have, and
+     * a client reading that has been told it is safe when it is not.
+     * <p>
+     * Absence is a disagreement here too. These switches all default to false in their
+     * specifications, so a client that cannot find the value is entitled to assume the lock is off -
+     * which is wrong whenever it is on.
+     *
+     * @param published the claims, as {@link #publishedClaims()} returns them
+     * @param name      the metadata name to look up
+     * @param enforced  what the code actually does
+     * @return {@code null} when the two agree, or a description of how they do not
+     */
+    public static String disagreement(Map<String, Object> published, String name, boolean enforced) {
+        Object value = published.get(name);
+        if (!(value instanceof Boolean advertised)) {
+            return name + " is not in the discovery documents, so a client reading them is entitled "
+                    + "to assume the specification default of false, while this server enforces "
+                    + enforced;
+        }
+        if (advertised != enforced) {
+            return name + " advertises " + advertised + " but this server enforces " + enforced
+                    + (advertised
+                    ? ". Publishing a defence that is not applied is the worse direction: a client "
+                    + "reading it has been told it is protected when it is not"
+                    : ". Clients are being refused for a rule the documents do not mention");
+        }
+        return null;
+    }
+
+    /**
      * What Spring Authorization Server cannot know to advertise, because this application added it:
      * the grant it does not implement, the details types the demo validates, and the response
      * parameter a handler here supplies. The scopes come from the registered clients rather than a
