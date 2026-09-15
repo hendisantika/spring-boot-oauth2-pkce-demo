@@ -28,7 +28,12 @@ public final class RequestUriFetcher {
     /** RFC 9101 section 5.2: "The entire Request URI SHOULD NOT exceed 512 ASCII characters." */
     public static final int MAXIMUM_URI_LENGTH = 512;
 
-    /** Clause (c): a timeout, so a slow host cannot hold an authorization request open. */
+    /**
+     * Clause (c): a timeout, so a slow host cannot hold an authorization request open. Applied to
+     * reading as well as connecting - the clause asks for "a timeout for obtaining the content of
+     * request_uri", and a host that accepts the connection and then dribbles the body has not
+     * connected slowly, it has answered slowly, which is the same attack with an extra step.
+     */
     public static final Duration TIMEOUT = Duration.ofSeconds(2);
 
     /** Nothing about a request object needs more room than this. */
@@ -39,12 +44,15 @@ public final class RequestUriFetcher {
     public RequestUriFetcher() {
         // Redirects are not followed: a fetch that can be bounced elsewhere is a fetch whose
         // destination the registered list no longer describes.
-        this.restClient = RestClient.builder()
-                .requestFactory(new JdkClientHttpRequestFactory(HttpClient.newBuilder()
+        JdkClientHttpRequestFactory requestFactory =
+                new JdkClientHttpRequestFactory(HttpClient.newBuilder()
                         .followRedirects(HttpClient.Redirect.NEVER)
                         .connectTimeout(TIMEOUT)
-                        .build()))
-                .build();
+                        .build());
+        // HttpClient's own timeout covers establishing the connection and nothing after it, so on
+        // its own it leaves clause (c) half done.
+        requestFactory.setReadTimeout(TIMEOUT);
+        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
     }
 
     /**
