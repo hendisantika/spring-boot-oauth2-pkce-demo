@@ -751,6 +751,11 @@ for refusing it.
 
 ![The contradictory registration](docs/images/144-fapi-unsigned-refusal.png)
 
+**145. FAPI 2.0** — the one client that meets every requirement, now including the PAR lock its
+profile asks for.
+
+![The FAPI client's card](docs/images/145-fapi-client-par-bound.png)
+
 **141. FAPI 2.0** — reading the request object rows together: what each profile asks, and what an
 absent value means in each.
 
@@ -2860,9 +2865,35 @@ wins — and that client is left with no request object it can successfully send
 reading whole: the signing row fails it for registering `none` while this row passes it for refusing
 `none`, and both are correct.
 
-Only `pkce-fapi-client`, `pkce-mtls-client` and `pkce-mtls-refresh-client` meet every client
-requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
-as a public client with no authentication, or a shared secret.
+The tenth check reads [`require_pushed_authorization_requests`](#require_pushed_authorization_requests)
+— the client half. Unlike §10.5's lock above it, **this one has a profile asking for it**: FAPI 2.0
+§5.3.2 binds the client directly, to *"only send `client_id` and `request_uri` request parameters to
+the authorization endpoint (all other authorization request parameters are sent in the pushed
+authorization request according to [RFC9126])"*. So a client bound to neither half is a real failure
+rather than a shrug:
+
+| State | Result | Count |
+|---|---|---|
+| The client registered it | PASS | 2 |
+| It did not, and RFC 9126 §5's server-wide half is on | PASS | 0 — that switch is off |
+| Neither | FAIL | 32 |
+
+A failing client may still push voluntarily — [the PAR page](#pushed-authorization-requests) shows
+one doing exactly that — but pushing is chosen per request rather than recorded on a registration, so
+it cannot be confirmed from here. That is the same limit the sender-constrained row states about
+DPoP, and the row says it rather than implying the client never pushes.
+
+**This check found a gap in the demo's own flagship client.** `pkce-fapi-client` exists specifically
+to be the profile-compliant one, and it was not registering the lock FAPI 2.0 §5.3.2 asks for. It now
+does. Because the seeding methods return early when a client already exists — and this demo's MySQL
+lives in a named volume that outlives `docker compose down` — a setting added to the builder would
+have reached new databases only, so there is an idempotent updater beside it that adds the lock to an
+existing registration.
+
+Only `pkce-fapi-client` meets every client requirement. `pkce-mtls-client` and
+`pkce-mtls-refresh-client`, which met the other nine, are bound to neither half of the PAR lock and
+now fail this row. The rest fail on purpose: each exists to demonstrate something the profile
+forbids, such as a public client with no authentication, or a shared secret.
 
 The checks read the live configuration (registered clients, authorization server settings) rather
 than a hand-maintained list, so they stay honest as the demo changes. A profile check that only ever
