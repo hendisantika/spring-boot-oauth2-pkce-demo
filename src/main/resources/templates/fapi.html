@@ -257,6 +257,26 @@
             so this is a capability the demo added and has to advertise to make usable.
         </p>
         <p class="hint">
+            <strong>§10.4.1 lists four mitigations, and all four now have rows.</strong> The section
+            is about a client pointing <code>request_uri</code> at something <em>"extremely large
+            content or extremely slow to respond"</em>. Clause (a) is the registration row; the other
+            three are about what happens once a fetch has been allowed to start —
+            <strong>(b)</strong> the response must be
+            <code>application/oauth-authz-req+jwt</code>, <strong>(c)</strong> there must be a
+            timeout, <strong>(d)</strong> no recursive GET. The
+            <a th:href="@{/request-uris}">fetching page</a> demonstrates each being refused.
+        </p>
+        <p class="hint">
+            <strong>Writing clause (c)'s row found a real gap here.</strong> The timeout was wired as
+            a connect timeout only, which bounds getting the connection and nothing after it — so a
+            host that accepted the connection and then dribbled the body was answering slowly rather
+            than connecting slowly, and this server waited. Clause (c) asks for a timeout
+            <em>"for obtaining the content"</em>, which is the whole of it. It is now applied to
+            reading as well, and a test holds a fetch against a deliberately slow host to prove the
+            difference: before the fix it waited four times the timeout, and the configuration looked
+            correct either way.
+        </p>
+        <p class="hint">
             <strong>The half of that flag worth checking is the half that can be got wrong.</strong>
             Whether <code>request_uri_parameter_supported</code> is honestly published is one thing;
             RFC 9126 §5 adds another — <em>"a <code>request_uri</code> value obtained from the PAR
