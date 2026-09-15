@@ -766,8 +766,8 @@ one the profile stopped asking for.
 
 ![The server table](docs/images/142-fapi-server-request-uri-registration.png)
 
-**143. FAPI 2.0** — the bottom of it: all three of the lists RFC 9101 §4 names together, each with
-its own citation, one failing and two passing.
+**143. FAPI 2.0** — the bottom of it: the four rows that check the discovery documents against the
+code before applying their citation — RFC 9126 §5's switch and RFC 9101 §4's three lists.
 
 ![The two algorithm rows](docs/images/143-fapi-advertised-algorithms.png)
 
@@ -2669,6 +2669,16 @@ on an advertised value means nothing if the advertised value is not what the cod
 | The list is absent from the documents | A client can only learn the set by being refused |
 | It advertises **less** than is accepted | A working option is hidden; clients never try it |
 | It advertises **more** than is accepted | The worse one: clients plan against something that will be refused |
+
+**RFC 9126 §5's switch is checked the same way**, through a boolean overload of the same comparison.
+That row used to say the value was *"published in both documents"* without ever looking; it now reads
+them back first, and says so. A switch can lie worse than a list:
+
+| Disagreement | Consequence |
+|---|---|
+| Absent from the documents | These switches default to `false`, so a client assumes the lock is off |
+| Advertises `false`, enforces `true` | Clients are refused for a rule the documents do not mention |
+| Advertises `true`, enforces `false` | The dangerous one: a client is told it is protected when it is not — and, unlike a wrong algorithm list, it never finds out by being refused |
 
 Ordering is not disagreement — both sides are sorted before comparing. All three currently agree, so
 the rows fall through to their profile verdicts, and `ServerMetadataCustomizer` is where the
