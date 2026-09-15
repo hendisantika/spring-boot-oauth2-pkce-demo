@@ -128,6 +128,11 @@ public class AuthorizationServerMetadataService {
         return DEMONSTRATED_BY;
     }
 
+    /** The client-side pages rows are linked to, which need the same guarding. */
+    public static Map<String, MetadataEntry.Counterpart> counterparts() {
+        return CLIENT_COUNTERPART;
+    }
+
     /**
      * RFC 8414 section 3. The well-known string goes <em>between the host and the path</em>, not on
      * the end - so an issuer with a path component publishes at a URL that reads back to front
@@ -174,6 +179,33 @@ public class AuthorizationServerMetadataService {
      * server describes itself. Where both documents carry a field they agree on its value - there is
      * a test for that - so the OAuth document's copy is the one rendered.
      */
+    /**
+     * The client registration parameter each of these server fields governs. Only the fields this
+     * demo can show both ends of are here: a link to a page that does not exist would be worse than
+     * no link, and a pairing nobody can watch happen is a footnote rather than a row.
+     */
+    private static final Map<String, MetadataEntry.Counterpart> CLIENT_COUNTERPART = Map.ofEntries(
+            Map.entry("request_object_signing_alg_values_supported",
+                    new MetadataEntry.Counterpart("request_object_signing_alg",
+                            "OIDC Registration \u00a72", "/jar-alg")),
+            Map.entry("request_object_encryption_alg_values_supported",
+                    new MetadataEntry.Counterpart("request_object_encryption_alg",
+                            "OIDC Registration \u00a72", "/jar-enc-alg")),
+            Map.entry("request_object_encryption_enc_values_supported",
+                    new MetadataEntry.Counterpart("request_object_encryption_enc",
+                            "OIDC Registration \u00a72", "/jar-enc-method")),
+            // The two that are the same word at both ends, each defined twice by its own RFC.
+            Map.entry("require_signed_request_object",
+                    new MetadataEntry.Counterpart("require_signed_request_object",
+                            "RFC 9101 \u00a710.5", "/jar-client-required")),
+            Map.entry("require_pushed_authorization_requests",
+                    new MetadataEntry.Counterpart("require_pushed_authorization_requests",
+                            "RFC 9126 \u00a76", "/par-required")),
+            // Not the same parameter, but the one a client has to supply to satisfy this field.
+            Map.entry("require_request_uri_registration",
+                    new MetadataEntry.Counterpart("request_uris",
+                            "OIDC Registration \u00a72", "/request-uris")));
+
     public List<MetadataEntry> describe(Map<String, Object> oauthDocument,
                                         Map<String, Object> oidcDocument) {
         List<MetadataEntry> entries = new ArrayList<>();
@@ -187,7 +219,8 @@ public class AuthorizationServerMetadataService {
                 DEFINED_BY.getOrDefault(name, "RFC 8414 §2"),
                 oauthDocument.containsKey(name),
                 oidcDocument.containsKey(name),
-                DEMONSTRATED_BY.get(name))));
+                DEMONSTRATED_BY.get(name),
+                CLIENT_COUNTERPART.get(name))));
         return entries;
     }
 
