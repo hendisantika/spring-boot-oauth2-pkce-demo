@@ -116,19 +116,27 @@ public class FapiComplianceService {
         // 1.0 Advanced required the request object to be signed, and FAPI 2.0 took that out in
         // favour of PAR - its own comparison table replaces "nbf & exp claims in request object"
         // with "request_uri has limited lifetime".
-        checks.add(FapiCheck.notApplicable("Request objects are signed",
-                "FAPI 1.0 Advanced §5.2.2; not carried into FAPI 2.0",
-                "FAPI 2.0 requires a pushed request with a short-lived request_uri instead. RFC 9101 "
-                        + "§10.5's require_signed_request_object is implemented here regardless: "
-                        + "server-wide it is " + this.requestObjectPolicy.requireSignedRequestObject()
-                        + " and published in both documents, and "
-                        + clientsRequiringSignedRequestObjects() + " of the "
-                        + configuredClients().size() + " clients below set it for themselves"));
+        checks.add(verifyingMetadata(published,
+                ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT_METADATA,
+                this.requestObjectPolicy.requireSignedRequestObject(),
+                FapiCheck.notApplicable("Request objects are signed",
+                        "FAPI 1.0 Advanced §5.2.2; not carried into FAPI 2.0",
+                        "FAPI 2.0 requires a pushed request with a short-lived request_uri instead. "
+                                + "RFC 9101 §10.5's require_signed_request_object is implemented "
+                                + "here regardless: server-wide it is "
+                                + this.requestObjectPolicy.requireSignedRequestObject()
+                                + ", and the documents were read back and say the same, and "
+                                + clientsRequiringSignedRequestObjects() + " of the "
+                                + configuredClients().size()
+                                + " clients below set it for themselves")));
 
         // No FAPI profile names this one - the checked spec is RFC 9101, and the profiles reach the
         // same attack surface from the other side by requiring PAR, which is the row below. It is
         // here because thirty-two of the client rows are only green while it is true.
-        checks.add(FapiCheck.of(this.requestUriPolicy.requireRegistration(),
+        checks.add(verifyingMetadata(published,
+                ServerMetadataCustomizer.REQUIRE_REQUEST_URI_REGISTRATION,
+                this.requestUriPolicy.requireRegistration(),
+                FapiCheck.of(this.requestUriPolicy.requireRegistration(),
                 "Fetched request_uris must be pre-registered",
                 "RFC 9101 \u00a710.4.1(a); no FAPI profile names it",
                 "RFC 9101 says the server should \"check that the value of the request_uri parameter "
@@ -138,24 +146,25 @@ public class FapiComplianceService {
                         + ServerMetadataCustomizer.REQUIRE_REQUEST_URI_REGISTRATION + " is "
                         + this.requestUriPolicy.requireRegistration() + " here, and "
                         + clientsWithRegisteredRequestUris() + " of the " + configuredClients().size()
-                        + " clients below have registered a URL. FAPI 2.0 answers the same attack by "
-                        + "requiring PAR instead, so nothing is fetched at all"));
+                        + " clients below have registered a URL, and the documents were read back "
+                        + "and say the same. FAPI 2.0 answers the same attack by requiring PAR "
+                        + "instead, so nothing is fetched at all")));
 
         // Honest failures follow. A profile check that only ever passes is worth nothing - and this
         // one is now capable of passing, which is the only thing that makes its failing mean
         // anything: the switch exists and is off rather than being absent.
-        checks.add(advertisedFlag(published,
+        checks.add(verifyingMetadata(published,
                 ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
                 this.pushedAuthorizationPolicy.requirePushedRequests(),
+                FapiCheck.of(this.pushedAuthorizationPolicy.requirePushedRequests(),
                 "The server requires pushed authorization requests", "FAPI 2.0 §5.3.1",
-                this.pushedAuthorizationPolicy.requirePushedRequests(),
                 "The profile says the server \"shall reject authorization requests sent without "
                         + "[RFC9126]\", which is every client rather than the willing ones. RFC 9126 "
                         + "§5's server-wide require_pushed_authorization_requests is "
                         + this.pushedAuthorizationPolicy.requirePushedRequests()
                         + ", and the documents were read back and say the same; §6's per-client one "
                         + "is set by " + clientsRequiringPushedRequests() + " of the "
-                        + configuredClients().size() + " clients below"));
+                        + configuredClients().size() + " clients below")));
 
         // The other half of the row the clients below are judged on. FAPI 1.0 Advanced §8.6 binds
         // "both clients and authorization servers", and FAPI 2.0 §5.4.1 says "not use or accept" -
@@ -232,16 +241,21 @@ public class FapiComplianceService {
     }
 
     /**
-     * The same precedence for metadata that is a switch rather than a list: whether the documents
-     * say what the code does is settled before the profile's verdict on what the code does.
+     * The same precedence for metadata that is a switch rather than a list, kept in a shape the
+     * not-applicable row can use too: whether the documents say what the code does is settled before
+     * anything else, and a document that disagrees fails the row whatever verdict it would otherwise
+     * have carried. A requirement this profile stopped asking for is still a requirement to describe
+     * this server truthfully.
+     *
+     * @param enforced what the code actually does
+     * @param verdict  the check to report when the documents agree
      */
-    private static FapiCheck advertisedFlag(Map<String, Object> published, String name,
-                                            boolean enforced, String requirement, String reference,
-                                            boolean meetsProfile, String observed) {
+    private static FapiCheck verifyingMetadata(Map<String, Object> published, String name,
+                                               boolean enforced, FapiCheck verdict) {
         String disagreement = ServerMetadataCustomizer.disagreement(published, name, enforced);
         return disagreement != null
-                ? FapiCheck.fail(requirement, reference, disagreement)
-                : FapiCheck.of(meetsProfile, requirement, reference, observed);
+                ? FapiCheck.fail(verdict.requirement(), verdict.reference(), disagreement)
+                : verdict;
     }
 
     /**
