@@ -360,6 +360,11 @@ specification that registered each one.
 
 ![The published document field by field](docs/images/56-metadata-fields.png)
 
+**150. Metadata** — six fields naming the client parameter they govern, with the specification that
+defines each.
+
+![The client counterparts](docs/images/150-metadata-client-counterparts.png)
+
 **56. Metadata** — a client reading it, and the issuer check that decides whether it may.
 
 ![Discovery accepted and rejected](docs/images/57-metadata-discovery.png)
@@ -2549,6 +2554,33 @@ A document says what a server claims; those pages say what it does about the cla
 linked path and asserts this application serves it — 200, or a redirect to sign in for the pages that
 need a session, which is what the rest of the demo does with them too — so a cross-link cannot quietly
 become a dead end.
+
+**Six rows also name the client parameter they govern.** A client parameter can never *be* a row
+here — these documents describe the server, and `request_object_signing_alg` is something a client
+registers — but several of these fields exist precisely to tell a client what it may register, and
+that pairing is most of what they mean:
+
+| Server field | A client registers | Defined by |
+|---|---|---|
+| `request_object_signing_alg_values_supported` | [`request_object_signing_alg`](#request_object_signing_alg) | OIDC Registration §2 |
+| `request_object_encryption_alg_values_supported` | [`request_object_encryption_alg`](#request_object_encryption_alg) | OIDC Registration §2 |
+| `request_object_encryption_enc_values_supported` | [`request_object_encryption_enc`](#request_object_encryption_enc) | OIDC Registration §2 |
+| `require_signed_request_object` | [`require_signed_request_object`](#require_signed_request_object-as-client-metadata) | RFC 9101 §10.5 |
+| `require_pushed_authorization_requests` | [`require_pushed_authorization_requests`](#require_pushed_authorization_requests) | RFC 9126 §6 |
+| `require_request_uri_registration` | [`request_uris`](#request_uris) | OIDC Registration §2 |
+
+The three algorithm lists say what a client may put in its registration, and RFC 9101 §10.1 then has
+this server refuse a request object that used anything other than the one that client chose — the
+list is not advice, it is the set the agreement may be drawn from. The two locks are the same word at
+both ends, each defined twice by its own RFC, which is why this demo has a page for each half.
+`require_request_uri_registration` is the odd one out: not a counterpart but the field that decides
+whether a client's `request_uris` are needed at all.
+
+Only pairings this demo can show both ends of are listed, because a link to a page that does not
+exist is worse than no link — and the dead-link test now sweeps these alongside the
+`see what it does` links, so neither kind can rot. A second test asserts each named client parameter
+is *not* itself a published field, since the moment one is, the row has stopped distinguishing the
+two sides.
 
 The rows left unlinked are the ones no single page owns: the endpoints themselves, `issuer`,
 `scopes_supported`, the response types, the auth-method lists, `code_challenge_methods_supported`
