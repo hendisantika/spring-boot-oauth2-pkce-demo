@@ -775,6 +775,11 @@ reference never reaches the registration check.
 
 ![The four DoS mitigations](docs/images/148-fapi-dos-mitigations.png)
 
+**149. FAPI 2.0** — the registered URLs judged rather than counted: three plaintext, no cache
+fragments, and why each matters.
+
+![The registered URL checks](docs/images/149-fapi-registered-url-checks.png)
+
 **142. FAPI 2.0** — the top of the server table: six passes, the row no profile asks for, and the
 one the profile stopped asking for.
 
@@ -2922,6 +2927,28 @@ That last row is conditional, and the check reads the switch live rather than as
 nothing could still name any https URL and have this server go and fetch it, so every one of those 32
 rows turns red together. It is the only per-client row here whose outcome depends on server
 configuration rather than on the registration alone.
+
+The eleventh check judges the registered URLs rather than counting them. Three specifications
+constrain a `request_uri`, and the row cites all three:
+
+| Source | Requirement |
+|---|---|
+| RFC 9101 §5.2 | *"the `request_uri` MUST be an `https` URI"*, and *"the entire Request URI SHOULD NOT exceed 512 ASCII characters"* |
+| OIDC Registration §2 | *"These URLs MUST use the https scheme unless the target Request Object is signed in a way that is verifiable by the OP"* |
+| FAPI 1.0 Advanced §8.5 | *"all interactions shall be encrypted with TLS (HTTPS)"* — fetching over `http` is one that is not |
+
+**Both clients holding URLs fail it, and that is the honest answer.** This demo serves no TLS, so the
+URLs it registers sit on its own origin over `http`, leaning on Registration §2's carve-out — every
+object fetched here is signed and verified, so it is legal by the registration spec. It is still a
+plaintext fetch, which is the same gap the server's own *"All endpoints are served over TLS"* row
+reports, seen from the fetching end rather than the listening end. A row that passed on the carve-out
+would be hiding that.
+
+The row also counts the **cache fragment**. Registration §2 says a URL *"SHOULD include the
+base64url-encoded SHA-256 hash value of the file contents … as the value of the URI fragment"*, so a
+server holding a cached copy can tell it has gone stale. None of these carry one, and the row says
+what that costs: nothing here, because this server re-fetches rather than caching. It would cost a
+client registering with a caching OP its freshness.
 
 Note that both kinds of reference arrive in the same `request_uri` parameter and are told apart by
 scheme — `http(s)` is fetched, anything else is left to PAR — so this row is about the fetched kind
