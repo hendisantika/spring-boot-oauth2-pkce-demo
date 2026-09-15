@@ -126,7 +126,10 @@ public class FapiComplianceService {
                                 + "RFC 9101 §10.5's require_signed_request_object is implemented "
                                 + "here regardless: server-wide it is "
                                 + this.requestObjectPolicy.requireSignedRequestObject()
-                                + ", and the documents were read back and say the same, and "
+                                + ", and the documents were read back and say the same. §10.5 makes "
+                                + "that the default too - \"if omitted, the default value is "
+                                + "false\" - so publishing it does not tighten anything, it removes "
+                                + "the doubt about whether the field is missing or off. And "
                                 + clientsRequiringSignedRequestObjects() + " of the "
                                 + configuredClients().size()
                                 + " clients below set it for themselves")));
@@ -673,11 +676,12 @@ public class FapiComplianceService {
                             + "which refuses unsigned requests from every client at once");
         }
         return FapiCheck.notApplicable(requirement, reference,
-                "Neither half of require_signed_request_object is set, so an ordinary RFC 6749 "
-                        + "request from this client is acted on - the downgrade §10.5 is named "
-                        + "after. No current profile asks a client to register it: FAPI 1.0 Advanced "
-                        + "asked the server to require signed request objects, and FAPI 2.0 asks for "
-                        + "PAR instead");
+                "Neither half of require_signed_request_object is set, which §10.5 says is the "
+                        + "default for both - \"if omitted, the default value is false\" - so an "
+                        + "ordinary RFC 6749 request from this client is acted on, the downgrade "
+                        + "§10.5 is named after. No current profile asks a client to register it: "
+                        + "FAPI 1.0 Advanced asked the server to require signed request objects, and "
+                        + "FAPI 2.0 asks for PAR instead");
     }
 
     /**
