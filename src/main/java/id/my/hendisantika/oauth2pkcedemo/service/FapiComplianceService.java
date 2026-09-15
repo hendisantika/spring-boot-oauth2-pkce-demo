@@ -158,6 +158,27 @@ public class FapiComplianceService {
                                         + "request that did not come through PAR is refused. That "
                                         + "row fails here, so it is reachable"))));
 
+        // RFC 9126 §5's carve-out, which is the part of request_uri_parameter_supported that can
+        // actually be got wrong: a server that gated all request_uri handling on it would break PAR
+        // for everybody. Demonstrated rather than asserted - the reference the pushed endpoint
+        // issues is put through the same predicate the filter uses.
+        boolean endpointPresent = settings.getPushedAuthorizationRequestEndpoint() != null;
+        boolean pushedReferenceIsNotFetched = !JwtSecuredAuthorizationRequestFilter
+                .isFetchedRequestUri(RequestUriService.PREFIX + "issued-by-the-pushed-endpoint");
+        checks.add(FapiCheck.of(endpointPresent && pushedReferenceIsNotFetched,
+                "A pushed request_uri ignores the fetch metadata", "RFC 9126 §5",
+                "§5: \"a request_uri value obtained from the PAR endpoint is usable at the "
+                        + "authorization endpoint regardless of other authorization server metadata "
+                        + "such as request_uri_parameter_supported or "
+                        + "require_request_uri_registration\". Both of those are published here - "
+                        + "the first true, the second "
+                        + this.requestUriPolicy.requireRegistration()
+                        + " - and neither is consulted for a pushed reference, because the two kinds "
+                        + "of request_uri are told apart by scheme: "
+                        + RequestUriService.PREFIX + "\u2026 is not a URL to fetch, so it never "
+                        + "reaches the registration check at all. A server that gated every "
+                        + "request_uri on that metadata would refuse its own pushed references"));
+
         // No FAPI profile names this one - the checked spec is RFC 9101, and the profiles reach the
         // same attack surface from the other side by requiring PAR, which is the row below. It is
         // here because thirty-two of the client rows are only green while it is true.
