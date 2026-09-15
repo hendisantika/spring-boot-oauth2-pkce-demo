@@ -415,6 +415,49 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(ServerMetadataCustomizer.disagreement(silent, name, false)).isNull();
     }
 
+    /**
+     * The capability the signed-request-object row rests on, and the only §5.2.2 requirement that is
+     * a disjunction - by value or by reference, either will do. Both booleans are verified, so a
+     * server cannot advertise a way in it does not offer.
+     */
+    @Test
+    void theByValueRowVerifiesBothWaysInAndSaysEitherWouldDo() {
+        Map<String, Object> published = serverMetadataCustomizer.publishedClaims();
+
+        assertThat(published).containsEntry(ServerMetadataCustomizer.REQUEST_PARAMETER_SUPPORTED, true);
+        assertThat(published)
+                .containsEntry(ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED, true);
+
+        assertThat(fapiComplianceService.serverChecks()).anySatisfy(check -> {
+            assertThat(check.requirement())
+                    .contains("Request objects can be passed by value or by reference");
+            assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+            assertThat(check.reference()).contains("FAPI 1.0 Advanced §5.2.2");
+            assertThat(check.observed())
+                    .contains("by value with the request parameter or by reference")
+                    .contains("read back from the documents")
+                    .contains("Discovery defaults the first to false");
+        });
+    }
+
+    /**
+     * The row pairs with the failing PAR row rather than standing alone: on a server meeting §5.3.1
+     * the by-value parameter is unreachable whatever this metadata says, and this server does not
+     * meet it - so the text has to say the parameter really is reachable here.
+     */
+    @Test
+    void theByValueRowTiesItselfToWhetherParIsRequired() {
+        FapiCheck check = fapiComplianceService.serverChecks().stream()
+                .filter(c -> c.requirement().contains("passed by value or by reference"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(pushedAuthorizationPolicy.requirePushedRequests()).isFalse();
+        assertThat(check.observed())
+                .contains("§5.3.1")
+                .contains("That row fails here, so it is reachable");
+    }
+
     @Test
     void theMechanismsTheProfileMandatesAreAllPresent() {
         List<FapiCheck> checks = fapiComplianceService.serverChecks();
