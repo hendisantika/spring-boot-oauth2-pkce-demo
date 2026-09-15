@@ -771,6 +771,10 @@ reference never reaches the registration check.
 
 ![The RFC 9126 carve-out](docs/images/147-fapi-pushed-uri-carve-out.png)
 
+**148. FAPI 2.0** — all four of RFC 9101 §10.4.1's DoS mitigations, each with its own clause.
+
+![The four DoS mitigations](docs/images/148-fapi-dos-mitigations.png)
+
 **142. FAPI 2.0** — the top of the server table: six passes, the row no profile asks for, and the
 one the profile stopped asking for.
 
@@ -2756,6 +2760,27 @@ the documents. Advertising a way in that is not offered sends clients down it fo
 Publishing the first is not decoration: OpenID Connect Discovery defaults it to `false`, and Spring
 Authorization Server has no notion of the `request` parameter at all, so it is a capability this demo
 added and has to advertise to make usable.
+
+**§10.4.1 lists four mitigations, and all four have rows.** The section is about a client pointing
+`request_uri` at something *"extremely large content or extremely slow to respond"*. Clause (a) is
+the registration row above; the other three are about what happens once a fetch has been allowed to
+start:
+
+| Clause | Requirement | How |
+|---|---|---|
+| (b) | *"check that the media type of the response is `application/oauth-authz-req+jwt`"* | The fetcher refuses anything else. `Accept: */*` is sent **on purpose** — asking only for that type would have the host refuse to serve anything else, and the clause is about judging what arrived, not what was asked for |
+| (c) | *"implement a timeout for obtaining the content of `request_uri`"* | 2s, on reading as well as connecting, beside a 64KB body limit and a 512-character URL limit |
+| (d) | *"not perform recursive GET on the `request_uri`"* | A request object carrying `request` or `request_uri` is refused — §4 says the same from the other end — so recursion has nowhere to start. Redirects are not followed either |
+
+**Writing clause (c)'s row found a real gap.** The timeout was wired as a connect timeout only, which
+bounds getting the connection and nothing after it. A host that accepted the connection and then
+dribbled the body was answering slowly rather than connecting slowly, and this server waited — which
+is precisely the attack the clause exists to stop. It is now applied to reading too.
+
+The configuration looked correct either way, so the fix is held by a test that runs a deliberately
+slow local host: with the read timeout the fetch gives up near 2s, and without it the same test waits
+8s and fails. The first version of that test passed in both cases — its tolerance sat above the
+host's delay rather than below it — so the bound is now tighter than the delay on purpose.
 
 **The half of that flag worth its own row is the half that can be got wrong.** Whether
 `request_uri_parameter_supported` is honestly published is one thing, and the disjunction row settles
