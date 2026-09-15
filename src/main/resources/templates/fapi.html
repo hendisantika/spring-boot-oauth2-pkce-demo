@@ -120,6 +120,30 @@
             does not allow, and this server refuses its encrypted request objects outright.
         </p>
         <p class="hint">
+            <strong>RFC 9101 §10.5 is one name for two settings, and each client row says which one
+            is covering it.</strong> The section defines
+            <code>require_signed_request_object</code> twice — once as client metadata, once as
+            server metadata, both boolean, both defaulting to <code>false</code> — and either being
+            true refuses an unsigned request. So a client that
+            <a th:href="@{/jar-client-required}">registered it</a> is closed whatever the
+            <a th:href="@{/jar-required}">server-wide switch</a> says, a client that registered
+            nothing is closed only while that switch is on, and the row distinguishes those rather
+            than reporting one green for both. Neither half set is not a failure: FAPI 1.0 Advanced
+            asked the <em>server</em> to require signed request objects and FAPI 2.0 asks for PAR
+            instead, so no profile asks a client to register this.
+        </p>
+        <p class="hint">
+            <strong>One registration argues with itself.</strong> A client here registered
+            <code>require_signed_request_object</code> and
+            <a th:href="@{/jar-none}"><code>none</code></a> as its only signing algorithm — the flag
+            refuses exactly what the algorithm declares. §10.5 is ambiguous about which wins: its
+            client paragraph makes the <code>none</code> rejection conditional on <em>"this server
+            metadata value"</em>, which reads like a drafting slip, while its server paragraph is
+            unconditional. This server takes the stricter reading, so the lock wins — and the client
+            is left with no request object it can successfully send, which the row says rather than
+            reporting a green and moving on.
+        </p>
+        <p class="hint">
             <strong>The last row is a mechanism one profile required and the next one removed.</strong>
             FAPI 1.0 Advanced §5.2.2 had the server <em>"require a JWS signed JWT request object
             passed by value with the <code>request</code> parameter or by reference with the
