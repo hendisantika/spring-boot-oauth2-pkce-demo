@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # The application's own dependencies: Spring Boot, Spring Authorization Server, Nimbus, the MySQL
+  # driver, Testcontainers.
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: daily
+      time: "05:00"
+      timezone: Asia/Jakarta
+
+  # The actions the build workflow pins. Worth watching for the same reason the dependencies are:
+  # the first version of that workflow pinned majors that were three releases stale and warned on
+  # every run, which is precisely the drift nobody notices by reading.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: daily
+      time: "05:00"
+      timezone: Asia/Jakarta
