@@ -90,6 +90,12 @@
                     <span class="hint" style="display:block" th:if="${entry.hasDemonstration()}">
                         <a th:href="${entry.demonstratedAt}">see what it does</a>
                     </span>
+                    <span class="hint" style="display:block" th:if="${entry.hasCounterpart()}">
+                        a client registers
+                        <a th:href="${entry.counterpart.demonstratedAt}"><code
+                                th:text="${entry.counterpart.name}">-</code></a>
+                        <span th:text="'(' + ${entry.counterpart.definedBy} + ')'">-</span>
+                    </span>
                 </td>
                 <td>
                     <span th:text="${entry.requirement}"
@@ -100,6 +106,19 @@
             </tr>
             </tbody>
         </table>
+        <p class="hint">
+            <strong>Six fields name the client parameter they govern.</strong> A client parameter can
+            never be a row here — these documents describe the server, and
+            <code>request_object_signing_alg</code> is something a <em>client</em> registers — but
+            several of these fields exist precisely to tell a client what it may register, and the
+            pairing is most of what they mean. The three algorithm lists say what a client may put in
+            <code>request_object_signing_alg</code>, <code>request_object_encryption_alg</code> and
+            <code>request_object_encryption_enc</code>, and RFC 9101 §10.1 then has this server
+            refuse a request object that used anything other than the one that client chose. Two more
+            are the same word at both ends, defined twice by their own RFC — and
+            <code>require_request_uri_registration</code> is the odd one: not a counterpart but the
+            field that decides whether a client's <code>request_uris</code> are needed at all.
+        </p>
         <p class="hint">
             Four fields are all RFC 8414 actually demands: <code>issuer</code>,
             <code>authorization_endpoint</code>, <code>token_endpoint</code> and
