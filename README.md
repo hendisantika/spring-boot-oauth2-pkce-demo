@@ -761,6 +761,11 @@ absent value means in each.
 
 ![The reading notes](docs/images/141-fapi-reading-this.png)
 
+**146. FAPI 2.0** — the two §5.2.2 rows together: what the profile asked for, and the two ways in
+that satisfy it.
+
+![By value or by reference](docs/images/146-fapi-by-value-or-reference.png)
+
 **142. FAPI 2.0** — the top of the server table: six passes, the row no profile asks for, and the
 one the profile stopped asking for.
 
@@ -2735,6 +2740,23 @@ One row is neither a pass nor a gap:
 | Requirement | Why it is not applicable |
 |---|---|
 | Request objects are signed | FAPI 1.0 Advanced §5.2.2 required it; FAPI 2.0 took it out in favour of a pushed request with a short-lived `request_uri`, and its own comparison table gives the rationale as preventing pre-generated requests |
+
+Beside it sits the capability that row depends on, and it is the only §5.2.2 requirement that is a
+**disjunction**. The section asked for a request object *"passed by value with the `request`
+parameter **or** by reference with the `request_uri` parameter"* — either satisfies it — so the row
+checks both [`request_parameter_supported`](#jwt-secured-authorization-requests-jar) and
+[`request_uri_parameter_supported`](#request_uri_parameter_supported), and both are read back from
+the documents. Advertising a way in that is not offered sends clients down it for nothing.
+
+Publishing the first is not decoration: OpenID Connect Discovery defaults it to `false`, and Spring
+Authorization Server has no notion of the `request` parameter at all, so it is a capability this demo
+added and has to advertise to make usable.
+
+It also only means anything because the PAR row fails. FAPI 2.0 has no use for the by-value form —
+§5.3.2 has the client send only `client_id` and `request_uri` — and on a server meeting §5.3.1 the
+`request` parameter would be unreachable whatever this metadata claimed, since every request that did
+not come through PAR is refused. That row fails here, so it really is reachable. Two rows a long way
+apart in the table settle one question between them.
 
 The row still reports what this server holds, because
 [`require_signed_request_object`](#require_signed_request_object) is implemented here anyway: the
