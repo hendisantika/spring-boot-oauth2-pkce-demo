@@ -365,7 +365,8 @@ defines each.
 
 ![The client counterparts](docs/images/150-metadata-client-counterparts.png)
 
-**151. Metadata** — why the pairings exist, in the specification's own words.
+**151. Metadata** — why the pairings exist in the specification's own words, and which two of them
+are coupled.
 
 ![Two halves of one agreement](docs/images/151-metadata-both-halves.png)
 
@@ -2587,6 +2588,18 @@ already cited in those rows' *Defined by* column, because it names all six value
 Two halves of one agreement. RFC 9101 §10.1 then has this server refuse a request object that used
 anything other than the one that client chose — so the published list is not advice, it is the set
 the agreement may be drawn from.
+
+**Two of the three counterparts are not independent, which the rows cannot show.** They sit side by
+side as though a client picked each freely. Registration §2 says otherwise:
+
+> If `request_object_encryption_alg` is specified, the default `request_object_encryption_enc` value
+> is `A128CBC-HS256`. When `request_object_encryption_enc` is included,
+> `request_object_encryption_alg` MUST also be provided.
+
+So an `alg` alone still names a content encryption method, an `enc` alone is a registration the
+specification does not allow, and only the signing counterpart stands on its own. A client here
+registers exactly that forbidden pair, and [what this server does with it](#request_object_encryption_enc)
+is refuse its encrypted request objects rather than guess the missing half.
 
 The counterparts cite **OIDC Registration §2** rather than §4, which is deliberate: §4 names the
 three client parameters but attributes them to RFC 7591, which does not define them. Registration §2
