@@ -232,7 +232,18 @@
             <code>RSA1_5</code> fails its row while the server passes this one.
         </p>
         <p class="hint">
-            <strong>All three rows check the document against the code first.</strong> Before any
+            <strong>RFC 9126 §5's switch is checked the same way, and a switch can lie worse than a
+            list.</strong> The server row for
+            <a th:href="@{/par-server-required}"><code>require_pushed_authorization_requests</code></a>
+            used to say the value was <em>"published in both documents"</em> without ever looking.
+            Now it reads the documents back before reporting anything. Publishing <code>true</code>
+            while enforcing nothing is the direction that matters: a client reading that has been
+            told it is protected when it is not, and unlike a wrong algorithm list it will not find
+            out by being refused. Absence counts as disagreement too — these switches default to
+            <code>false</code>, so a client that cannot find the value assumes the lock is off.
+        </p>
+        <p class="hint">
+            <strong>All three algorithm rows check the document against the code first.</strong> Before any
             profile has a say, each list is read back from the class that writes
             <a th:href="@{/metadata}">both discovery documents</a> and compared with the set the
             request object filter actually applies. A server that advertises an algorithm it will
