@@ -230,10 +230,7 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         }
 
         Map<String, String[]> parameters = parametersFrom(claims);
-        if (parameters.containsKey(REQUEST) || parameters.containsKey(OAuth2ParameterNames.REQUEST_URI)) {
-            // RFC 9101 section 4: "request and request_uri parameters MUST NOT be included in
-            // Request Objects", which is also section 10.4.1 clause (d) - a server that followed one
-            // would be performing the recursive GET that clause is about.
+        if (carriesAnotherRequestReference(parameters)) {
             log.debug("Rejecting a request object that carries another request reference");
             writeError(response, INVALID_REQUEST_OBJECT,
                     "A request object may not carry request or request_uri");
@@ -241,6 +238,17 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         }
         log.debug("Accepted a request object from [{}] carrying {}", claims.getIssuer(), parameters.keySet());
         filterChain.doFilter(new RequestObjectParameters(request, parameters), response);
+    }
+
+    /**
+     * Whether a request object asks this server to go and read another one. RFC 9101 section 4:
+     * "request and request_uri parameters MUST NOT be included in Request Objects", which is also
+     * section 10.4.1 clause (d) - a server that followed one would be performing the recursive GET
+     * that clause tells it not to.
+     */
+    public static boolean carriesAnotherRequestReference(Map<String, String[]> parameters) {
+        return parameters.containsKey(REQUEST)
+                || parameters.containsKey(OAuth2ParameterNames.REQUEST_URI);
     }
 
     /**
