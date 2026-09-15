@@ -152,6 +152,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
             assertThat(check.observed())
                     .contains("shall reject authorization requests sent without")
                     .contains("§5's server-wide require_pushed_authorization_requests is false")
+                    .contains("the documents were read back and say the same")
                     .containsPattern("set by \\d+ of the \\d+ clients below");
         });
     }
@@ -349,6 +350,58 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         Map<String, Object> reordered =
                 new LinkedHashMap<>(Map.of(name, List.of("RS256", "PS256")));
         assertThat(ServerMetadataCustomizer.disagreement(reordered, name, enforced)).isNull();
+    }
+
+    /**
+     * The server-metadata half: RFC 9126 §5's switch is not only read from the policy, it is checked
+     * against what the discovery documents actually carry - the claim the row used to make without
+     * verifying.
+     */
+    @Test
+    void theParSwitchIsAdvertisedAsItIsEnforced() {
+        Map<String, Object> published = serverMetadataCustomizer.publishedClaims();
+
+        assertThat(published)
+                .containsKey(ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS);
+        assertThat(ServerMetadataCustomizer.disagreement(published,
+                ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
+                pushedAuthorizationPolicy.requirePushedRequests()))
+                .isNull();
+
+        // And it follows the switch rather than describing a value fixed at startup.
+        boolean previous = pushedAuthorizationPolicy.requirePushedRequests(true);
+        try {
+            assertThat(serverMetadataCustomizer.publishedClaims())
+                    .containsEntry(ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
+                            true);
+        } finally {
+            pushedAuthorizationPolicy.requirePushedRequests(previous);
+        }
+    }
+
+    /**
+     * The switch comparison, driven through what cannot happen while the documents are built from
+     * the policy the code reads. Advertising true while enforcing nothing is the dangerous
+     * direction, and the text has to say so rather than reporting a symmetrical mismatch.
+     */
+    @Test
+    void theSwitchComparisonCallsOutThePublishedDefenceThatIsNotApplied() {
+        String name = ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS;
+
+        assertThat(ServerMetadataCustomizer.disagreement(new LinkedHashMap<>(), name, true))
+                .contains("not in the discovery documents")
+                .contains("specification default of false");
+
+        Map<String, Object> claiming = new LinkedHashMap<>(Map.of(name, true));
+        assertThat(ServerMetadataCustomizer.disagreement(claiming, name, false))
+                .contains("advertises true but this server enforces false")
+                .contains("told it is protected when it is not");
+
+        Map<String, Object> silent = new LinkedHashMap<>(Map.of(name, false));
+        assertThat(ServerMetadataCustomizer.disagreement(silent, name, true))
+                .contains("refused for a rule the documents do not mention");
+
+        assertThat(ServerMetadataCustomizer.disagreement(silent, name, false)).isNull();
     }
 
     @Test
