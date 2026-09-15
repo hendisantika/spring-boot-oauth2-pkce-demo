@@ -608,7 +608,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(10));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(11));
     }
 
     /**
@@ -909,6 +909,65 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     private FapiCheck unsignedCheckFor(Map<String, List<FapiCheck>> checks,
                                        DemoProperties.Client configured) {
         return rowFor(checks, configured, "Unsigned requests are refused");
+    }
+
+    /**
+     * The registered URLs, rather than how many there are. This demo serves no TLS, so the URLs it
+     * registers sit on its own origin over http - which fails FAPI §8.5 exactly as the server's own
+     * TLS row does, and the row has to say so rather than passing on a technicality.
+     */
+    @Test
+    void theRegisteredUrlsAreJudgedAndFailForBeingPlaintextHere() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(urlCheckFor(checks, properties.fetchedRequestClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
+                    assertThat(check.reference())
+                            .contains("FAPI 1.0 Advanced §8.5")
+                            .contains("RFC 9101 §5.2")
+                            .contains("OIDC Registration §2");
+                    assertThat(check.observed())
+                            .contains("are not https")
+                            .contains("verifiable by the OP")
+                            .contains("same plaintext gap");
+                });
+
+        // A client that registered nothing has no URL to judge, which is not the same as passing.
+        assertThat(urlCheckFor(checks, properties.client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+                    assertThat(check.observed()).contains("no URL for this server to fetch");
+                });
+    }
+
+    /**
+     * The row reports the fragment count Registration §2 asks for, and why its absence costs
+     * nothing on a server that does not cache. Both halves have to stay true together.
+     */
+    @Test
+    void theRowReportsTheCacheFragmentAndWhyItIsNotNeededHere() {
+        FapiCheck check = urlCheckFor(fapiComplianceService.clientChecks(),
+                properties.fetchedRequestClient());
+
+        assertThat(check.observed())
+                .containsPattern("\\d+ of the \\d+ carry the base64url SHA-256 fragment")
+                .contains("re-fetches rather than caching");
+    }
+
+    /** One definition of how the setting is parsed, shared with the filter that fetches them. */
+    @Test
+    void theRegisteredUrisAreParsedTheOneWay() {
+        assertThat(JwtSecuredAuthorizationRequestFilter.parseRequestUris(null)).isEmpty();
+        assertThat(JwtSecuredAuthorizationRequestFilter.parseRequestUris("  ")).isEmpty();
+        assertThat(JwtSecuredAuthorizationRequestFilter
+                .parseRequestUris("https://a.example/r.jwt https://b.example/r.jwt"))
+                .containsExactly("https://a.example/r.jwt", "https://b.example/r.jwt");
+    }
+
+    private FapiCheck urlCheckFor(Map<String, List<FapiCheck>> checks,
+                                  DemoProperties.Client configured) {
+        return rowFor(checks, configured, "Registered request_uris are fetched over TLS");
     }
 
     private FapiCheck requestUriCheckFor(Map<String, List<FapiCheck>> checks,
