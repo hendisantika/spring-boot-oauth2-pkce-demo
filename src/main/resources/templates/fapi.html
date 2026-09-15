@@ -245,6 +245,27 @@
             <code>false</code>, so a client that cannot find the value assumes the lock is off.
         </p>
         <p class="hint">
+            <strong>One row is a disjunction, which is unusual enough to say out loud.</strong>
+            §5.2.2 asked for a request object <em>"passed by value with the <code>request</code>
+            parameter <strong>or</strong> by reference with the <code>request_uri</code>
+            parameter"</em> — either satisfies it. So the row checks both
+            <a th:href="@{/jar}"><code>request_parameter_supported</code></a> and
+            <a th:href="@{/request-uri-metadata}"><code>request_uri_parameter_supported</code></a>,
+            and both have to be honest: advertising a way in that is not offered sends clients down
+            it for nothing. OpenID Connect Discovery defaults the first to <code>false</code>, and
+            Spring Authorization Server has no notion of the <code>request</code> parameter at all,
+            so this is a capability the demo added and has to advertise to make usable.
+        </p>
+        <p class="hint">
+            <strong>And it only means anything because the PAR row fails.</strong> FAPI 2.0 has no
+            use for the by-value form — §5.3.2 has the client send only <code>client_id</code> and
+            <code>request_uri</code> — and on a server that met §5.3.1 the <code>request</code>
+            parameter would be unreachable whatever this metadata claimed, because every request that
+            did not come through <a th:href="@{/par}">the pushed endpoint</a> is refused. That row
+            fails here, so it really is reachable. Two rows a long way apart in the table decide one
+            question between them.
+        </p>
+        <p class="hint">
             <strong>Even the row the profile stopped asking for.</strong>
             <em>"Request objects are signed"</em> is reported as not applicable, because FAPI 2.0
             dropped it — but it still tells you what this server holds, and a value reported wrongly
