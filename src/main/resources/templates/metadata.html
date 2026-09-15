@@ -111,11 +111,30 @@
             never be a row here — these documents describe the server, and
             <code>request_object_signing_alg</code> is something a <em>client</em> registers — but
             several of these fields exist precisely to tell a client what it may register, and the
-            pairing is most of what they mean. The three algorithm lists say what a client may put in
-            <code>request_object_signing_alg</code>, <code>request_object_encryption_alg</code> and
-            <code>request_object_encryption_enc</code>, and RFC 9101 §10.1 then has this server
-            refuse a request object that used anything other than the one that client chose. Two more
-            are the same word at both ends, defined twice by their own RFC — and
+            pairing is most of what they mean.
+        </p>
+        <p class="hint">
+            <strong>For the three algorithm lists, RFC 9101 §4 says why in one sentence.</strong> It
+            is the section already cited in the <em>Defined by</em> column of those rows, and it
+            names all six values together: <em>"The client determines the algorithms used to sign
+            and encrypt Request Objects. <strong>The algorithms chosen need to be supported by both
+            the client and the authorization server.</strong> The client can inform the authorization
+            server … <code>request_object_signing_alg</code>,
+            <code>request_object_encryption_alg</code>, and
+            <code>request_object_encryption_enc</code>. Likewise, the authorization server can inform
+            the client … <code>request_object_signing_alg_values_supported</code>, …"</em> Two
+            halves of one agreement, and
+            <a th:href="@{/jar-alg}">RFC 9101 §10.1</a> then has this server refuse a request object
+            that used anything other than the one that client chose — so the published list is not
+            advice, it is the set the agreement may be drawn from.
+        </p>
+        <p class="hint">
+            The counterparts cite <em>OpenID Connect Registration §2</em> rather than §4, which is
+            deliberate: §4 names the three client parameters but attributes them to RFC 7591, and it
+            is Registration §2 that actually defines them — the defaults, and the sentence saying a
+            client <em>"MAY still use other supported encryption algorithms or send unencrypted
+            Request Objects"</em> that this server chooses to be stricter than. The remaining two
+            pairings are the same word at both ends, defined twice by their own RFC, and
             <code>require_request_uri_registration</code> is the odd one: not a counterpart but the
             field that decides whether a client's <code>request_uris</code> are needed at all.
         </p>
