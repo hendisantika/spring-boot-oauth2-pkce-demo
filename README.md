@@ -1,5 +1,7 @@
 # spring-boot-oauth2-pkce-demo
 
+[![Build](https://github.com/hendisantika/spring-boot-oauth2-pkce-demo/actions/workflows/build.yml/badge.svg)](https://github.com/hendisantika/spring-boot-oauth2-pkce-demo/actions/workflows/build.yml)
+
 A single Spring Boot application that plays **both sides** of the OAuth 2.0 Authorization Code flow
 with **PKCE** (RFC 7636):
 
