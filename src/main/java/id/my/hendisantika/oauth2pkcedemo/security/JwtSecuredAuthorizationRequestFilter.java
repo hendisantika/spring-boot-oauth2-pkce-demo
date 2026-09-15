@@ -195,11 +195,9 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
         String clientId = request.getParameter(OAuth2ParameterNames.CLIENT_ID);
         String requestUri = request.getParameter(OAuth2ParameterNames.REQUEST_URI);
-        if (StringUtils.hasText(requestUri) && requestUri.regionMatches(true, 0, "http", 0, 4)) {
+        if (isFetchedRequestUri(requestUri)) {
             // A request_uri that is a URL to fetch, rather than a reference the pushed endpoint
-            // handed out. Both arrive in the same parameter and mean entirely different things; the
-            // test is the scheme rather than the shape of the other kind, because RFC 9126 section 4
-            // leaves the format of a pushed request_uri to the server.
+            // handed out.
             try {
                 requestObject = fetchRequestObject(requestUri, clientId);
             } catch (IllegalArgumentException ex) {
@@ -243,6 +241,22 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
         }
         log.debug("Accepted a request object from [{}] carrying {}", claims.getIssuer(), parameters.keySet());
         filterChain.doFilter(new RequestObjectParameters(request, parameters), response);
+    }
+
+    /**
+     * Whether a {@code request_uri} is a URL for this server to fetch, rather than a reference the
+     * pushed endpoint handed out. Both arrive in the same parameter and mean entirely different
+     * things, and the test is the scheme rather than the shape of the other kind, because RFC 9126
+     * section 4 leaves the format of a pushed request_uri to the server's discretion.
+     * <p>
+     * This is what makes RFC 9126 section 5's carve-out hold here: "a request_uri value obtained
+     * from the PAR endpoint is usable at the authorization endpoint regardless of other
+     * authorization server metadata such as request_uri_parameter_supported or
+     * require_request_uri_registration". A pushed reference never reaches the fetch path, so neither
+     * value is ever consulted for one.
+     */
+    public static boolean isFetchedRequestUri(String requestUri) {
+        return StringUtils.hasText(requestUri) && requestUri.regionMatches(true, 0, "http", 0, 4);
     }
 
     /**
