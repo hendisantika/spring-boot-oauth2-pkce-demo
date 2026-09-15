@@ -6,6 +6,7 @@ import id.my.hendisantika.oauth2pkcedemo.security.JwtSecuredAuthorizationRequest
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.PushedAuthorizationRequiredFilter;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestObjectPolicy;
+import id.my.hendisantika.oauth2pkcedemo.security.RequestUriFetcher;
 import id.my.hendisantika.oauth2pkcedemo.security.RequestUriPolicy;
 import id.my.hendisantika.oauth2pkcedemo.security.ServerMetadataCustomizer;
 import id.my.hendisantika.oauth2pkcedemo.service.FapiComplianceService;
@@ -20,12 +21,18 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import com.sun.net.httpserver.HttpServer;
+
+import java.net.InetSocketAddress;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -508,6 +515,76 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                 .filter(c -> c.requirement().contains("pushed request_uri ignores"))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    /**
+     * §10.4.1's other three clauses, which are about what happens once a fetch has been allowed to
+     * start: what came back, how long it may take, and whether it may ask for another.
+     */
+    @Test
+    void theRemainingDosMitigationsEachHaveARow() {
+        List<FapiCheck> checks = fapiComplianceService.serverChecks();
+
+        for (String clause : List.of("§10.4.1(b)", "§10.4.1(c)", "§10.4.1(d)")) {
+            assertThat(checks)
+                    .as("a row citing %s", clause)
+                    .anySatisfy(check -> {
+                        assertThat(check.reference()).contains(clause);
+                        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    });
+        }
+
+        // (b) is only worth anything if the media type really is the one the RFC names.
+        assertThat(RequestUriFetcher.REQUEST_OBJECT_MEDIA_TYPE)
+                .hasToString("application/oauth-authz-req+jwt");
+
+        // (d) both ways, through the predicate the filter itself uses.
+        assertThat(JwtSecuredAuthorizationRequestFilter.carriesAnotherRequestReference(
+                Map.of("request_uri", new String[] {"https://elsewhere.example/r.jwt"}))).isTrue();
+        assertThat(JwtSecuredAuthorizationRequestFilter.carriesAnotherRequestReference(
+                Map.of("scope", new String[] {"openid"}))).isFalse();
+    }
+
+    /**
+     * Clause (c) asks for a timeout "for obtaining the content", which a connect timeout does not
+     * give: a host that accepts the connection and then says nothing has answered slowly rather
+     * than connected slowly. Proven against a host that does exactly that, because the difference
+     * is invisible in the configuration and only shows up under the attack.
+     */
+    @Test
+    void aSlowHostCannotHoldAFetchOpenPastTheTimeout() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/slow", exchange -> {
+            try {
+                // Four times the timeout, so "gave up on time" and "waited for the host" are
+                // far enough apart that the assertion below can tell them apart.
+                Thread.sleep(RequestUriFetcher.TIMEOUT.toMillis() * 4);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/slow";
+            Instant started = Instant.now();
+
+            assertThatThrownBy(() -> new RequestUriFetcher().fetch(url))
+                    .isInstanceOf(IllegalArgumentException.class);
+
+            // The point is that it gave up on time rather than how it phrased it. The bound has to
+            // sit below the host's delay, or a connect-only timeout passes this test by waiting for
+            // the slow response and then failing on its missing media type instead.
+            assertThat(Duration.between(started, Instant.now()))
+                    .as("should give up near the timeout, not wait for the host")
+                    .isLessThan(RequestUriFetcher.TIMEOUT.multipliedBy(2));
+        } finally {
+            // Does not wait for the sleeping handler: the assertion above is already made, and the
+            // point of the test is that this side gave up, not that the slow side finished.
+            server.stop(0);
+        }
     }
 
     @Test
