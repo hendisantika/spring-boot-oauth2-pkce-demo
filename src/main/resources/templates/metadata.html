@@ -129,6 +129,19 @@
             advice, it is the set the agreement may be drawn from.
         </p>
         <p class="hint">
+            <strong>Two of the three are not independent, which the rows cannot show.</strong> They
+            sit side by side here as though a client picked each freely, and Registration §2 says
+            otherwise: <em>"If <code>request_object_encryption_alg</code> is specified, the default
+            <code>request_object_encryption_enc</code> value is <code>A128CBC-HS256</code>"</em>, and
+            <em>"when <code>request_object_encryption_enc</code> is included,
+            <code>request_object_encryption_alg</code> MUST also be provided"</em>. So an
+            <code>alg</code> alone still names a content encryption method, an
+            <code>enc</code> alone is a registration the specification does not allow, and only the
+            signing counterpart above them stands on its own. A client here registers exactly that
+            forbidden pair, and <a th:href="@{/jar-enc-method}">what this server does with it</a> is
+            refuse its encrypted request objects rather than guess the missing half.
+        </p>
+        <p class="hint">
             The counterparts cite <em>OpenID Connect Registration §2</em> rather than §4, which is
             deliberate: §4 names the three client parameters but attributes them to RFC 7591, and it
             is Registration §2 that actually defines them — the defaults, and the sentence saying a
