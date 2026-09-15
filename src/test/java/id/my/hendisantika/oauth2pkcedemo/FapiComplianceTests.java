@@ -146,6 +146,10 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                     .contains("server-wide it is "
                             + requestObjectPolicy.requireSignedRequestObject())
                     .contains("the documents were read back and say the same")
+                    // §10.5 defaults both halves to false, so publishing it removes doubt rather
+                    // than tightening anything - and the row should not read as though false were
+                    // this deployment's own idea.
+                    .contains("if omitted, the default value is false")
                     .containsPattern("\\d+ of the \\d+ clients below set it");
         });
     }
@@ -846,7 +850,12 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         assertThat(unsignedCheckFor(fapiComplianceService.clientChecks(), properties.client()))
                 .satisfies(check -> {
                     assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
-                    assertThat(check.observed()).contains("Neither half");
+                    assertThat(check.observed())
+                            .contains("Neither half")
+                            // The omitted case is exactly what the default governs, so the row says
+                            // so rather than leaving "neither is set" looking like a configuration
+                            // choice somebody made.
+                            .contains("if omitted, the default value is false");
                 });
 
         boolean previous = requestObjectPolicy.requireSignedRequestObject(true);
