@@ -257,6 +257,19 @@
             so this is a capability the demo added and has to advertise to make usable.
         </p>
         <p class="hint">
+            <strong>The half of that flag worth checking is the half that can be got wrong.</strong>
+            Whether <code>request_uri_parameter_supported</code> is honestly published is one thing;
+            RFC 9126 §5 adds another — <em>"a <code>request_uri</code> value obtained from the PAR
+            endpoint is usable at the authorization endpoint regardless of other authorization
+            server metadata such as <code>request_uri_parameter_supported</code> or
+            <code>require_request_uri_registration</code>"</em>. A server that gated every
+            <code>request_uri</code> on that metadata would refuse
+            <a th:href="@{/par}">its own pushed references</a>, which is a real way to break PAR
+            while looking compliant. Its row demonstrates the discrimination rather than claiming
+            it: the reference the pushed endpoint issues is put through the same predicate the
+            filter uses, and comes back "not a URL to fetch", so neither value is consulted for it.
+        </p>
+        <p class="hint">
             <strong>And it only means anything because the PAR row fails.</strong> FAPI 2.0 has no
             use for the by-value form — §5.3.2 has the client send only <code>client_id</code> and
             <code>request_uri</code> — and on a server that met §5.3.1 the <code>request</code>
