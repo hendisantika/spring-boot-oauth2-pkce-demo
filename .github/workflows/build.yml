@@ -8,10 +8,12 @@ on:
   workflow_dispatch:
 
 # A newer push to the same branch makes the previous run's answer irrelevant, so it is cancelled
-# rather than left to finish and report on code nobody has any more.
+# rather than left to finish and report on code nobody has any more - but not on main. A cancelled
+# run is the workflow's most recent conclusion there, and the badge draws that as failing, so
+# cancelling on main turns a green history red for nothing.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
