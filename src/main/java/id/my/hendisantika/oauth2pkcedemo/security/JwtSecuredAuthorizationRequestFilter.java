@@ -302,7 +302,18 @@ public final class JwtSecuredAuthorizationRequestFilter extends OncePerRequestFi
 
     /** What this client registered as {@code request_uris}, and nothing any other client did. */
     private List<String> registeredRequestUris(String clientId) {
-        String configured = registeredSetting(clientId, REQUEST_URIS_SETTING);
+        return parseRequestUris(registeredSetting(clientId, REQUEST_URIS_SETTING));
+    }
+
+    /**
+     * The registered {@code request_uris}, parsed the one way. OpenID Connect Registration section 2
+     * defines the metadata as an array; it travels here as a whitespace-separated setting, because
+     * {@code ClientSettings} stores what it is given and a list is not one of the things Spring
+     * Authorization Server serialises for it.
+     *
+     * @param configured the raw setting, or null where the client registered none
+     */
+    public static List<String> parseRequestUris(String configured) {
         return configured == null || configured.isBlank() ? List.of()
                 : List.of(configured.split("\\s+"));
     }
