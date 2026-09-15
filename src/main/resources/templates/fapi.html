@@ -180,6 +180,32 @@
             why that row fails while this one passes.
         </p>
         <p class="hint">
+            <strong>A second row judges the URLs rather than counting them.</strong> Three
+            specifications constrain a registered <code>request_uri</code>: RFC 9101 §5.2 —
+            <em>"the <code>request_uri</code> MUST be an <code>https</code> URI"</em>, and
+            <em>"the entire Request URI SHOULD NOT exceed 512 ASCII characters"</em>; OpenID Connect
+            Registration §2, which allows plaintext only <em>"unless the target Request Object is
+            signed in a way that is verifiable by the OP"</em>; and FAPI 1.0 Advanced §8.5, under
+            which fetching one over <code>http</code> is an interaction not encrypted with TLS.
+        </p>
+        <p class="hint">
+            <strong>Both clients fail it, and honestly.</strong> This demo serves no TLS, so
+            <a th:href="@{/request-uris}">the URLs it registers</a> sit on its own origin over
+            <code>http</code> — leaning on Registration §2's carve-out, since every object fetched
+            here is signed and verified. That makes it legal by the registration spec and still a
+            plaintext fetch, which is the same gap the <em>"All endpoints are served over TLS"</em>
+            row reports, seen from the fetching end rather than the listening end. A row that passed
+            here on the carve-out would be hiding it.
+        </p>
+        <p class="hint">
+            <strong>The fragment is a caching hint, and this server does not cache.</strong>
+            Registration §2 says a registered URL <em>"SHOULD include the base64url-encoded SHA-256
+            hash value of the file contents … as the value of the URI fragment"</em>, so that a
+            server holding a cached copy can tell it has gone stale. The row counts how many carry
+            one and says what it costs that none does: nothing here, because every fetch goes to the
+            host. It would cost a client registering with a caching OP its freshness.
+        </p>
+        <p class="hint">
             <strong>Both kinds of reference arrive in the same parameter.</strong> A
             <a th:href="@{/par}">pushed</a> <code>request_uri</code> and a fetched one are told apart
             by scheme, not by which is which in the registration — so this row is about the fetched
