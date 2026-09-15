@@ -362,7 +362,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
 
         // Thirty-four clients, each demonstrating something; the page should hide none of them.
         assertThat(checks).hasSize(34);
-        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(8));
+        assertThat(checks.values()).allSatisfy(clientChecks -> assertThat(clientChecks).hasSize(9));
     }
 
     /**
@@ -565,6 +565,59 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
         } finally {
             requestUriPolicy.requireRegistration(previous);
         }
+    }
+
+    /**
+     * The client half of RFC 9101 §10.5, including the registration that argues with itself: the
+     * only algorithm it declared is the one the flag beside it refuses.
+     */
+    @Test
+    void theUnsignedRefusalRowReportsTheContradictoryRegistration() {
+        Map<String, List<FapiCheck>> checks = fapiComplianceService.clientChecks();
+
+        assertThat(unsignedCheckFor(checks, properties.jarNoneStrictClient()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                    assertThat(check.reference()).contains("RFC 9101");
+                    assertThat(check.observed())
+                            .contains("contradict each other")
+                            .contains("no request object it can successfully send");
+                });
+
+        // Registered none without the lock, so it is the other side of the same pair and must not
+        // be reported as locked down.
+        assertThat(unsignedCheckFor(checks, properties.jarNoneClient()).outcome())
+                .isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+    }
+
+    /**
+     * Either half of the lock closes the hole, so a client that registered nothing changes answer
+     * when the server-wide switch moves - and must say which half is covering it.
+     */
+    @Test
+    void eitherHalfOfTheLockClosesTheDowngradeForAClient() {
+        assertThat(requestObjectPolicy.requireSignedRequestObject()).isFalse();
+        assertThat(unsignedCheckFor(fapiComplianceService.clientChecks(), properties.client()))
+                .satisfies(check -> {
+                    assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
+                    assertThat(check.observed()).contains("Neither half");
+                });
+
+        boolean previous = requestObjectPolicy.requireSignedRequestObject(true);
+        try {
+            assertThat(unsignedCheckFor(fapiComplianceService.clientChecks(), properties.client()))
+                    .satisfies(check -> {
+                        assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.PASS);
+                        assertThat(check.observed()).contains("server-wide half is on");
+                    });
+        } finally {
+            requestObjectPolicy.requireSignedRequestObject(previous);
+        }
+    }
+
+    private FapiCheck unsignedCheckFor(Map<String, List<FapiCheck>> checks,
+                                       DemoProperties.Client configured) {
+        return rowFor(checks, configured, "Unsigned requests are refused");
     }
 
     private FapiCheck requestUriCheckFor(Map<String, List<FapiCheck>> checks,
