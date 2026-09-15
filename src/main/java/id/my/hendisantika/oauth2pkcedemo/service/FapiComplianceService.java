@@ -681,6 +681,60 @@ public class FapiComplianceService {
     }
 
     /**
+     * The registered URLs themselves, rather than whether there are any. Three specifications have
+     * something to say about them: RFC 9101 section 5.2 ("the request_uri MUST be an https URI", and
+     * "the entire Request URI SHOULD NOT exceed 512 ASCII characters"), OpenID Connect Registration
+     * section 2 ("these URLs MUST use the https scheme unless the target Request Object is signed in
+     * a way that is verifiable by the OP", plus the SHA-256 fragment that lets a caching server know
+     * its copy is stale), and FAPI 1.0 Advanced section 8.5, under which fetching one over plaintext
+     * is an interaction not encrypted with TLS.
+     */
+    private FapiCheck registeredRequestUriUrlCheck(RegisteredClient client) {
+        String requirement = "Registered request_uris are fetched over TLS";
+        String reference = "FAPI 1.0 Advanced \u00a78.5; RFC 9101 \u00a75.2; OIDC Registration \u00a72";
+
+        Object registered = client.getClientSettings()
+                .getSetting(JwtSecuredAuthorizationRequestFilter.REQUEST_URIS_SETTING);
+        List<String> urls = JwtSecuredAuthorizationRequestFilter.parseRequestUris(
+                registered == null ? null : String.valueOf(registered));
+        if (urls.isEmpty()) {
+            return FapiCheck.notApplicable(requirement, reference,
+                    "No request_uris registered, so there is no URL for this server to fetch");
+        }
+
+        List<String> plaintext = urls.stream()
+                .filter(url -> !url.regionMatches(true, 0, "https://", 0, 8))
+                .toList();
+        List<String> overlong = urls.stream()
+                .filter(url -> url.length() > RequestUriFetcher.MAXIMUM_URI_LENGTH)
+                .toList();
+        long withFragment = urls.stream().filter(url -> url.indexOf('#') >= 0).count();
+
+        String fragments = withFragment + " of the " + urls.size() + " carry the base64url SHA-256 "
+                + "fragment Registration §2 asks for where the file could change - which costs "
+                + "nothing here, because this server re-fetches rather than caching, and a fragment "
+                + "is how a caching server is told its copy is stale";
+        if (!plaintext.isEmpty()) {
+            return FapiCheck.fail(requirement, reference,
+                    plaintext.size() + " of the " + urls.size() + " registered request_uris are not "
+                            + "https: " + plaintext + ". Registration §2 allows it only \"unless the "
+                            + "target Request Object is signed in a way that is verifiable by the "
+                            + "OP\", which is the clause this demo relies on - it serves no TLS, so "
+                            + "these sit on the issuer's own origin. It is the same plaintext gap the "
+                            + "TLS row above reports, seen from the fetching end. " + fragments);
+        }
+        return FapiCheck.of(overlong.isEmpty(), requirement, reference,
+                "All " + urls.size() + " registered request_uris are https"
+                        + (overlong.isEmpty()
+                        ? ", and none exceeds RFC 9101 §5.2's "
+                        + RequestUriFetcher.MAXIMUM_URI_LENGTH + " characters. "
+                        : ", but " + overlong.size() + " exceed RFC 9101 §5.2's "
+                        + RequestUriFetcher.MAXIMUM_URI_LENGTH + " characters, which the fetcher "
+                        + "refuses at use time. ")
+                        + fragments);
+    }
+
+    /**
      * Whether the client can start an authorization request from a URL it registered in advance.
      * FAPI 1.0 Advanced section 5.2.2 blessed exactly this - the server "shall require a JWS signed
      * JWT request object passed by value with the request parameter or by reference with the
@@ -750,6 +804,7 @@ public class FapiComplianceService {
         checks.add(unsignedRequestRefusalCheck(client));
         checks.add(pushedRequestRequirementCheck(client));
         checks.add(preRegisteredRequestUriCheck(client));
+        checks.add(registeredRequestUriUrlCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
             checks.add(FapiCheck.of(!client.getTokenSettings().isReuseRefreshTokens(),
