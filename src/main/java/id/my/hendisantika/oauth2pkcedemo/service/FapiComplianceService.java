@@ -479,6 +479,56 @@ public class FapiComplianceService {
     }
 
     /**
+     * RFC 9101 section 10.5's lock, seen from the client side. The section is titled "Downgrade
+     * Attack" and says why it exists: "Unless the protocol used by the client and the server is
+     * locked down to use an OAuth JWT-Secured Authorization Request (JAR), it is possible for an
+     * attacker to use RFC 6749 requests to bypass all the protection provided by this
+     * specification." The metadata is defined twice under one name, client and server, both boolean
+     * and both defaulting to false, and either being true closes the hole for this client.
+     * <p>
+     * Not a failure where neither is set: FAPI 2.0 dropped the request object in favour of PAR, so
+     * no current profile asks a client to register this, and marking thirty-odd clients red for
+     * declining an optional flag would be inventing a requirement rather than checking one.
+     */
+    private FapiCheck unsignedRequestRefusalCheck(RegisteredClient client) {
+        String requirement = "Unsigned requests are refused for this client";
+        String reference = "RFC 9101 \u00a710.5; not carried into FAPI 2.0";
+
+        if (requiresSignedRequestObjects(client)) {
+            Object algorithm = client.getClientSettings()
+                    .getSetting(JwtSecuredAuthorizationRequestFilter.SIGNING_ALG_SETTING);
+            if (JwtSecuredAuthorizationRequestFilter.NO_SIGNATURE.equals(String.valueOf(algorithm))) {
+                // A registration that argues with itself: the only algorithm it declared is the one
+                // the flag beside it refuses. §10.5 is ambiguous about precedence here - its client
+                // paragraph makes the none rejection conditional on "this server metadata value",
+                // which reads like a slip, while its server paragraph is unconditional. This server
+                // takes the stricter reading, so the lock wins and the client can send nothing.
+                return FapiCheck.pass(requirement, reference,
+                        "Registered require_signed_request_object and "
+                                + JwtSecuredAuthorizationRequestFilter.NO_SIGNATURE
+                                + " as its only signing algorithm, which contradict each other. The "
+                                + "lock wins here, so nothing unsigned is acted on - at the price of "
+                                + "this client having no request object it can successfully send");
+            }
+            return FapiCheck.pass(requirement, reference,
+                    "Registered require_signed_request_object, so §10.5's downgrade is closed for "
+                            + "this client whatever the server-wide switch says");
+        }
+
+        if (this.requestObjectPolicy.requireSignedRequestObject()) {
+            return FapiCheck.pass(requirement, reference,
+                    "Did not register require_signed_request_object, but the server-wide half is on, "
+                            + "which refuses unsigned requests from every client at once");
+        }
+        return FapiCheck.notApplicable(requirement, reference,
+                "Neither half of require_signed_request_object is set, so an ordinary RFC 6749 "
+                        + "request from this client is acted on - the downgrade §10.5 is named "
+                        + "after. No current profile asks a client to register it: FAPI 1.0 Advanced "
+                        + "asked the server to require signed request objects, and FAPI 2.0 asks for "
+                        + "PAR instead");
+    }
+
+    /**
      * Whether the client can start an authorization request from a URL it registered in advance.
      * FAPI 1.0 Advanced section 5.2.2 blessed exactly this - the server "shall require a JWS signed
      * JWT request object passed by value with the request parameter or by reference with the
@@ -545,6 +595,7 @@ public class FapiComplianceService {
         checks.add(requestObjectAlgorithmCheck(client));
         checks.add(requestObjectEncryptionCheck(client));
         checks.add(requestObjectEncryptionMethodCheck(client));
+        checks.add(unsignedRequestRefusalCheck(client));
         checks.add(preRegisteredRequestUriCheck(client));
 
         if (client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.REFRESH_TOKEN)) {
