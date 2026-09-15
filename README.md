@@ -766,6 +766,11 @@ that satisfy it.
 
 ![By value or by reference](docs/images/146-fapi-by-value-or-reference.png)
 
+**147. FAPI 2.0** — the carve-out row directly above the fetch row it carves out of: a pushed
+reference never reaches the registration check.
+
+![The RFC 9126 carve-out](docs/images/147-fapi-pushed-uri-carve-out.png)
+
 **142. FAPI 2.0** — the top of the server table: six passes, the row no profile asks for, and the
 one the profile stopped asking for.
 
@@ -2751,6 +2756,26 @@ the documents. Advertising a way in that is not offered sends clients down it fo
 Publishing the first is not decoration: OpenID Connect Discovery defaults it to `false`, and Spring
 Authorization Server has no notion of the `request` parameter at all, so it is a capability this demo
 added and has to advertise to make usable.
+
+**The half of that flag worth its own row is the half that can be got wrong.** Whether
+`request_uri_parameter_supported` is honestly published is one thing, and the disjunction row settles
+it. RFC 9126 §5 adds another:
+
+> A "request_uri" value obtained from the PAR endpoint is usable at the authorization endpoint
+> regardless of other authorization server metadata such as "request_uri_parameter_supported" or
+> "require_request_uri_registration" [OIDC.Disco].
+
+A server that gated every `request_uri` on that metadata would refuse
+[its own pushed references](#pushed-authorization-requests) — a real way to break PAR while looking
+compliant, since both flags would read perfectly. The row demonstrates the discrimination instead of
+claiming it: the reference the pushed endpoint issues is put through the same predicate the filter
+uses, `JwtSecuredAuthorizationRequestFilter.isFetchedRequestUri`, and comes back *not* a URL to
+fetch — so neither value is consulted for it. The two kinds of `request_uri` are told apart by
+scheme, because RFC 9126 §4 leaves the format of a pushed one to the server's discretion.
+
+"Regardless" means in either position, so a test asserts the row passes with
+`require_request_uri_registration` both on and off — it must not follow that switch the way the fetch
+row does.
 
 It also only means anything because the PAR row fails. FAPI 2.0 has no use for the by-value form —
 §5.3.2 has the client send only `client_id` and `request_uri` — and on a server meeting §5.3.1 the
