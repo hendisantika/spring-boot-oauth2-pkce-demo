@@ -365,6 +365,10 @@ defines each.
 
 ![The client counterparts](docs/images/150-metadata-client-counterparts.png)
 
+**151. Metadata** — why the pairings exist, in the specification's own words.
+
+![Two halves of one agreement](docs/images/151-metadata-both-halves.png)
+
 **56. Metadata** — a client reading it, and the issuer check that decides whether it may.
 
 ![Discovery accepted and rejected](docs/images/57-metadata-discovery.png)
@@ -2569,9 +2573,25 @@ that pairing is most of what they mean:
 | `require_pushed_authorization_requests` | [`require_pushed_authorization_requests`](#require_pushed_authorization_requests) | RFC 9126 §6 |
 | `require_request_uri_registration` | [`request_uris`](#request_uris) | OIDC Registration §2 |
 
-The three algorithm lists say what a client may put in its registration, and RFC 9101 §10.1 then has
-this server refuse a request object that used anything other than the one that client chose — the
-list is not advice, it is the set the agreement may be drawn from. The two locks are the same word at
+For the three algorithm lists, RFC 9101 §4 says why in one sentence — and it is the same section
+already cited in those rows' *Defined by* column, because it names all six values together:
+
+> The client determines the algorithms used to sign and encrypt Request Objects. **The algorithms
+> chosen need to be supported by both the client and the authorization server.** The client can
+> inform the authorization server of the algorithms that it supports in its dynamic client
+> registration metadata […] `request_object_signing_alg`, `request_object_encryption_alg`, and
+> `request_object_encryption_enc`. Likewise, the authorization server can inform the client […]
+> `request_object_signing_alg_values_supported`, `request_object_encryption_alg_values_supported`,
+> and `request_object_encryption_enc_values_supported`.
+
+Two halves of one agreement. RFC 9101 §10.1 then has this server refuse a request object that used
+anything other than the one that client chose — so the published list is not advice, it is the set
+the agreement may be drawn from.
+
+The counterparts cite **OIDC Registration §2** rather than §4, which is deliberate: §4 names the
+three client parameters but attributes them to RFC 7591, which does not define them. Registration §2
+does — the defaults, and the sentence saying a client *"MAY still use other supported encryption
+algorithms or send unencrypted Request Objects"* that this server chooses to be stricter than. The two locks are the same word at
 both ends, each defined twice by its own RFC, which is why this demo has a page for each half.
 `require_request_uri_registration` is the odd one out: not a counterpart but the field that decides
 whether a client's `request_uris` are needed at all.
