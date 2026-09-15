@@ -2670,15 +2670,24 @@ on an advertised value means nothing if the advertised value is not what the cod
 | It advertises **less** than is accepted | A working option is hidden; clients never try it |
 | It advertises **more** than is accepted | The worse one: clients plan against something that will be refused |
 
-**RFC 9126 §5's switch is checked the same way**, through a boolean overload of the same comparison.
-That row used to say the value was *"published in both documents"* without ever looking; it now reads
-them back first, and says so. A switch can lie worse than a list:
+**All three switch metadata values are checked the same way**, through a boolean overload of the same
+comparison: [`require_pushed_authorization_requests`](#require_pushed_authorization_requests-as-server-metadata),
+[`require_signed_request_object`](#require_signed_request_object) and
+[`require_request_uri_registration`](#require_request_uri_registration). Each row used to say its
+value was published without ever looking; all three now read the documents back first, and say so. A
+switch can lie worse than a list:
 
 | Disagreement | Consequence |
 |---|---|
 | Absent from the documents | These switches default to `false`, so a client assumes the lock is off |
 | Advertises `false`, enforces `true` | Clients are refused for a rule the documents do not mention |
 | Advertises `true`, enforces `false` | The dangerous one: a client is told it is protected when it is not — and, unlike a wrong algorithm list, it never finds out by being refused |
+
+This applies even to the row the profile stopped asking for. *"Request objects are signed"* is
+reported as not applicable, because FAPI 2.0 dropped it — but it still reports what this server
+holds, and a value reported wrongly is wrong whether or not a profile is asking. A document that
+disagrees fails that row too, not-applicable or not. A requirement no longer being asked of you is
+not permission to describe yourself inaccurately.
 
 Ordering is not disagreement — both sides are sorted before comparing. All three currently agree, so
 the rows fall through to their profile verdicts, and `ServerMetadataCustomizer` is where the
