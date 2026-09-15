@@ -92,6 +92,7 @@ public class DemoDataInitializer {
             seedParRequiredClient(registeredClientRepository, properties);
             seedFetchedRequestClient(registeredClientRepository, properties);
             registerOtherClientRequestUri(registeredClientRepository, properties);
+            addPushedRequestLockToFapiClient(registeredClientRepository, properties);
             seedJarmEncryptionMethod(registeredClientRepository, properties,
                     properties.jarmGcmClient(), "A256GCM");
             seedJarmEncryptionMethod(registeredClientRepository, properties,
@@ -248,6 +249,9 @@ public class DemoDataInitializer {
                 .redirectUri(properties.issuerUri() + "/login/oauth2/code/" + client.registrationId())
                 .clientSettings(ClientSettings.builder()
                         .requireProofKey(true)
+                        // FAPI 2.0 §5.3.2 binds the client to PAR, and this is the client built to
+                        // the profile: registering the lock is what makes that checkable.
+                        .setting(PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING, true)
                         .requireAuthorizationConsent(true)
                         .jwkSetUrl(properties.issuerUri() + ClientJwkSetController.CLIENT_JWK_SET_URI)
                         .tokenEndpointAuthenticationSigningAlgorithm(SignatureAlgorithm.RS256)
@@ -659,6 +663,30 @@ public class DemoDataInitializer {
 
         registeredClientRepository.save(builder.build());
         log.info("Registered [{}] with three request_uris", client.clientId());
+    }
+
+    /**
+     * Adds RFC 9126 section 6's lock to the FAPI client where an earlier run created it without one.
+     * The seeding methods return early when the client already exists, and this demo's MySQL lives
+     * in a named volume that outlives {@code docker compose down} - so a setting added to a builder
+     * reaches new databases only, and the running demo would keep contradicting its own FAPI page.
+     */
+    void addPushedRequestLockToFapiClient(RegisteredClientRepository registeredClientRepository,
+                                          DemoProperties properties) {
+        RegisteredClient client = registeredClientRepository
+                .findByClientId(properties.fapiClient().clientId());
+        Object existing = client == null ? null : client.getClientSettings()
+                .getSetting(PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING);
+        if (client == null || existing != null) {
+            return;
+        }
+        ClientSettings settings = ClientSettings
+                .withSettings(new java.util.LinkedHashMap<>(client.getClientSettings().getSettings()))
+                .setting(PushedAuthorizationRequiredFilter.REQUIRE_PAR_SETTING, true)
+                .build();
+        registeredClientRepository.save(
+                RegisteredClient.from(client).clientSettings(settings).build());
+        log.info("Added require_pushed_authorization_requests to [{}]", client.getClientId());
     }
 
     /**
