@@ -137,6 +137,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                     .contains("require_signed_request_object")
                     .contains("server-wide it is "
                             + requestObjectPolicy.requireSignedRequestObject())
+                    .contains("the documents were read back and say the same")
                     .containsPattern("\\d+ of the \\d+ clients below set it");
         });
     }
@@ -171,6 +172,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
             assertThat(check.observed())
                     .contains("does not point to an unexpected location")
                     .contains("Discovery makes the default false")
+                    .contains("the documents were read back and say the same")
                     .containsPattern("\\d+ of the \\d+ clients below have registered a URL");
         });
 
@@ -361,12 +363,21 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
     void theParSwitchIsAdvertisedAsItIsEnforced() {
         Map<String, Object> published = serverMetadataCustomizer.publishedClaims();
 
-        assertThat(published)
-                .containsKey(ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS);
-        assertThat(ServerMetadataCustomizer.disagreement(published,
+        // All three switches, since all three rows now settle this before their citation.
+        Map<String, Boolean> enforced = Map.of(
                 ServerMetadataCustomizer.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS,
-                pushedAuthorizationPolicy.requirePushedRequests()))
-                .isNull();
+                pushedAuthorizationPolicy.requirePushedRequests(),
+                ServerMetadataCustomizer.REQUIRE_SIGNED_REQUEST_OBJECT_METADATA,
+                requestObjectPolicy.requireSignedRequestObject(),
+                ServerMetadataCustomizer.REQUIRE_REQUEST_URI_REGISTRATION,
+                requestUriPolicy.requireRegistration());
+
+        enforced.forEach((name, value) -> {
+            assertThat(published).containsKey(name);
+            assertThat(ServerMetadataCustomizer.disagreement(published, name, value))
+                    .as("%s should be advertised exactly as it is enforced", name)
+                    .isNull();
+        });
 
         // And it follows the switch rather than describing a value fixed at startup.
         boolean previous = pushedAuthorizationPolicy.requirePushedRequests(true);
