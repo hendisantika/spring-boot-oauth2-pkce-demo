@@ -166,6 +166,8 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                     .contains("shall reject authorization requests sent without")
                     .contains("§5's server-wide require_pushed_authorization_requests is false")
                     .contains("the documents were read back and say the same")
+                    // Both halves default to false, so false is not this deployment's own idea.
+                    .contains("if omitted, the default value is false")
                     .containsPattern("set by \\d+ of the \\d+ clients below");
         });
     }
@@ -889,6 +891,7 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                     assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.FAIL);
                     assertThat(check.observed())
                             .contains("may still push voluntarily")
+                            .contains("if omitted, the default value is false")
                             .contains("cannot be confirmed from here");
                 });
     }
