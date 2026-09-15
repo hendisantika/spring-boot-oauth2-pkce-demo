@@ -746,6 +746,11 @@ row its key-wrapping algorithm passes.
 
 ![Eight checks and a pre-registered reference](docs/images/140-fapi-request-uris.png)
 
+**144. FAPI 2.0** — the registration that argues with itself: failed for registering `none`, passed
+for refusing it.
+
+![The contradictory registration](docs/images/144-fapi-unsigned-refusal.png)
+
 **141. FAPI 2.0** — reading the request object rows together: what each profile asks, and what an
 absent value means in each.
 
@@ -2825,6 +2830,35 @@ configuration rather than on the registration alone.
 Note that both kinds of reference arrive in the same `request_uri` parameter and are told apart by
 scheme — `http(s)` is fetched, anything else is left to PAR — so this row is about the fetched kind
 only. A client using PAR is not failing it.
+
+The ninth check reads [`require_signed_request_object`](#require_signed_request_object-as-client-metadata)
+— the client half of it. RFC 9101 §10.5 is titled *"Downgrade Attack"* and says why the setting
+exists: *"Unless the protocol used by the client and the server is locked down to use an OAuth
+JWT-Secured Authorization Request (JAR), it is possible for an attacker to use RFC 6749 requests to
+bypass all the protection provided by this specification."* It defines the name twice — client
+metadata and server metadata, both boolean, both defaulting to `false` — and either being true
+refuses the unsigned request:
+
+| State | Result | Why |
+|---|---|---|
+| The client registered it | PASS | Closed for this client whatever the server-wide switch says |
+| It did not, and the server-wide half is on | PASS | Closed for every client at once |
+| Neither half is set | NOT_APPLICABLE | 33 of 34. The downgrade is open, and no profile asks a client to register this — FAPI 1.0 Advanced asked the *server*, FAPI 2.0 asks for PAR instead |
+
+Marking 33 clients red for declining an optional flag no current profile requires would be inventing
+a requirement rather than checking one, which is why the third row is not a failure. Like the
+`request_uris` row, this one reads the server-wide policy live, so every not-applicable row turns
+green together if that switch is turned on.
+
+**One registration argues with itself**, and the row says so rather than reporting a green and moving
+on. `pkce-jar-none-strict-client` registered `require_signed_request_object` *and*
+[`request_object_signing_alg: none`](#request_object_signing_alg-none) — the flag refuses exactly
+what the algorithm declares. §10.5 is ambiguous about which wins: its client paragraph makes the
+`none` rejection conditional on *"this server metadata value"*, which reads like a drafting slip,
+while its server paragraph is unconditional. This server takes the stricter reading, so the lock
+wins — and that client is left with no request object it can successfully send. Its card is worth
+reading whole: the signing row fails it for registering `none` while this row passes it for refusing
+`none`, and both are correct.
 
 Only `pkce-fapi-client`, `pkce-mtls-client` and `pkce-mtls-refresh-client` meet every client
 requirement. The rest fail on purpose: each exists to demonstrate something the profile forbids, such
