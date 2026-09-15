@@ -9,6 +9,16 @@ updates:
       interval: daily
       time: "05:00"
       timezone: Asia/Jakarta
+    groups:
+      # One pull request per ecosystem for everything that should not change behaviour, so a daily
+      # schedule produces a thing to review rather than a queue to triage. Majors are deliberately
+      # not in here: those are the ones worth reading one at a time.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   # The actions the build workflow pins. Worth watching for the same reason the dependencies are:
   # the first version of that workflow pinned majors that were three releases stale and warned on
@@ -19,3 +29,13 @@ updates:
       interval: daily
       time: "05:00"
       timezone: Asia/Jakarta
+    groups:
+      # One pull request per ecosystem for everything that should not change behaviour, so a daily
+      # schedule produces a thing to review rather than a queue to triage. Majors are deliberately
+      # not in here: those are the ones worth reading one at a time.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
