@@ -130,6 +130,34 @@ public class FapiComplianceService {
                                 + configuredClients().size()
                                 + " clients below set it for themselves")));
 
+        // The capability the row above depends on, and the only §5.2.2 requirement that is a
+        // disjunction: by value or by reference, either will do. Both booleans are verified, because
+        // a server that advertises a way in it does not offer sends clients down it for nothing.
+        checks.add(verifyingMetadata(published, ServerMetadataCustomizer.REQUEST_PARAMETER_SUPPORTED,
+                true,
+                verifyingMetadata(published,
+                        ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED, true,
+                        FapiCheck.notApplicable(
+                                "Request objects can be passed by value or by reference",
+                                "FAPI 1.0 Advanced §5.2.2; not carried into FAPI 2.0",
+                                "§5.2.2 asked for \"a JWS signed JWT request object passed by value "
+                                        + "with the request parameter or by reference with the "
+                                        + "request_uri parameter\" - either satisfies it, and this "
+                                        + "server offers both: "
+                                        + ServerMetadataCustomizer.REQUEST_PARAMETER_SUPPORTED
+                                        + " and "
+                                        + ServerMetadataCustomizer.REQUEST_URI_PARAMETER_SUPPORTED
+                                        + " are true, read back from the documents. OpenID Connect "
+                                        + "Discovery defaults the first to false, and Spring "
+                                        + "Authorization Server has no notion of the request "
+                                        + "parameter at all, so this is a capability the demo added "
+                                        + "and must advertise to be usable. FAPI 2.0 has no use for "
+                                        + "the by-value form - §5.3.2 has the client send only "
+                                        + "client_id and request_uri - and on a server meeting "
+                                        + "§5.3.1 it would be unreachable anyway, since every "
+                                        + "request that did not come through PAR is refused. That "
+                                        + "row fails here, so it is reachable"))));
+
         // No FAPI profile names this one - the checked spec is RFC 9101, and the profiles reach the
         // same attack surface from the other side by requiring PAR, which is the row below. It is
         // here because thirty-two of the client rows are only green while it is true.
