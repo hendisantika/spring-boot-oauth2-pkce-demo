@@ -646,7 +646,13 @@ class FapiComplianceTests extends AbstractMySqlIntegrationTest {
                     assertThat(check.outcome()).isEqualTo(FapiCheck.Outcome.NOT_APPLICABLE);
                     assertThat(check.observed())
                             .contains("No request_object_signing_alg registered")
-                            .contains(JwtSecuredAuthorizationRequestFilter.DEFAULT_SIGNING_ALG);
+                            .contains(JwtSecuredAuthorizationRequestFilter.DEFAULT_SIGNING_ALG)
+                            // The registration spec's default is "any mutually supported
+                            // algorithm", not RS256 - RS256 appears there only as one servers
+                            // SHOULD support. Saying RS256 is the default would be wrong, and the
+                            // row is one reword away from saying it.
+                            .contains("any algorithm supported by the OP and the RP MAY be used")
+                            .contains("never as a default");
                 });
     }
 
