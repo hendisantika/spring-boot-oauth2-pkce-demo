@@ -462,10 +462,16 @@ public class FapiComplianceService {
             // RS256, but that default is its own choice rather than anything the client declared,
             // and most of these clients never send a request object at all.
             return FapiCheck.notApplicable(requirement, reference,
-                    "No request_object_signing_alg registered. This server falls back to "
+                    "No request_object_signing_alg registered, and the registration spec's default "
+                            + "for that is not an algorithm at all: \"the default, if omitted, is "
+                            + "that any algorithm supported by the OP and the RP MAY be used\". "
+                            + "This server narrows that to one, "
                             + JwtSecuredAuthorizationRequestFilter.DEFAULT_SIGNING_ALG
-                            + ", which the profile says should not be used - but that is this "
-                            + "server's default rather than a client's declaration");
+                            + " - which the profile says should not be used, so the narrowing is "
+                            + "tighter than the spec and lands on a worse algorithm than it had to. "
+                            + "RS256 is named there only as one servers SHOULD support, never as a "
+                            + "default. Either way it is this server's choice rather than a client's "
+                            + "declaration, which is why the row is not a failure for the client");
         }
 
         String algorithm = String.valueOf(registered);
